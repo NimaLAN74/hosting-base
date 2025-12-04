@@ -79,12 +79,32 @@ jobs:
           path: frontend-image.tar.gz
           retention-days: 7
 
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            echo "Please add REMOTE_USER secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            echo "Please add SSH_PRIVATE_KEY secret in repository settings"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
       - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          REMOTE_HOST="${{ secrets.REMOTE_HOST }}"
           if [ -n "$REMOTE_HOST" ]; then
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
