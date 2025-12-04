@@ -5,6 +5,8 @@ services:
     expose:
       - "80"
     restart: unless-stopped
+    networks:
+      - lianel-network
 
   nginx:
     image: nginx
@@ -18,3 +20,9 @@ services:
     depends_on:
       - frontend
     restart: unless-stopped
+    networks:
+      - lianel-network
+
+networks:
+  lianel-network:
+    external: true
