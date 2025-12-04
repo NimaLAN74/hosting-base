@@ -4,7 +4,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ## Documentation Index
 
-### 1. [System Overview](./01-SYSTEM-OVERVIEW.md)
+### 1. [System Overview](./P0-01-SYSTEM-OVERVIEW.md)
 **Purpose**: High-level architecture and system design
 
 **Contents**:
@@ -23,7 +23,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 2. [Technical Specifications](./02-TECHNICAL-SPECIFICATIONS.md)
+### 2. [Technical Specifications](./P0-02-TECHNICAL-SPECIFICATIONS.md)
 **Purpose**: Detailed technical specifications for all components
 
 **Contents**:
@@ -42,7 +42,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 3. [Architecture Documentation](./03-ARCHITECTURE.md)
+### 3. [Architecture Documentation](./P0-03-ARCHITECTURE.md)
 **Purpose**: Deep dive into architectural patterns and design decisions
 
 **Contents**:
@@ -59,7 +59,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 4. [Deployment Guide](./04-DEPLOYMENT-GUIDE.md)
+### 4. [Deployment Guide](./P0-04-DEPLOYMENT-GUIDE.md)
 **Purpose**: Step-by-step deployment and maintenance procedures
 
 **Contents**:
@@ -78,7 +78,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 5. [Monitoring Setup](./05-MONITORING-SETUP.md)
+### 5. [Monitoring Setup](./P0-05-MONITORING-SETUP.md)
 **Purpose**: Complete monitoring stack configuration and usage
 
 **Contents**:
@@ -97,7 +97,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 6. [Security Configuration](./06-SECURITY-CONFIGURATION.md)
+### 6. [Security Configuration](./P0-06-SECURITY-CONFIGURATION.md)
 **Purpose**: Comprehensive security setup and best practices
 
 **Contents**:
@@ -117,7 +117,7 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ---
 
-### 7. [Remote Host Analysis](./07-REMOTE-HOST-ANALYSIS.md)
+### 7. [Remote Host Analysis](./P0-07-REMOTE-HOST-ANALYSIS.md)
 **Purpose**: Current state analysis of production remote host
 
 **Contents**:
@@ -138,24 +138,24 @@ Complete technical documentation for the Lianel containerized web application pl
 ## Quick Start
 
 ### For New Team Members
-1. Start with [System Overview](./01-SYSTEM-OVERVIEW.md) to understand the big picture
-2. Review [Architecture Documentation](./03-ARCHITECTURE.md) to understand design decisions
-3. Read [Technical Specifications](./02-TECHNICAL-SPECIFICATIONS.md) for component details
+1. Start with [System Overview](./P0-01-SYSTEM-OVERVIEW.md) to understand the big picture
+2. Review [Architecture Documentation](./P0-03-ARCHITECTURE.md) to understand design decisions
+3. Read [Technical Specifications](./P0-02-TECHNICAL-SPECIFICATIONS.md) for component details
 
 ### For Deployment
-1. Follow [Deployment Guide](./04-DEPLOYMENT-GUIDE.md) step-by-step
-2. Configure monitoring using [Monitoring Setup](./05-MONITORING-SETUP.md)
-3. Review [Security Configuration](./06-SECURITY-CONFIGURATION.md) for hardening
+1. Follow [Deployment Guide](./P0-04-DEPLOYMENT-GUIDE.md) step-by-step
+2. Configure monitoring using [Monitoring Setup](./P0-05-MONITORING-SETUP.md)
+3. Review [Security Configuration](./P0-06-SECURITY-CONFIGURATION.md) for hardening
 
 ### For Operations
-1. Reference [Monitoring Setup](./05-MONITORING-SETUP.md) for day-to-day monitoring
-2. Use [Deployment Guide](./04-DEPLOYMENT-GUIDE.md) for maintenance procedures
-3. Keep [Security Configuration](./06-SECURITY-CONFIGURATION.md) handy for security tasks
+1. Reference [Monitoring Setup](./P0-05-MONITORING-SETUP.md) for day-to-day monitoring
+2. Use [Deployment Guide](./P0-04-DEPLOYMENT-GUIDE.md) for maintenance procedures
+3. Keep [Security Configuration](./P0-06-SECURITY-CONFIGURATION.md) handy for security tasks
 
 ### For Troubleshooting
-1. Check [Monitoring Setup](./05-MONITORING-SETUP.md) troubleshooting section
-2. Review [Deployment Guide](./04-DEPLOYMENT-GUIDE.md) troubleshooting section
-3. Consult [Technical Specifications](./02-TECHNICAL-SPECIFICATIONS.md) for component details
+1. Check [Monitoring Setup](./P0-05-MONITORING-SETUP.md) troubleshooting section
+2. Review [Deployment Guide](./P0-04-DEPLOYMENT-GUIDE.md) troubleshooting section
+3. Consult [Technical Specifications](./P0-02-TECHNICAL-SPECIFICATIONS.md) for component details
 
 ---
 
