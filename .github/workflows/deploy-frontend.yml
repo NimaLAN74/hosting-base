@@ -79,24 +79,25 @@ jobs:
           path: frontend-image.tar.gz
           retention-days: 7
 
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "SSH key setup complete"
+
+      - name: Test SSH Connection
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${{ secrets.REMOTE_PORT || 22 }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "echo 'SSH connection successful'"
+
       - name: Deploy to Remote Host
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.REMOTE_PORT || 22 }}
-          source: "frontend-image.tar.gz"
-          target: "/root/lianel/dc/"
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${{ secrets.REMOTE_PORT || 22 }} frontend-image.tar.gz ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:/root/lianel/dc/
 
       - name: Load and Deploy on Remote Host
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.REMOTE_PORT || 22 }}
-          script: |
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${{ secrets.REMOTE_PORT || 22 }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOF'
             set -e
             echo "=== Loading Docker image ==="
             cd /root/lianel/dc
@@ -105,7 +106,7 @@ jobs:
             docker load < frontend-image.tar.gz
             
             # Get the loaded image name and tag it
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-frontend\|hosting-base" | head -1)
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-frontend\|hosting-base\|nimalan74" | head -1)
             if [ -n "$LOADED_IMAGE" ]; then
               docker tag "$LOADED_IMAGE" lianel-frontend:latest || true
             fi
@@ -125,6 +126,7 @@ jobs:
             rm -f frontend-image.tar.gz
             
             echo "=== Deployment successful ==="
+EOF
 
       - name: Deployment Summary
         run: |
