@@ -1,0 +1,100 @@
+# GitHub Actions Workflows
+
+This directory contains CI/CD workflows for automated deployment.
+
+## Frontend Deployment Workflow
+
+**File**: `deploy-frontend.yml`
+
+### Overview
+Automatically builds and deploys the React frontend to the production server when changes are pushed to the `master` or `main` branch.
+
+### Trigger Conditions
+- Push to `master` or `main` branch with changes in:
+  - `lianel/dc/frontend/**`
+  - `lianel/dc/docker-compose.frontend.yaml`
+  - `lianel/dc/docker-compose.yaml`
+- Manual trigger via GitHub Actions UI (`workflow_dispatch`)
+
+### Workflow Steps
+1. **Checkout**: Gets the latest code
+2. **Docker Buildx Setup**: Sets up multi-platform builds
+3. **Build Image**: Builds frontend Docker image for `linux/amd64`
+4. **Push to Registry**: Pushes image to GitHub Container Registry (ghcr.io)
+5. **Save Image**: Saves image as tar.gz for deployment
+6. **Upload Artifact**: Stores image as GitHub Actions artifact
+7. **SCP Transfer**: Transfers image to remote host
+8. **Deploy**: Loads image and restarts container on remote host
+9. **Cleanup**: Removes old images and temporary files
+
+### Required Secrets
+Configure these secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
+
+| Secret Name | Description | Example |
+|------------|-------------|---------|
+| `REMOTE_HOST` | Remote server IP or hostname | `72.60.80.84` |
+| `REMOTE_USER` | SSH username | `root` |
+| `SSH_PRIVATE_KEY` | Private SSH key for authentication | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `REMOTE_PORT` | SSH port (optional, defaults to 22) | `22` |
+
+### How to Set Up Secrets
+
+1. Go to your repository: https://github.com/NimaLAN74/hosting-base
+2. Click **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret**
+4. Add each secret listed above
+
+#### Generating SSH Key (if needed)
+```bash
+# Generate SSH key pair
+ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions_deploy
+
+# Copy public key to remote host
+ssh-copy-id -i ~/.ssh/github_actions_deploy.pub root@72.60.80.84
+
+# Copy private key content (to add as secret)
+cat ~/.ssh/github_actions_deploy
+```
+
+### Image Registry
+Images are pushed to GitHub Container Registry:
+- **Registry**: `ghcr.io`
+- **Image**: `ghcr.io/nimalan74/hosting-base/lianel-frontend:latest`
+- **Tags**: `latest`, `master-<sha>`, `<branch>-<sha>`
+
+### Manual Deployment
+You can manually trigger deployment:
+1. Go to **Actions** tab in GitHub
+2. Select **Deploy Frontend to Production**
+3. Click **Run workflow**
+4. Select branch and click **Run workflow**
+
+### Monitoring
+- Check workflow runs in the **Actions** tab
+- View logs for each step
+- Deployment summary is shown at the end of the workflow
+
+### Troubleshooting
+
+#### SSH Connection Failed
+- Verify SSH key is correctly added as secret
+- Check remote host firewall allows SSH
+- Test SSH connection manually: `ssh -i <key> root@72.60.80.84`
+
+#### Docker Build Failed
+- Check Dockerfile syntax
+- Verify frontend dependencies are correct
+- Review build logs in GitHub Actions
+
+#### Deployment Failed
+- Check remote host Docker is running: `docker ps`
+- Verify docker-compose.yaml is correct
+- Check container logs: `docker logs lianel-frontend`
+
+### Future Enhancements
+- [ ] Add rollback capability
+- [ ] Add health checks after deployment
+- [ ] Add notification (Slack, email) on deployment
+- [ ] Add deployment to staging environment
+- [ ] Add automated testing before deployment
+

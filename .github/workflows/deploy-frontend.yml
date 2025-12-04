@@ -1,0 +1,130 @@
+name: Deploy Frontend to Production
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/frontend/**'
+      - 'lianel/dc/docker-compose.frontend.yaml'
+      - 'lianel/dc/docker-compose.yaml'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/lianel-frontend
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lianel/dc/frontend
+          file: ./lianel/dc/frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save Docker image as tar.gz
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest | gzip > frontend-image.tar.gz
+          ls -lh frontend-image.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-docker-image
+          path: frontend-image.tar.gz
+          retention-days: 7
+
+      - name: Deploy to Remote Host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.REMOTE_PORT || 22 }}
+          source: "frontend-image.tar.gz"
+          target: "/root/lianel/dc/"
+
+      - name: Load and Deploy on Remote Host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.REMOTE_PORT || 22 }}
+          script: |
+            set -e
+            echo "=== Loading Docker image ==="
+            cd /root/lianel/dc
+            
+            # Load the Docker image
+            docker load < frontend-image.tar.gz
+            
+            # Tag the image if needed (in case it was pulled from registry)
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest lianel-frontend:latest || true
+            
+            echo "=== Deploying frontend container ==="
+            # Deploy using docker-compose
+            docker-compose -f docker-compose.yaml up -d frontend
+            
+            # Verify deployment
+            echo "=== Verifying deployment ==="
+            sleep 5
+            docker ps | grep lianel-frontend || exit 1
+            
+            # Clean up old image
+            echo "=== Cleaning up ==="
+            docker image prune -f
+            rm -f frontend-image.tar.gz
+            
+            echo "=== Deployment successful ==="
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Frontend Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+
