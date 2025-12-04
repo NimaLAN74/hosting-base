@@ -14,7 +14,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/lianel-frontend
+  IMAGE_NAME: ${{ github.repository_owner }}/hosting-base/lianel-frontend
 
 jobs:
   build-and-deploy:
@@ -64,8 +64,11 @@ jobs:
 
       - name: Save Docker image as tar.gz
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest | gzip > frontend-image.tar.gz
+          # Use the lowercase tag from metadata action
+          IMAGE_TAG="${{ steps.meta.outputs.tags }}" 
+          LATEST_TAG=$(echo "$IMAGE_TAG" | tr ' ' '\n' | grep ':latest' | head -1)
+          docker pull "$LATEST_TAG"
+          docker save "$LATEST_TAG" | gzip > frontend-image.tar.gz
           ls -lh frontend-image.tar.gz
 
       - name: Upload image artifact
@@ -100,8 +103,11 @@ jobs:
             # Load the Docker image
             docker load < frontend-image.tar.gz
             
-            # Tag the image if needed (in case it was pulled from registry)
-            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest lianel-frontend:latest || true
+            # Get the loaded image name and tag it
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-frontend\|hosting-base" | head -1)
+            if [ -n "$LOADED_IMAGE" ]; then
+              docker tag "$LOADED_IMAGE" lianel-frontend:latest || true
+            fi
             
             echo "=== Deploying frontend container ==="
             # Deploy using docker-compose
@@ -123,7 +129,7 @@ jobs:
         run: |
           echo "## 🚀 Frontend Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ steps.meta.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
