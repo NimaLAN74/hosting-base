@@ -21,3 +21,57 @@ scrape_configs:
         target_label: 'stream'
       - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
         target_label: 'service'
+    pipeline_stages:
+      # Parse nginx JSON logs for nginx-proxy container
+      - match:
+          selector: '{container="nginx-proxy"}'
+          stages:
+            - json:
+                expressions:
+                  time_local: time_local
+                  remote_addr: remote_addr
+                  remote_user: remote_user
+                  request: request
+                  status: status
+                  body_bytes_sent: body_bytes_sent
+                  request_time: request_time
+                  http_referrer: http_referrer
+                  http_user_agent: http_user_agent
+                  http_x_forwarded_for: http_x_forwarded_for
+                  upstream_addr: upstream_addr
+                  upstream_response_time: upstream_response_time
+                  host: host
+                  request_method: request_method
+                  request_uri: request_uri
+            # Extract HTTP method and path from request string
+            - regex:
+                expression: '^(?P<http_method>\w+)\s+(?P<http_path>\S+)\s+HTTP'
+                source: request
+            # Add labels for filtering
+            - labels:
+                status_code: status
+                http_method: request_method
+                hostname: host
+                client_ip: remote_addr
+            # Extract path from request_uri
+            - regex:
+                expression: '^(?P<path>[^?]+)'
+                source: request_uri
+            - labels:
+                path: path
+            # Parse standard nginx log format as fallback
+      - match:
+          selector: '{container="nginx-proxy"}'
+          stages:
+            - regex:
+                expression: '(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<request>[^"]+)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referrer>[^"]*)" "(?P<http_user_agent>[^"]*)"'
+                source: message
+            - labels:
+                status_code: status
+                client_ip: remote_addr
+            - regex:
+                expression: '^(?P<http_method>\w+)\s+(?P<http_path>\S+)\s+HTTP'
+                source: request
+            - labels:
+                http_method: http_method
+                path: http_path
