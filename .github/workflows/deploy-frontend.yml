@@ -147,8 +147,8 @@ jobs:
             fi
             
             echo "=== Deploying frontend container ==="
-            # Deploy using docker-compose
-            docker-compose -f docker-compose.yaml up -d frontend
+            # Deploy using docker compose (try V2 first, fallback to V1)
+            docker compose -f docker-compose.yaml up -d frontend 2>/dev/null || docker-compose -f docker-compose.yaml up -d frontend
             
             # Verify deployment
             echo "=== Verifying deployment ==="
