@@ -1,0 +1,80 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.env
+SECURITY_CREDENTIALS.md
+
+# Docker
+*.tar.gz
+*.tar
+docker-compose.override.yaml
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# Build outputs
+build/
+dist/
+*.build/
+
+# Frontend build artifacts
+lianel/dc/frontend/build/
+lianel/dc/frontend/node_modules/
+
+# Logs
+logs/
+*.log
+lianel/dc/logs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.project
+.classpath
+.settings/
+
+# Airflow
+lianel/dc/logs/
+lianel/dc/plugins/__pycache__/
+*.pyc
+__pycache__/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# SSL certificates (should not be in repo)
+lianel/dc/nginx/ssl/
+*.pem
+*.key
+*.crt
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Docker volumes data (if any)
+data/
+volumes/
+

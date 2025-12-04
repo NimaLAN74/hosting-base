@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2c5aa0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1b4f72;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f4d03f;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bgGradient)" stroke="#f4d03f" stroke-width="8"/>
+  
+  <!-- Inner circle for depth -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+  
+  <!-- Letter L -->
+  <path d="M 180 180 L 180 340 L 280 340 L 280 310 L 210 310 L 210 180 Z" fill="url(#textGradient)" stroke="rgba(0,0,0,0.1)" stroke-width="2"/>
+  
+  <!-- Letter W -->
+  <path d="M 300 180 L 320 300 L 340 180 L 370 180 L 390 300 L 410 180 L 440 180 L 410 340 L 380 340 L 360 220 L 340 340 L 310 340 L 280 180 Z" fill="url(#textGradient)" stroke="rgba(0,0,0,0.1)" stroke-width="2"/>
+  
+  <!-- Decorative elements -->
+  <circle cx="200" cy="200" r="4" fill="#f4d03f" opacity="0.8"/>
+  <circle cx="420" cy="200" r="4" fill="#f4d03f" opacity="0.8"/>
+  <circle cx="200" cy="320" r="4" fill="#f4d03f" opacity="0.8"/>
+  <circle cx="420" cy="320" r="4" fill="#f4d03f" opacity="0.8"/>
+</svg>

@@ -1,0 +1,31 @@
+{
+  "short_name": "Lianel World",
+  "name": "Lianel World - Infrastructure Platform",
+  "description": "Infrastructure Management Platform with Airflow, Monitoring, and SSO",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#2c5aa0",
+  "background_color": "#1b4f72"
+}

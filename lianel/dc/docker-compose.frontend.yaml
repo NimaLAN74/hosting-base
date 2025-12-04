@@ -1,0 +1,16 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: lianel-frontend:latest
+    container_name: lianel-frontend
+    expose:
+      - "80"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+
+networks:
+  lianel-network:
+    external: true
