@@ -118,6 +118,21 @@ Complete technical documentation for the Lianel containerized web application pl
 ---
 
 ### 7. [Remote Host Analysis](./P0-07-REMOTE-HOST-ANALYSIS.md)
+
+### 8. [Profile Service](./P0-08-PROFILE-SERVICE.md)
+**Purpose**: Profile Service API documentation and architecture
+
+**Contents**:
+- Profile Service overview
+- API endpoints and schemas
+- Security architecture
+- Deployment procedures
+- Frontend integration
+- Troubleshooting guide
+
+**Audience**: Backend developers, API consumers, DevOps engineers
+
+---
 **Purpose**: Current state analysis of production remote host
 
 **Contents**:
@@ -168,7 +183,8 @@ Complete technical documentation for the Lianel containerized web application pl
 - **Domains**: lianel.se, www.lianel.se, auth.lianel.se, airflow.lianel.se, monitoring.lianel.se
 
 ### Key Services
-- **Frontend**: React application
+- **Frontend**: React application with user profile management
+- **Profile Service**: Rust-based backend API for user profile operations
 - **Orchestration**: Apache Airflow 3.1.3
 - **Authentication**: Keycloak + OAuth2 Proxy
 - **Monitoring**: Prometheus + Grafana + Loki
@@ -177,6 +193,8 @@ Complete technical documentation for the Lianel containerized web application pl
 
 ### Access Points
 - **Main Site**: https://www.lianel.se
+- **Profile Management**: https://www.lianel.se/profile
+- **API Documentation**: https://www.lianel.se/swagger-ui/
 - **Monitoring**: https://www.lianel.se/monitoring/
 - **Airflow**: https://airflow.lianel.se
 - **Keycloak**: https://auth.lianel.se
@@ -199,8 +217,12 @@ graph TB
     OAuth2 -->|OIDC| Keycloak[Keycloak]
     
     Nginx -->|Proxy| Frontend[React Frontend]
+    Nginx -->|Proxy| ProfileService[Profile Service - Rust API]
     Nginx -->|Proxy| Airflow[Airflow]
     Nginx -->|Proxy| Grafana[Grafana]
+    
+    Frontend -->|API Calls| ProfileService
+    ProfileService -->|Admin API| Keycloak
     
     Airflow --> Postgres[(PostgreSQL)]
     Airflow --> Redis[(Redis)]

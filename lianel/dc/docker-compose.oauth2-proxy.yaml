@@ -53,6 +53,8 @@ services:
       OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
       OAUTH2_PROXY_PASS_USER_HEADERS: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_USER_ID_CLAIM: "preferred_username"
+      OAUTH2_PROXY_OIDC_GROUPS_CLAIM: "groups"
     expose:
       - "4180"
     depends_on:

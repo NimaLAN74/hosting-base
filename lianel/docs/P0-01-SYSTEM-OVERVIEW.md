@@ -25,6 +25,7 @@ graph TB
         
         subgraph "Application Services"
             Frontend[React Frontend - Port 80]
+            ProfileService[Profile Service - Rust API - Port 3000]
             Airflow[Airflow Web UI - Port 8080]
             Grafana[Grafana - Port 3000]
         end
@@ -54,6 +55,9 @@ graph TB
     Nginx -->|Auth Check| OAuth2
     OAuth2 -->|OIDC| Keycloak
     Nginx -->|Proxy| Frontend
+    Nginx -->|Proxy| ProfileService
+    Frontend -->|API Calls| ProfileService
+    ProfileService -->|Admin API| Keycloak
     Nginx -->|Proxy| Airflow
     Nginx -->|Proxy| Grafana
     
@@ -87,6 +91,7 @@ graph TB
 - **Container**: Nginx serving static files
 
 ### Backend Services
+- **Profile Service**: Rust-based API service for user profile management
 - **Orchestration**: Apache Airflow 3.1.3
 - **Authentication**: Keycloak (latest)
 - **Auth Proxy**: OAuth2 Proxy (latest)

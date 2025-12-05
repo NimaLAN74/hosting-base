@@ -1,14 +1,8 @@
 services:
-  frontend:
-    image: lianel-frontend:latest
-    container_name: lianel-frontend
-    expose:
-      - "80"
-    restart: unless-stopped
-    networks:
-      - lianel-network
-
   profile-service:
+    build:
+      context: ./profile-service
+      dockerfile: Dockerfile
     image: lianel-profile-service:latest
     container_name: lianel-profile-service
     env_file:
@@ -28,21 +22,7 @@ services:
     networks:
       - lianel-network
 
-  nginx:
-    image: nginx
-    container_name: nginx-proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /root/lianel/dc/nginx/config/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - frontend
-    restart: unless-stopped
-    networks:
-      - lianel-network
-
 networks:
   lianel-network:
     external: true
+
