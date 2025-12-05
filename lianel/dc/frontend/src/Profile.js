@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import UserDropdown from './UserDropdown';
+import './App.css';
 import './Profile.css';
 
 function Profile() {
@@ -192,6 +194,9 @@ function Profile() {
             <div className="logo-icon">LW</div>
             Lianel World
           </h1>
+          <div className="header-right">
+            <UserDropdown />
+          </div>
         </header>
         
         <main className="main">
