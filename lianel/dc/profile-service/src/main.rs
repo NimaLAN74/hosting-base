@@ -100,9 +100,12 @@ struct HealthResponse {
 struct ApiDoc;
 
 // Extract user info from headers
-fn extract_user_from_headers(headers: &HeaderMap) -> Result<(String, String), StatusCode> {
+fn extract_user_from_headers(headers: &HeaderMap) -> Result<(String, String, Option<String>), StatusCode> {
+    // Try to get username/preferred_username first, fallback to user ID
     let username = headers
-        .get("x-user")
+        .get("x-auth-request-preferred-username")
+        .or_else(|| headers.get("x-preferred-username"))
+        .or_else(|| headers.get("x-user"))
         .or_else(|| headers.get("x-auth-request-user"))
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -113,7 +116,14 @@ fn extract_user_from_headers(headers: &HeaderMap) -> Result<(String, String), St
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    Ok((username.to_string(), email.to_string()))
+    // Get user ID if available (might be UUID)
+    let user_id = headers
+        .get("x-auth-request-user-id")
+        .or_else(|| headers.get("x-user-id"))
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    Ok((username.to_string(), email.to_string(), user_id))
 }
 
 // Get admin token from Keycloak
@@ -217,7 +227,7 @@ async fn get_profile(
     headers: HeaderMap,
     axum::extract::State(config): axum::extract::State<AppConfig>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
-    let (username, _email) = extract_user_from_headers(&headers)
+    let (username, _email, user_id_from_header) = extract_user_from_headers(&headers)
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -232,17 +242,26 @@ async fn get_profile(
             )
         })?;
 
-    let user_id = get_user_id(&config, &admin_token, &username)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                    details: Some(e.to_string()),
-                }),
-            )
-        })?;
+    // If we have a user ID from header (UUID), use it directly, otherwise look up by username/email
+    let user_id = if let Some(ref uid) = user_id_from_header {
+        uid.clone()
+    } else if username.len() == 36 && username.contains('-') {
+        // Likely a UUID, try using it directly
+        username.clone()
+    } else {
+        // Look up by username or email
+        get_user_id(&config, &admin_token, &username)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "User not found".to_string(),
+                        details: Some(e.to_string()),
+                    }),
+                )
+            })?
+    };
 
     let client = reqwest::Client::new();
     let response = client
@@ -344,7 +363,7 @@ async fn update_profile(
         ));
     }
 
-    let (username, _email) = extract_user_from_headers(&headers)
+    let (username, _email, user_id_from_header) = extract_user_from_headers(&headers)
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -359,17 +378,23 @@ async fn update_profile(
             )
         })?;
 
-    let user_id = get_user_id(&config, &admin_token, &username)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                    details: Some(e.to_string()),
-                }),
-            )
-        })?;
+    let user_id = if username.len() == 36 && username.matches('-').count() == 4 {
+        username.clone()
+    } else if let Some(ref uid) = user_id_from_header {
+        uid.clone()
+    } else {
+        get_user_id(&config, &admin_token, &username)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "User not found".to_string(),
+                        details: Some(e.to_string()),
+                    }),
+                )
+            })?
+    };
 
     // Build update payload
     let mut update_payload = serde_json::Map::new();
@@ -505,13 +530,21 @@ async fn change_password(
         ));
     }
 
-    let (username, _email) = extract_user_from_headers(&headers)
+    let (username, email, user_id_from_header) = extract_user_from_headers(&headers)
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    // Get actual username for password verification (not UUID)
+    // If username is a UUID, use email prefix as login username
+    let login_username = if username.len() == 36 && username.matches('-').count() == 4 {
+        email.split('@').next().unwrap_or(&email)
+    } else {
+        &username
+    };
 
     // Verify current password
     let client = reqwest::Client::new();
     let params = [
-        ("username", username.as_str()),
+        ("username", login_username),
         ("password", payload.current_password.as_str()),
         ("grant_type", "password"),
         ("client_id", "oauth2-proxy"),
@@ -558,17 +591,23 @@ async fn change_password(
             )
         })?;
 
-    let user_id = get_user_id(&config, &admin_token, &username)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                    details: Some(e.to_string()),
-                }),
-            )
-        })?;
+    let user_id = if username.len() == 36 && username.matches('-').count() == 4 {
+        username.clone()
+    } else if let Some(ref uid) = user_id_from_header {
+        uid.clone()
+    } else {
+        get_user_id(&config, &admin_token, login_username)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "User not found".to_string(),
+                        details: Some(e.to_string()),
+                    }),
+                )
+            })?
+    };
 
     let password_payload = serde_json::json!({
         "type": "password",
