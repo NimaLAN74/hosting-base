@@ -3,8 +3,8 @@ FROM rust:1.83-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache musl-dev
+# Install build dependencies including OpenSSL
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
 # Copy Cargo files
 COPY Cargo.toml ./
