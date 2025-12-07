@@ -142,9 +142,9 @@ jobs:
             fi
             
             echo "=== Deploying profile service container ==="
-            # Deploy using docker-compose.backend.yaml with --no-build flag
+            # Deploy using multiple compose files to include keycloak dependency
             # Image is already loaded, so we prevent Docker Compose from trying to build
-            docker compose -f docker-compose.backend.yaml up -d --no-build profile-service
+            docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
             
             # Verify deployment
             echo "=== Verifying deployment ==="
