@@ -142,6 +142,10 @@ jobs:
             fi
             
             echo "=== Deploying profile service container ==="
+            # Stop and remove existing container if it exists
+            docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml stop profile-service 2>/dev/null || true
+            docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml rm -f profile-service 2>/dev/null || true
+            
             # Deploy using multiple compose files to include keycloak dependency
             # Image is already loaded, so we prevent Docker Compose from trying to build
             docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
