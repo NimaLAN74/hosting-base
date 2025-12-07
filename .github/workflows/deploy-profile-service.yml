@@ -142,8 +142,9 @@ jobs:
             fi
             
             echo "=== Deploying profile service container ==="
-            # Deploy using docker compose (v2) - use main compose file (same as frontend)
-            docker compose -f docker-compose.yaml up -d profile-service
+            # Deploy using docker-compose.backend.yaml with --no-build flag
+            # Image is already loaded, so we prevent Docker Compose from trying to build
+            docker compose -f docker-compose.backend.yaml up -d --no-build profile-service
             
             # Verify deployment
             echo "=== Verifying deployment ==="
