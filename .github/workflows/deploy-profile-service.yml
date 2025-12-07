@@ -46,6 +46,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-rust-
 
+      - name: Verify Rust code compiles
+        working-directory: ./lianel/dc/profile-service
+        run: |
+          echo "Checking Rust code compilation..."
+          cargo check --release --target x86_64-unknown-linux-musl
+          echo "✅ Rust code compiles successfully"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -70,6 +77,7 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
+        id: build
         with:
           context: ./lianel/dc/profile-service
           file: ./lianel/dc/profile-service/Dockerfile
@@ -80,13 +88,48 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify build succeeded
+        run: |
+          if [ "${{ steps.build.outcome }}" != "success" ]; then
+            echo "Error: Docker build failed"
+            exit 1
+          fi
+          echo "✅ Docker build and push completed successfully"
+          echo "Image tags: ${{ steps.meta.outputs.tags }}"
+
       - name: Save Docker image as tar.gz
         run: |
-          IMAGE_TAG="${{ steps.meta.outputs.tags }}" 
-          LATEST_TAG=$(echo "$IMAGE_TAG" | tr ' ' '\n' | grep ':latest' | head -1)
-          docker pull "$LATEST_TAG"
-          docker save "$LATEST_TAG" | gzip > profile-service-image.tar.gz
+          # Extract image tag - prefer latest, otherwise use first tag
+          IMAGE_TAGS="${{ steps.meta.outputs.tags }}"
+          IMAGE_TAG=$(echo "$IMAGE_TAGS" | tr ' ' '\n' | grep ':latest' | head -1)
+          
+          # If no latest tag, use the first tag
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
+          fi
+          
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "Error: Could not extract image tag from: $IMAGE_TAGS"
+            exit 1
+          fi
+          
+          echo "Pulling image: $IMAGE_TAG"
+          docker pull "$IMAGE_TAG" || {
+            echo "Error: Failed to pull image $IMAGE_TAG"
+            exit 1
+          }
+          
+          echo "Saving image: $IMAGE_TAG"
+          docker save "$IMAGE_TAG" | gzip > profile-service-image.tar.gz
+          
+          # Verify the file was created and has content
+          if [ ! -f profile-service-image.tar.gz ] || [ ! -s profile-service-image.tar.gz ]; then
+            echo "Error: Failed to create image archive or archive is empty"
+            exit 1
+          fi
+          
           ls -lh profile-service-image.tar.gz
+          echo "Image archive created successfully"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
@@ -151,21 +194,45 @@ jobs:
             
             docker load < profile-service-image.tar.gz
             
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-profile-service\|hosting-base\|nimalan74" | head -1)
-            if [ -n "$LOADED_IMAGE" ]; then
+            # Find the loaded image (it might have various names from the registry)
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "(lianel-profile-service|hosting-base|nimalan74|ghcr.io)" | grep -v "<none>" | head -1)
+            if [ -z "$LOADED_IMAGE" ]; then
+              # Fallback: get the most recently loaded image
+              LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -2 | tail -1)
+            fi
+            if [ -n "$LOADED_IMAGE" ] && [ "$LOADED_IMAGE" != "REPOSITORY:TAG" ]; then
+              echo "Tagging image: $LOADED_IMAGE -> lianel-profile-service:latest"
               docker tag "$LOADED_IMAGE" lianel-profile-service:latest || true
+            else
+              echo "Warning: Could not find loaded image to tag"
             fi
             
             echo "=== Deploying profile service container ==="
-            docker compose -f docker-compose.backend.yaml up -d profile-service 2>/dev/null || docker-compose -f docker-compose.backend.yaml up -d profile-service
+            # Try docker compose (v2) first, fallback to docker-compose (v1)
+            if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then
+              docker compose -f docker-compose.backend.yaml up -d profile-service
+            elif command -v docker-compose > /dev/null; then
+              docker-compose -f docker-compose.backend.yaml up -d profile-service
+            else
+              echo "Error: Neither 'docker compose' nor 'docker-compose' found"
+              exit 1
+            fi
             
             echo "=== Verifying deployment ==="
             sleep 5
             docker ps | grep lianel-profile-service || exit 1
             
             echo "=== Testing health endpoint ==="
-            sleep 3
-            docker exec lianel-profile-service curl -f http://localhost:3000/health || echo "Health check failed, but continuing..."
+            sleep 5
+            # Try multiple methods to test health
+            if docker exec lianel-profile-service wget -q -O- http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Health check passed (wget)"
+            elif docker exec lianel-profile-service curl -f http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Health check passed (curl)"
+            else
+              echo "Warning: Health check failed, but container is running"
+              docker logs lianel-profile-service --tail 20
+            fi
             
             echo "=== Cleaning up ==="
             docker image prune -f

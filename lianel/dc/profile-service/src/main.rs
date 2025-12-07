@@ -1,7 +1,8 @@
 use axum::{
+    extract::Path,
     http::{HeaderMap, StatusCode},
     response::Json,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,29 @@ struct ChangePasswordRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct CreateUserRequest {
+    username: String,
+    email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    firstName: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lastName: Option<String>,
+    password: String,
+    enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct AdminChangePasswordRequest {
+    new_password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct UserListResponse {
+    users: Vec<UserProfile>,
+    total: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct SuccessResponse {
     message: String,
 }
@@ -74,18 +98,29 @@ struct HealthResponse {
         get_profile,
         update_profile,
         change_password,
-        health
+        health,
+        check_admin,
+        list_users,
+        get_user_by_id,
+        create_user,
+        update_user,
+        delete_user,
+        admin_change_password
     ),
     components(schemas(
         UserProfile,
         UpdateProfileRequest,
         ChangePasswordRequest,
+        CreateUserRequest,
+        AdminChangePasswordRequest,
         SuccessResponse,
         ErrorResponse,
-        HealthResponse
+        HealthResponse,
+        UserListResponse
     )),
     tags(
         (name = "profile", description = "User profile management endpoints"),
+        (name = "admin", description = "Admin user management endpoints"),
         (name = "health", description = "Health check endpoint")
     ),
     info(
@@ -206,6 +241,42 @@ async fn get_user_id(
     }
 
     Err(anyhow::anyhow!("User not found"))
+}
+
+// Check if user has admin role
+async fn is_admin(
+    config: &AppConfig,
+    admin_token: &str,
+    user_id: &str,
+) -> Result<bool, anyhow::Error> {
+    let client = reqwest::Client::new();
+    
+    // Get realm roles for the user
+    let response = client
+        .get(format!(
+            "{}/admin/realms/{}/users/{}/role-mappings/realm",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Ok(false);
+    }
+
+    let roles: Vec<serde_json::Value> = response.json().await?;
+    
+    // Check if user has "admin" or "realm-admin" role
+    for role in roles {
+        if let Some(name) = role.get("name").and_then(|v| v.as_str()) {
+            if name.to_lowercase() == "admin" || name.to_lowercase() == "realm-admin" {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 /// Get current user's profile
@@ -651,6 +722,927 @@ async fn change_password(
     }))
 }
 
+/// Check if current user is admin
+#[utoipa::path(
+    get,
+    path = "/api/admin/check",
+    tag = "admin",
+    responses(
+        (status = 200, description = "Admin status", body = serde_json::Value),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn check_admin(
+    headers: HeaderMap,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let user_id = user_id_from_header.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    let is_admin_user = is_admin(&config, &admin_token, &user_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to check admin status".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "isAdmin": is_admin_user
+    })))
+}
+
+/// List all users (admin only)
+#[utoipa::path(
+    get,
+    path = "/api/admin/users",
+    tag = "admin",
+    responses(
+        (status = 200, description = "List of users", body = UserListResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn list_users(
+    headers: HeaderMap,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+) -> Result<Json<UserListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let user_id = user_id_from_header.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "{}/admin/realms/{}/users",
+            config.keycloak_url, config.keycloak_realm
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch users".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to fetch users".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    let users: Vec<serde_json::Value> = response.json().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to parse users".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })?;
+
+    let user_profiles: Vec<UserProfile> = users
+        .into_iter()
+        .map(|user| {
+            let first_name = user.get("firstName").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let last_name = user.get("lastName").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let name = if let (Some(fn_val), Some(ln_val)) = (&first_name, &last_name) {
+                format!("{} {}", fn_val, ln_val)
+            } else {
+                first_name
+                    .clone()
+                    .or(last_name.clone())
+                    .unwrap_or_else(|| user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            };
+
+            UserProfile {
+                id: user.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                username: user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                email: user.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                firstName: first_name,
+                lastName: last_name,
+                name,
+                email_verified: user.get("emailVerified").and_then(|v| v.as_bool()).unwrap_or(false),
+                enabled: user.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+            }
+        })
+        .collect();
+
+    Ok(Json(UserListResponse {
+        total: user_profiles.len(),
+        users: user_profiles,
+    }))
+}
+
+/// Get user by ID (admin only)
+#[utoipa::path(
+    get,
+    path = "/api/admin/users/{user_id}",
+    tag = "admin",
+    responses(
+        (status = 200, description = "User profile", body = UserProfile),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn get_user_by_id(
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
+    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let current_user_id = current_user_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &current_user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "{}/admin/realms/{}/users/{}",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "User not found".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    let user: serde_json::Value = response.json().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to parse user data".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })?;
+
+    let first_name = user.get("firstName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let last_name = user.get("lastName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let name = if let (Some(fn_val), Some(ln_val)) = (&first_name, &last_name) {
+        format!("{} {}", fn_val, ln_val)
+    } else {
+        first_name
+            .clone()
+            .or(last_name.clone())
+            .unwrap_or_else(|| user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    };
+
+    let profile = UserProfile {
+        id: user.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        username: user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        email: user.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        firstName: first_name,
+        lastName: last_name,
+        name,
+        email_verified: user.get("emailVerified").and_then(|v| v.as_bool()).unwrap_or(false),
+        enabled: user.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+    };
+
+    Ok(Json(profile))
+}
+
+/// Create new user (admin only)
+#[utoipa::path(
+    post,
+    path = "/api/admin/users",
+    tag = "admin",
+    request_body = CreateUserRequest,
+    responses(
+        (status = 201, description = "User created successfully", body = UserProfile),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn create_user(
+    headers: HeaderMap,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+    Json(payload): Json<CreateUserRequest>,
+) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
+    if payload.password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Password must be at least 8 characters long".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let user_id = user_id_from_header.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    // Create user payload
+    let mut user_payload = serde_json::json!({
+        "username": payload.username,
+        "email": payload.email,
+        "enabled": payload.enabled.unwrap_or(true),
+        "emailVerified": false,
+        "credentials": [{
+            "type": "password",
+            "value": payload.password,
+            "temporary": false
+        }]
+    });
+
+    if let Some(ref fn_val) = payload.firstName {
+        user_payload["firstName"] = serde_json::Value::String(fn_val.clone());
+    }
+    if let Some(ref ln_val) = payload.lastName {
+        user_payload["lastName"] = serde_json::Value::String(ln_val.clone());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "{}/admin/realms/{}/users",
+            config.keycloak_url, config.keycloak_realm
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .header("Content-Type", "application/json")
+        .json(&user_payload)
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to create user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Failed to create user".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    // Get the created user ID from Location header
+    let location = response.headers().get("location");
+    let created_user_id = if let Some(loc) = location {
+        loc.to_str().ok()
+            .and_then(|s| s.split('/').last().map(|s| s.to_string()))
+    } else {
+        // Fallback: search for the user by username
+        get_user_id(&config, &admin_token, &payload.username).await.ok()
+    };
+
+    let created_user_id = created_user_id.ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "User created but ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Fetch the created user
+    let response = client
+        .get(format!(
+            "{}/admin/realms/{}/users/{}",
+            config.keycloak_url, config.keycloak_realm, created_user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch created user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let user: serde_json::Value = response.json().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to parse user data".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })?;
+
+    let first_name = user.get("firstName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let last_name = user.get("lastName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let name = if let (Some(fn_val), Some(ln_val)) = (&first_name, &last_name) {
+        format!("{} {}", fn_val, ln_val)
+    } else {
+        first_name
+            .clone()
+            .or(last_name.clone())
+            .unwrap_or_else(|| user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    };
+
+    let profile = UserProfile {
+        id: user.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        username: user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        email: user.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        firstName: first_name,
+        lastName: last_name,
+        name,
+        email_verified: user.get("emailVerified").and_then(|v| v.as_bool()).unwrap_or(false),
+        enabled: user.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+    };
+
+    Ok(Json(profile))
+}
+
+/// Update user (admin only)
+#[utoipa::path(
+    put,
+    path = "/api/admin/users/{user_id}",
+    tag = "admin",
+    request_body = UpdateProfileRequest,
+    responses(
+        (status = 200, description = "User updated successfully", body = UserProfile),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn update_user(
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
+    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let current_user_id = current_user_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &current_user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    // Build update payload
+    let mut update_payload = serde_json::Map::new();
+    if let Some(ref fn_val) = payload.firstName {
+        update_payload.insert("firstName".to_string(), serde_json::Value::String(fn_val.clone()));
+    }
+    if let Some(ref ln_val) = payload.lastName {
+        update_payload.insert("lastName".to_string(), serde_json::Value::String(ln_val.clone()));
+    }
+    if let Some(ref email) = payload.email {
+        update_payload.insert("email".to_string(), serde_json::Value::String(email.clone()));
+        update_payload.insert("emailVerified".to_string(), serde_json::Value::Bool(false));
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .put(format!(
+            "{}/admin/realms/{}/users/{}",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .header("Content-Type", "application/json")
+        .json(&update_payload)
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to update user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to update user".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    // Fetch updated user
+    let response = client
+        .get(format!(
+            "{}/admin/realms/{}/users/{}",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch updated user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let user: serde_json::Value = response.json().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to parse updated user data".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })?;
+
+    let first_name = user.get("firstName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let last_name = user.get("lastName").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let name = if let (Some(fn_val), Some(ln_val)) = (&first_name, &last_name) {
+        format!("{} {}", fn_val, ln_val)
+    } else {
+        first_name
+            .clone()
+            .or(last_name.clone())
+            .unwrap_or_else(|| user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    };
+
+    let profile = UserProfile {
+        id: user.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        username: user.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        email: user.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        firstName: first_name,
+        lastName: last_name,
+        name,
+        email_verified: user.get("emailVerified").and_then(|v| v.as_bool()).unwrap_or(false),
+        enabled: user.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+    };
+
+    Ok(Json(profile))
+}
+
+/// Delete user (admin only)
+#[utoipa::path(
+    delete,
+    path = "/api/admin/users/{user_id}",
+    tag = "admin",
+    responses(
+        (status = 200, description = "User deleted successfully", body = SuccessResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn delete_user(
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let current_user_id = current_user_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &current_user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    // Prevent deleting yourself
+    if user_id == current_user_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Cannot delete your own account".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .delete(format!(
+            "{}/admin/realms/{}/users/{}",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to delete user".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "User not found or could not be deleted".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    Ok(Json(SuccessResponse {
+        message: "User deleted successfully".to_string(),
+    }))
+}
+
+/// Change user password (admin only, no current password required)
+#[utoipa::path(
+    post,
+    path = "/api/admin/users/{user_id}/change-password",
+    tag = "admin",
+    request_body = AdminChangePasswordRequest,
+    responses(
+        (status = 200, description = "Password changed successfully", body = SuccessResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden - not admin", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse)
+    ),
+    security(
+        ("oauth2" = [])
+    )
+)]
+async fn admin_change_password(
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    axum::extract::State(config): axum::extract::State<AppConfig>,
+    Json(payload): Json<AdminChangePasswordRequest>,
+) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if payload.new_password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "New password must be at least 8 characters long".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+        .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
+
+    let admin_token = get_admin_token(&config)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to authenticate with Keycloak".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    let current_user_id = current_user_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User ID not found".to_string(),
+                details: None,
+            }),
+        )
+    })?;
+
+    // Check if user is admin
+    if !is_admin(&config, &admin_token, &current_user_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to check admin status".to_string(),
+                details: Some(e.to_string()),
+            }),
+        )
+    })? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Admin access required".to_string(),
+                details: None,
+            }),
+        ));
+    }
+
+    let password_payload = serde_json::json!({
+        "type": "password",
+        "value": payload.new_password,
+        "temporary": false
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .put(format!(
+            "{}/admin/realms/{}/users/{}/reset-password",
+            config.keycloak_url, config.keycloak_realm, user_id
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token))
+        .header("Content-Type", "application/json")
+        .json(&password_payload)
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to change password".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to change password".to_string(),
+                details: Some(text),
+            }),
+        ));
+    }
+
+    Ok(Json(SuccessResponse {
+        message: "Password changed successfully".to_string(),
+    }))
+}
+
 /// Health check endpoint
 #[utoipa::path(
     get,
@@ -695,6 +1687,10 @@ async fn main() {
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .route("/api/profile", get(get_profile).put(update_profile))
         .route("/api/profile/change-password", post(change_password))
+        .route("/api/admin/check", get(check_admin))
+        .route("/api/admin/users", get(list_users).post(create_user))
+        .route("/api/admin/users/:user_id", get(get_user_by_id).put(update_user).delete(delete_user))
+        .route("/api/admin/users/:user_id/change-password", post(admin_change_password))
         .route("/health", get(health))
         .layer(
             ServiceBuilder::new()
