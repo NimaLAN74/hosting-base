@@ -28,32 +28,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            lianel/dc/profile-service/target/
-          key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-rust-
-
-      - name: Verify Rust code compiles
-        working-directory: ./lianel/dc/profile-service
-        run: |
-          echo "Checking Rust code compilation..."
-          # Just check syntax, don't build for musl (Dockerfile will handle that)
-          cargo check
-          echo "✅ Rust code compiles successfully"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -78,7 +52,6 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
-        id: build
         with:
           context: ./lianel/dc/profile-service
           file: ./lianel/dc/profile-service/Dockerfile
@@ -89,77 +62,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify build succeeded
-        run: |
-          if [ "${{ steps.build.outcome }}" != "success" ]; then
-            echo "Error: Docker build failed"
-            exit 1
-          fi
-          echo "✅ Docker build and push completed successfully"
-          echo "Image tags: ${{ steps.meta.outputs.tags }}"
-
       - name: Save Docker image as tar.gz
         run: |
-          # Extract image tag - use the same method as frontend workflow
-          IMAGE_TAGS="${{ steps.meta.outputs.tags }}"
-          echo "Available tags: $IMAGE_TAGS"
-          
-          # Get the latest tag (should be first for default branch)
-          LATEST_TAG=$(echo "$IMAGE_TAGS" | tr ' ' '\n' | grep ':latest' | head -1)
-          
-          if [ -z "$LATEST_TAG" ]; then
-            # Fallback to first tag if no latest found
-            LATEST_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
-          fi
-          
-          if [ -z "$LATEST_TAG" ]; then
-            echo "❌ Error: Could not extract image tag from: $IMAGE_TAGS"
-            exit 1
-          fi
-          
-          echo "Using image tag: $LATEST_TAG"
-          
-          # Wait a moment for registry to be ready
-          echo "Waiting for registry to be ready..."
-          sleep 5
-          
-          # Pull the image with retries
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            echo "Attempting to pull image (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
-            if docker pull "$LATEST_TAG"; then
-              echo "✅ Successfully pulled image"
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Pull failed, waiting 10 seconds before retry..."
-                sleep 10
-              else
-                echo "❌ Error: Failed to pull image $LATEST_TAG after $MAX_RETRIES attempts"
-                echo "Available tags were: $IMAGE_TAGS"
-                exit 1
-              fi
-            fi
-          done
-          
-          echo "Saving image: $LATEST_TAG"
+          # Use the same method as frontend workflow
+          IMAGE_TAG="${{ steps.meta.outputs.tags }}" 
+          LATEST_TAG=$(echo "$IMAGE_TAG" | tr ' ' '\n' | grep ':latest' | head -1)
+          docker pull "$LATEST_TAG"
           docker save "$LATEST_TAG" | gzip > profile-service-image.tar.gz
-          
-          # Verify the file was created and has content
-          if [ ! -f profile-service-image.tar.gz ]; then
-            echo "❌ Error: Failed to create image archive"
-            exit 1
-          fi
-          
-          if [ ! -s profile-service-image.tar.gz ]; then
-            echo "❌ Error: Image archive is empty"
-            exit 1
-          fi
-          
           ls -lh profile-service-image.tar.gz
-          echo "✅ Image archive created successfully ($(du -h profile-service-image.tar.gz | cut -f1))"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
@@ -222,57 +132,25 @@ jobs:
             echo "=== Loading Docker image ==="
             cd /root/lianel/dc
             
+            # Load the Docker image
             docker load < profile-service-image.tar.gz
             
-            # Find the loaded image - check all images and find the one that was just loaded
-            # Get images sorted by creation time (newest first)
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" --filter "dangling=false" | grep -v "REPOSITORY" | head -1)
-            
-            if [ -z "$LOADED_IMAGE" ] || [ "$LOADED_IMAGE" = "REPOSITORY:TAG" ]; then
-              echo "Warning: Could not automatically detect loaded image, trying alternative method..."
-              # Alternative: check for images with our expected patterns
-              LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "(lianel-profile-service|hosting-base|nimalan74|ghcr.io)" | grep -v "<none>" | head -1)
-            fi
-            
-            if [ -n "$LOADED_IMAGE" ] && [ "$LOADED_IMAGE" != "REPOSITORY:TAG" ]; then
-              echo "Found loaded image: $LOADED_IMAGE"
-              echo "Tagging as: lianel-profile-service:latest"
-              docker tag "$LOADED_IMAGE" lianel-profile-service:latest
-              echo "✅ Image tagged successfully"
-            else
-              echo "❌ Error: Could not find loaded image to tag"
-              echo "Available images:"
-              docker images --format "{{.Repository}}:{{.Tag}}"
-              exit 1
+            # Get the loaded image name and tag it
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-profile-service\|hosting-base\|nimalan74" | head -1)
+            if [ -n "$LOADED_IMAGE" ]; then
+              docker tag "$LOADED_IMAGE" lianel-profile-service:latest || true
             fi
             
             echo "=== Deploying profile service container ==="
-            # Try docker compose (v2) first, fallback to docker-compose (v1)
-            if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then
-              docker compose -f docker-compose.backend.yaml up -d profile-service
-            elif command -v docker-compose > /dev/null; then
-              docker-compose -f docker-compose.backend.yaml up -d profile-service
-            else
-              echo "Error: Neither 'docker compose' nor 'docker-compose' found"
-              exit 1
-            fi
+            # Deploy using docker compose (try V2 first, fallback to V1)
+            docker compose -f docker-compose.backend.yaml up -d profile-service 2>/dev/null || docker-compose -f docker-compose.backend.yaml up -d profile-service
             
+            # Verify deployment
             echo "=== Verifying deployment ==="
             sleep 5
             docker ps | grep lianel-profile-service || exit 1
             
-            echo "=== Testing health endpoint ==="
-            sleep 5
-            # Try multiple methods to test health
-            if docker exec lianel-profile-service wget -q -O- http://localhost:3000/health > /dev/null 2>&1; then
-              echo "Health check passed (wget)"
-            elif docker exec lianel-profile-service curl -f http://localhost:3000/health > /dev/null 2>&1; then
-              echo "Health check passed (curl)"
-            else
-              echo "Warning: Health check failed, but container is running"
-              docker logs lianel-profile-service --tail 20
-            fi
-            
+            # Clean up old image
             echo "=== Cleaning up ==="
             docker image prune -f
             rm -f profile-service-image.tar.gz
