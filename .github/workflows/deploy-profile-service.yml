@@ -50,7 +50,8 @@ jobs:
         working-directory: ./lianel/dc/profile-service
         run: |
           echo "Checking Rust code compilation..."
-          cargo check --release --target x86_64-unknown-linux-musl
+          # Just check syntax, don't build for musl (Dockerfile will handle that)
+          cargo check
           echo "✅ Rust code compiles successfully"
 
       - name: Set up Docker Buildx
@@ -101,35 +102,57 @@ jobs:
         run: |
           # Extract image tag - prefer latest, otherwise use first tag
           IMAGE_TAGS="${{ steps.meta.outputs.tags }}"
-          IMAGE_TAG=$(echo "$IMAGE_TAGS" | tr ' ' '\n' | grep ':latest' | head -1)
+          echo "Available tags: $IMAGE_TAGS"
           
-          # If no latest tag, use the first tag
-          if [ -z "$IMAGE_TAG" ]; then
-            IMAGE_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
-          fi
+          # Get the first tag (should be latest for default branch)
+          IMAGE_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
           
           if [ -z "$IMAGE_TAG" ]; then
             echo "Error: Could not extract image tag from: $IMAGE_TAGS"
             exit 1
           fi
           
-          echo "Pulling image: $IMAGE_TAG"
-          docker pull "$IMAGE_TAG" || {
-            echo "Error: Failed to pull image $IMAGE_TAG"
-            exit 1
-          }
+          echo "Using image tag: $IMAGE_TAG"
+          
+          # Wait a moment for registry to be ready, then pull with retries
+          echo "Waiting for registry to be ready..."
+          sleep 5
+          
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempting to pull image (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+            if docker pull "$IMAGE_TAG"; then
+              echo "✅ Successfully pulled image"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Pull failed, waiting 10 seconds before retry..."
+                sleep 10
+              else
+                echo "❌ Error: Failed to pull image $IMAGE_TAG after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
           
           echo "Saving image: $IMAGE_TAG"
           docker save "$IMAGE_TAG" | gzip > profile-service-image.tar.gz
           
           # Verify the file was created and has content
-          if [ ! -f profile-service-image.tar.gz ] || [ ! -s profile-service-image.tar.gz ]; then
-            echo "Error: Failed to create image archive or archive is empty"
+          if [ ! -f profile-service-image.tar.gz ]; then
+            echo "❌ Error: Failed to create image archive"
+            exit 1
+          fi
+          
+          if [ ! -s profile-service-image.tar.gz ]; then
+            echo "❌ Error: Image archive is empty"
             exit 1
           fi
           
           ls -lh profile-service-image.tar.gz
-          echo "Image archive created successfully"
+          echo "✅ Image archive created successfully"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
@@ -194,17 +217,26 @@ jobs:
             
             docker load < profile-service-image.tar.gz
             
-            # Find the loaded image (it might have various names from the registry)
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "(lianel-profile-service|hosting-base|nimalan74|ghcr.io)" | grep -v "<none>" | head -1)
-            if [ -z "$LOADED_IMAGE" ]; then
-              # Fallback: get the most recently loaded image
-              LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -2 | tail -1)
+            # Find the loaded image - check all images and find the one that was just loaded
+            # Get images sorted by creation time (newest first)
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" --filter "dangling=false" | grep -v "REPOSITORY" | head -1)
+            
+            if [ -z "$LOADED_IMAGE" ] || [ "$LOADED_IMAGE" = "REPOSITORY:TAG" ]; then
+              echo "Warning: Could not automatically detect loaded image, trying alternative method..."
+              # Alternative: check for images with our expected patterns
+              LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "(lianel-profile-service|hosting-base|nimalan74|ghcr.io)" | grep -v "<none>" | head -1)
             fi
+            
             if [ -n "$LOADED_IMAGE" ] && [ "$LOADED_IMAGE" != "REPOSITORY:TAG" ]; then
-              echo "Tagging image: $LOADED_IMAGE -> lianel-profile-service:latest"
-              docker tag "$LOADED_IMAGE" lianel-profile-service:latest || true
+              echo "Found loaded image: $LOADED_IMAGE"
+              echo "Tagging as: lianel-profile-service:latest"
+              docker tag "$LOADED_IMAGE" lianel-profile-service:latest
+              echo "✅ Image tagged successfully"
             else
-              echo "Warning: Could not find loaded image to tag"
+              echo "❌ Error: Could not find loaded image to tag"
+              echo "Available images:"
+              docker images --format "{{.Repository}}:{{.Tag}}"
+              exit 1
             fi
             
             echo "=== Deploying profile service container ==="

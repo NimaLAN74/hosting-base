@@ -7,18 +7,19 @@ WORKDIR /app
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
 # Copy Cargo files
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock* ./
 
 # Create a dummy source file to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies (this layer will be cached)
+# Note: Building without target for dependency caching, final build will use default target
 RUN cargo build --release && rm -rf src
 
 # Copy source code
 COPY src ./src
 
-# Build the application
+# Build the application (Docker buildx will handle platform targeting)
 RUN touch src/main.rs && cargo build --release
 
 # Runtime stage
