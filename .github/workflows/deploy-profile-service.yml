@@ -100,29 +100,35 @@ jobs:
 
       - name: Save Docker image as tar.gz
         run: |
-          # Extract image tag - prefer latest, otherwise use first tag
+          # Extract image tag - use the same method as frontend workflow
           IMAGE_TAGS="${{ steps.meta.outputs.tags }}"
           echo "Available tags: $IMAGE_TAGS"
           
-          # Get the first tag (should be latest for default branch)
-          IMAGE_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
+          # Get the latest tag (should be first for default branch)
+          LATEST_TAG=$(echo "$IMAGE_TAGS" | tr ' ' '\n' | grep ':latest' | head -1)
           
-          if [ -z "$IMAGE_TAG" ]; then
-            echo "Error: Could not extract image tag from: $IMAGE_TAGS"
+          if [ -z "$LATEST_TAG" ]; then
+            # Fallback to first tag if no latest found
+            LATEST_TAG=$(echo "$IMAGE_TAGS" | awk '{print $1}')
+          fi
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "❌ Error: Could not extract image tag from: $IMAGE_TAGS"
             exit 1
           fi
           
-          echo "Using image tag: $IMAGE_TAG"
+          echo "Using image tag: $LATEST_TAG"
           
-          # Wait a moment for registry to be ready, then pull with retries
+          # Wait a moment for registry to be ready
           echo "Waiting for registry to be ready..."
           sleep 5
           
+          # Pull the image with retries
           MAX_RETRIES=3
           RETRY_COUNT=0
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             echo "Attempting to pull image (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
-            if docker pull "$IMAGE_TAG"; then
+            if docker pull "$LATEST_TAG"; then
               echo "✅ Successfully pulled image"
               break
             else
@@ -131,14 +137,15 @@ jobs:
                 echo "Pull failed, waiting 10 seconds before retry..."
                 sleep 10
               else
-                echo "❌ Error: Failed to pull image $IMAGE_TAG after $MAX_RETRIES attempts"
+                echo "❌ Error: Failed to pull image $LATEST_TAG after $MAX_RETRIES attempts"
+                echo "Available tags were: $IMAGE_TAGS"
                 exit 1
               fi
             fi
           done
           
-          echo "Saving image: $IMAGE_TAG"
-          docker save "$IMAGE_TAG" | gzip > profile-service-image.tar.gz
+          echo "Saving image: $LATEST_TAG"
+          docker save "$LATEST_TAG" | gzip > profile-service-image.tar.gz
           
           # Verify the file was created and has content
           if [ ! -f profile-service-image.tar.gz ]; then
@@ -152,7 +159,7 @@ jobs:
           fi
           
           ls -lh profile-service-image.tar.gz
-          echo "✅ Image archive created successfully"
+          echo "✅ Image archive created successfully ($(du -h profile-service-image.tar.gz | cut -f1))"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
