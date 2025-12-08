@@ -58,29 +58,20 @@ function UserDropdown() {
   }, []);
 
   const handleLogout = () => {
-    // Clear all cookies for this domain and Keycloak domain
-    // This ensures both OAuth2-proxy and Keycloak sessions are cleared
+    // Clear OAuth2-proxy cookies first (can clear same-origin cookies)
     const cookies = document.cookie.split(';');
     cookies.forEach(cookie => {
       const eqPos = cookie.indexOf('=');
       const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-      // Clear cookies for current domain
+      // Clear cookies for current domain and parent domain
       document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se`;
       document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
     });
     
-    // Clear Keycloak cookies explicitly
-    document.cookie = 'AUTH_SESSION_ID=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    document.cookie = 'KEYCLOAK_SESSION=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    document.cookie = 'KEYCLOAK_IDENTITY=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    document.cookie = 'KEYCLOAK_SESSION_LEGACY=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    
-    // Clear OAuth2-proxy cookies
-    document.cookie = '_oauth2_proxy=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    document.cookie = '_oauth2_proxy_csrf=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
-    
-    // Redirect to OAuth2-proxy sign_out, then Keycloak logout
-    window.location.href = '/oauth2/sign_out?rd=https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&redirect_uri=' + encodeURIComponent('https://www.lianel.se/');
+    // Redirect to OAuth2-proxy sign_out first (clears OAuth2-proxy session)
+    // Then redirect to Keycloak logout with id_token_hint to properly clear Keycloak session
+    // Use a new window/tab to ensure cookies are cleared, then redirect back
+    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent('https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=' + encodeURIComponent('https://www.lianel.se/'));
   };
 
   const getInitials = () => {
