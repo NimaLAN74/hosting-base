@@ -211,14 +211,16 @@ OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
 - **Note**: Browser cookies may persist - users may need to clear cookies or use incognito mode for full logout test
 
 **MFA Configuration**:
-- Multi-Factor Authentication is configured as "Conditional 2FA" in Browser flow
-- OTP Form is set to "ALTERNATIVE" (optional) - only prompts if user has OTP configured
-- **MFA will prompt during login for users who have OTP configured in their Keycloak account**
-- Users can configure OTP via:
-  - Keycloak account console (https://auth.lianel.se/realms/lianel/account)
-  - Admin-initiated required actions (`CONFIGURE_TOTP`)
-- **Current Status**: testuser does NOT have OTP configured, so MFA will not prompt for this user
-- To test MFA: Configure OTP for a user, then logout and login - MFA prompt should appear after password entry
+- Multi-Factor Authentication is **REQUIRED** for all users in Browser flow
+- "Browser - Conditional 2FA" subflow is set to **REQUIRED** (mandatory for all logins)
+- OTP Form is set to **REQUIRED** (mandatory step in authentication flow)
+- **MFA will ALWAYS prompt during login - users MUST have OTP configured to log in**
+- Users must configure OTP before they can successfully authenticate:
+  - Via Keycloak account console (https://auth.lianel.se/realms/lianel/account) - requires initial login
+  - Admin-initiated required actions (`CONFIGURE_TOTP`) - recommended for new users
+- **New users**: Admin should add `CONFIGURE_TOTP` as a required action before first login
+- **Existing users**: Must configure OTP via account console or admin must add required action
+- **Note**: Users without OTP configured will NOT be able to log in until OTP is configured
 
 ### Grafana Auth Proxy
 
