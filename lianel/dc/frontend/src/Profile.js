@@ -160,27 +160,18 @@ function Profile() {
   };
 
   const handleLogout = () => {
-    // Clear Keycloak cookies manually (they're set for auth.lianel.se domain)
-    // We can't access HttpOnly cookies from JavaScript, but we can try to clear what we can
-    // Then redirect to OAuth2-proxy logout, which will clear OAuth2-proxy cookies
-    // Finally redirect to Keycloak logout endpoint
+    // RP-Initiated Logout flow:
+    // 1. Clear OAuth2-proxy session
+    // 2. Redirect to Keycloak logout with redirect_uri
+    // 3. Keycloak shows confirmation page, user clicks Logout
+    // 4. Keycloak clears session and should redirect back to redirect_uri
+    // Note: Keycloak may not redirect automatically - user may need to manually navigate back
     
-    // Try to clear any accessible cookies
-    document.cookie.split(';').forEach(cookie => {
-      const eqPos = cookie.indexOf('=');
-      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-      // Clear for current domain
-      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
-      // Clear for parent domain
-      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se`;
-    });
-    
-    // Redirect to OAuth2-proxy logout, then to Keycloak logout
-    // Using legacy redirect_uri parameter with legacy-logout-redirect-uri enabled
     const keycloakLogoutUrl = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout' +
       '?client_id=oauth2-proxy' +
       '&redirect_uri=' + encodeURIComponent('https://www.lianel.se');
     
+    // Clear OAuth2-proxy session first, then redirect to Keycloak logout
     window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent(keycloakLogoutUrl);
   };
 
