@@ -55,7 +55,7 @@ services:
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_USER_ID_CLAIM: "preferred_username"
       OAUTH2_PROXY_OIDC_GROUPS_CLAIM: "groups"
-      OAUTH2_PROXY_BACKEND_LOGOUT_URL: "https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=https://www.lianel.se/"
+      OAUTH2_PROXY_BACKEND_LOGOUT_URL: "https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?id_token_hint={id_token}&client_id=oauth2-proxy&post_logout_redirect_uri=https://www.lianel.se/"
     expose:
       - "4180"
     depends_on:
