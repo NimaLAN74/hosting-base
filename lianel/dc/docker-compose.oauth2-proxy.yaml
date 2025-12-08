@@ -14,7 +14,7 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
-    command: start
+    command: start --spi-login-protocol-openid-connect-legacy-logout-redirect-uri=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:

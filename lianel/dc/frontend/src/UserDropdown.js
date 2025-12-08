@@ -58,16 +58,28 @@ function UserDropdown() {
   }, []);
 
   const handleLogout = () => {
-    // RP-Initiated Logout: Redirect to Keycloak logout endpoint without post_logout_redirect_uri
-    // Keycloak rejects post_logout_redirect_uri even when configured, so we'll handle redirect manually
-    // First clear OAuth2-proxy session, then redirect to Keycloak logout
-    // After Keycloak logout, user will be on Keycloak page - we'll need to manually redirect
-    const keycloakLogoutUrl = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout' +
-      '?client_id=oauth2-proxy';
+    // Clear Keycloak cookies manually (they're set for auth.lianel.se domain)
+    // We can't access HttpOnly cookies from JavaScript, but we can try to clear what we can
+    // Then redirect to OAuth2-proxy logout, which will clear OAuth2-proxy cookies
+    // Finally redirect to Keycloak logout endpoint
     
-    // Clear OAuth2-proxy session first, then redirect to Keycloak logout
-    // After Keycloak logout completes, manually redirect to main site
-    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent(keycloakLogoutUrl + '&redirect_uri=' + encodeURIComponent('https://www.lianel.se'));
+    // Try to clear any accessible cookies
+    document.cookie.split(';').forEach(cookie => {
+      const eqPos = cookie.indexOf('=');
+      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+      // Clear for current domain
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+      // Clear for parent domain
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se`;
+    });
+    
+    // Redirect to OAuth2-proxy logout, then to Keycloak logout
+    // Using legacy redirect_uri parameter with legacy-logout-redirect-uri enabled
+    const keycloakLogoutUrl = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout' +
+      '?client_id=oauth2-proxy' +
+      '&redirect_uri=' + encodeURIComponent('https://www.lianel.se');
+    
+    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent(keycloakLogoutUrl);
   };
 
   const getInitials = () => {
