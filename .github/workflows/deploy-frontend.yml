@@ -147,6 +147,10 @@ jobs:
             fi
             
             echo "=== Deploying frontend container ==="
+            # Stop and remove existing container if it exists (use docker directly to avoid compose file issues)
+            docker stop lianel-frontend 2>/dev/null || true
+            docker rm lianel-frontend 2>/dev/null || true
+            
             # Deploy using docker compose (v2) - use frontend compose file
             docker compose -f docker-compose.frontend.yaml up -d frontend
             
