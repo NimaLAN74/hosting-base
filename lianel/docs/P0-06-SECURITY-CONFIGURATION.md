@@ -211,13 +211,20 @@ OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
 - **Note**: Browser cookies may persist - users may need to clear cookies or use incognito mode for full logout test
 
 **MFA Configuration**:
-- Multi-Factor Authentication is configured as "Browser - Conditional 2FA" set to **CONDITIONAL** in Browser flow
-- OTP Form is set to **REQUIRED** - prompts for OTP when Conditional 2FA executes
-- **Configure OTP is set as a default required action** - all users must configure OTP on first login
-- **MFA will prompt during login for users WITH OTP configured**
-- **Users WITHOUT OTP will be prompted to configure it before they can complete login**
-- **Current Status**: All existing users have CONFIGURE_TOTP required action set
-- **Note**: Conditional 2FA must be CONDITIONAL (not REQUIRED) to prevent AuthenticationFlowException when users don't have OTP configured yet
+- **Browser - Conditional 2FA**: Set to **CONDITIONAL** in Browser flow
+  - Prevents AuthenticationFlowException for users without OTP configured
+  - Only executes when user has OTP configured (conditional logic)
+- **OTP Form**: Set to **REQUIRED** within Conditional 2FA subflow
+  - When Conditional 2FA executes, OTP Form is mandatory
+- **Configure OTP**: Set as **default required action** for all users
+  - New users must configure OTP on first login
+  - Existing users have CONFIGURE_TOTP required action set
+- **How it works**:
+  1. User logs in with username/password
+  2. If user has OTP configured → Conditional 2FA executes → OTP Form prompts for MFA code
+  3. If user doesn't have OTP → Configure OTP required action → User must configure OTP before login completes
+  4. After OTP is configured → Next login will prompt for MFA
+- **Result**: MFA is enforced for all users (either they have it and use it, or they must configure it)
 - Users must configure OTP before they can successfully authenticate:
   - Via Keycloak account console (https://auth.lianel.se/realms/lianel/account) - requires initial login
   - Admin-initiated required actions (`CONFIGURE_TOTP`) - recommended for new users
