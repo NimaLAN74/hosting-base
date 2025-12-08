@@ -58,10 +58,10 @@ function UserDropdown() {
   }, []);
 
   const handleLogout = () => {
-    // Redirect to Keycloak logout with post_logout_redirect_uri
-    // This will clear Keycloak session and redirect to OAuth2-proxy sign_out
-    // OAuth2-proxy will then clear its cookies
-    window.location.href = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?post_logout_redirect_uri=' + encodeURIComponent('https://www.lianel.se/oauth2/sign_out');
+    // Use OAuth2-proxy sign_out endpoint
+    // OAuth2-proxy will call Keycloak backend logout URL to clear Keycloak session
+    // Then OAuth2-proxy clears its own cookies
+    window.location.href = '/oauth2/sign_out';
   };
 
   const getInitials = () => {
