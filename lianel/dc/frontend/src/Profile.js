@@ -160,20 +160,9 @@ function Profile() {
   };
 
   const handleLogout = () => {
-    // Clear OAuth2-proxy cookies first (can clear same-origin cookies)
-    const cookies = document.cookie.split(';');
-    cookies.forEach(cookie => {
-      const eqPos = cookie.indexOf('=');
-      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-      // Clear cookies for current domain and parent domain
-      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se`;
-      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
-    });
-    
-    // Redirect to OAuth2-proxy sign_out first (clears OAuth2-proxy session)
-    // Then redirect to Keycloak logout with id_token_hint to properly clear Keycloak session
-    // Use a new window/tab to ensure cookies are cleared, then redirect back
-    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent('https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=' + encodeURIComponent('https://www.lianel.se/'));
+    // Use OAuth2-proxy sign_out endpoint
+    // OAuth2-proxy will handle clearing its own session and calling Keycloak backend logout
+    window.location.href = '/oauth2/sign_out';
   };
 
   const getInitials = () => {
