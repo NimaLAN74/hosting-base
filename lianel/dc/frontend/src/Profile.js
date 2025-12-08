@@ -160,8 +160,28 @@ function Profile() {
   };
 
   const handleLogout = () => {
-    // Clear OAuth2-proxy session first
-    // Then redirect to Keycloak logout with client_id to properly clear SSO session
+    // Clear all cookies for this domain and Keycloak domain
+    // This ensures both OAuth2-proxy and Keycloak sessions are cleared
+    const cookies = document.cookie.split(';');
+    cookies.forEach(cookie => {
+      const eqPos = cookie.indexOf('=');
+      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+      // Clear cookies for current domain
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se`;
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+    });
+    
+    // Clear Keycloak cookies explicitly
+    document.cookie = 'AUTH_SESSION_ID=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    document.cookie = 'KEYCLOAK_SESSION=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    document.cookie = 'KEYCLOAK_IDENTITY=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    document.cookie = 'KEYCLOAK_SESSION_LEGACY=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    
+    // Clear OAuth2-proxy cookies
+    document.cookie = '_oauth2_proxy=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    document.cookie = '_oauth2_proxy_csrf=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=.lianel.se';
+    
+    // Redirect to OAuth2-proxy sign_out, then Keycloak logout
     window.location.href = '/oauth2/sign_out?rd=https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&redirect_uri=' + encodeURIComponent('https://www.lianel.se/');
   };
 
