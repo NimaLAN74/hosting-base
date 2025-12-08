@@ -58,14 +58,23 @@ function UserDropdown() {
   }, []);
 
   const handleLogout = () => {
-    // Complete logout flow:
-    // 1. Clear OAuth2-proxy session via sign_out endpoint
-    // 2. This will redirect to Keycloak logout
-    // 3. Keycloak will clear its session and redirect back
-    // 4. OAuth2-proxy will see no session and redirect to login
+    // Front-channel logout flow:
+    // 1. Clear OAuth2-proxy session first
+    // 2. Redirect to Keycloak logout endpoint
+    // 3. Keycloak clears session and redirects back
+    // 4. User is logged out from both systems
     
-    // Use OAuth2-proxy sign_out endpoint - it handles the full logout flow
-    window.location.href = '/oauth2/sign_out';
+    // First clear OAuth2-proxy session
+    fetch('/oauth2/sign_out', { method: 'GET', credentials: 'include' })
+      .then(() => {
+        // Then redirect to Keycloak logout
+        // Using post_logout_redirect_uri (not redirect_uri) for proper validation
+        window.location.href = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=' + encodeURIComponent('https://www.lianel.se');
+      })
+      .catch(() => {
+        // Fallback: direct redirect to Keycloak logout
+        window.location.href = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=' + encodeURIComponent('https://www.lianel.se');
+      });
   };
 
   const getInitials = () => {
