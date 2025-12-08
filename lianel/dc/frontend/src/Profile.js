@@ -160,10 +160,9 @@ function Profile() {
   };
 
   const handleLogout = () => {
-    // First clear OAuth2-proxy session, then redirect to Keycloak logout
-    // This ensures both OAuth2-proxy and Keycloak sessions are cleared
-    // Keycloak logout will clear the SSO session, forcing re-authentication
-    window.location.href = '/oauth2/sign_out?rd=https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?redirect_uri=' + encodeURIComponent('https://www.lianel.se/');
+    // Clear OAuth2-proxy session first
+    // Then redirect to Keycloak logout with client_id to properly clear SSO session
+    window.location.href = '/oauth2/sign_out?rd=https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy&redirect_uri=' + encodeURIComponent('https://www.lianel.se/');
   };
 
   const getInitials = () => {
