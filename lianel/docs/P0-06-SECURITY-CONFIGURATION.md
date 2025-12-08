@@ -202,13 +202,15 @@ OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
 **SSO Behavior**:
 - Users stay logged in across all services (www.lianel.se, monitoring.lianel.se, airflow.lianel.se)
 - Single Keycloak session shared across all applications
-- **Logout Process**:
-  1. Frontend calls `/oauth2/sign_out` which clears OAuth2-proxy cookies
-  2. Redirects to Keycloak logout endpoint: `https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout`
-  3. User must click "Logout" button on Keycloak confirmation page
-  4. Keycloak clears SSO session and redirects back to main site
-  5. After logout, login will prompt for credentials (and MFA if OTP configured)
-- **Note**: Browser cookies may persist - users may need to clear cookies or use incognito mode for full logout test
+- **Logout Process** (Back-Channel Logout):
+  1. Frontend calls `/oauth2/sign_out` endpoint
+  2. OAuth2-proxy clears its own session cookie
+  3. OAuth2-proxy calls `BACKEND_LOGOUT_URL` (Keycloak logout endpoint) - **back-channel logout**
+  4. Keycloak clears its session server-side
+  5. OAuth2-proxy redirects to `post_logout_redirect_uri` (https://www.lianel.se)
+  6. User is logged out from both OAuth2-proxy and Keycloak
+  7. After logout, login will prompt for credentials (and MFA if OTP configured)
+- **No manual cookie clearing needed** - OAuth2-proxy handles everything via back-channel logout
 
 **MFA Configuration**:
 - **Browser - Conditional 2FA**: Set to **CONDITIONAL** in Browser flow
