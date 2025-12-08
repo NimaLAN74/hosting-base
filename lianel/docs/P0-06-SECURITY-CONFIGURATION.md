@@ -186,7 +186,11 @@ OAUTH2_PROXY_COOKIE_SAMESITE: lax
 OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
 OAUTH2_PROXY_COOKIE_EXPIRE: 4h
 OAUTH2_PROXY_COOKIE_REFRESH: 1h
+OAUTH2_PROXY_USER_ID_CLAIM: preferred_username
+OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
 ```
+
+**Note**: `OAUTH2_PROXY_BACKEND_LOGOUT_URL` is NOT configured. This ensures proper SSO behavior where users stay logged in across sessions. Logout clears OAuth2-proxy cookies but maintains Keycloak SSO session for seamless access across services.
 
 **Session Security**:
 - Cookies are HttpOnly (not accessible via JavaScript)
@@ -194,6 +198,18 @@ OAUTH2_PROXY_COOKIE_REFRESH: 1h
 - SameSite=lax (CSRF protection)
 - Domain-wide cookies (.lianel.se)
 - 4-hour expiration with 1-hour refresh
+
+**SSO Behavior**:
+- Users stay logged in across all services (www.lianel.se, monitoring.lianel.se, airflow.lianel.se)
+- Single Keycloak session shared across all applications
+- Logout clears OAuth2-proxy cookies but maintains Keycloak SSO session
+- Users must explicitly logout from Keycloak to fully terminate SSO session
+
+**MFA Configuration**:
+- Multi-Factor Authentication is configured as "Conditional 2FA"
+- OTP Form is set to "ALTERNATIVE" (optional)
+- MFA will prompt users who have OTP configured in their Keycloak account
+- Users can configure OTP via Keycloak account console or admin-initiated required actions
 
 ### Grafana Auth Proxy
 
