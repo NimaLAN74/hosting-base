@@ -56,12 +56,16 @@ curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/lianel/clients/${CLIENT_ID}" \
       \"https://lianel.se/oauth2/callback\",
       \"https://www.lianel.se/oauth2/callback\",
       \"https://auth.lianel.se/oauth2/callback\",
+      \"https://airflow.lianel.se/oauth2/callback\",
+      \"https://monitoring.lianel.se/oauth2/callback\",
       \"https://*.lianel.se/*\"
     ],
     \"webOrigins\": [
       \"https://lianel.se\",
       \"https://www.lianel.se\",
       \"https://auth.lianel.se\",
+      \"https://airflow.lianel.se\",
+      \"https://monitoring.lianel.se\",
       \"https://*.lianel.se\"
     ]
   }" > /dev/null
