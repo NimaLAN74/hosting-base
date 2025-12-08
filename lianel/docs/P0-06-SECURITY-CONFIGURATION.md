@@ -202,14 +202,23 @@ OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
 **SSO Behavior**:
 - Users stay logged in across all services (www.lianel.se, monitoring.lianel.se, airflow.lianel.se)
 - Single Keycloak session shared across all applications
-- Logout clears OAuth2-proxy cookies but maintains Keycloak SSO session
-- Users must explicitly logout from Keycloak to fully terminate SSO session
+- **Logout Process**:
+  1. Frontend calls `/oauth2/sign_out` which clears OAuth2-proxy cookies
+  2. Redirects to Keycloak logout endpoint: `https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout`
+  3. User must click "Logout" button on Keycloak confirmation page
+  4. Keycloak clears SSO session and redirects back to main site
+  5. After logout, login will prompt for credentials (and MFA if OTP configured)
+- **Note**: Browser cookies may persist - users may need to clear cookies or use incognito mode for full logout test
 
 **MFA Configuration**:
-- Multi-Factor Authentication is configured as "Conditional 2FA"
-- OTP Form is set to "ALTERNATIVE" (optional)
-- MFA will prompt users who have OTP configured in their Keycloak account
-- Users can configure OTP via Keycloak account console or admin-initiated required actions
+- Multi-Factor Authentication is configured as "Conditional 2FA" in Browser flow
+- OTP Form is set to "ALTERNATIVE" (optional) - only prompts if user has OTP configured
+- **MFA will prompt during login for users who have OTP configured in their Keycloak account**
+- Users can configure OTP via:
+  - Keycloak account console (https://auth.lianel.se/realms/lianel/account)
+  - Admin-initiated required actions (`CONFIGURE_TOTP`)
+- **Current Status**: testuser does NOT have OTP configured, so MFA will not prompt for this user
+- To test MFA: Configure OTP for a user, then logout and login - MFA prompt should appear after password entry
 
 ### Grafana Auth Proxy
 
