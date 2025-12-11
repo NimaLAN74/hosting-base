@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import UserDropdown from './UserDropdown';
+import { useKeycloak } from './KeycloakProvider';
 import './App.css';
 import './Profile.css';
 
 function Profile() {
+  const { authenticated, authenticatedFetch, userInfo: keycloakUserInfo, login } = useKeycloak();
   const [userInfo, setUserInfo] = useState({
     id: '',
     username: '',
@@ -34,17 +36,21 @@ function Profile() {
     confirmPassword: ''
   });
 
+  // Redirect to login if not authenticated
   useEffect(() => {
+    if (!authenticated) {
+      login();
+      return;
+    }
     fetchUserInfo();
-  }, []);
+  }, [authenticated, login]);
 
   const fetchUserInfo = async () => {
     try {
       setLoading(true);
       setError('');
-      const response = await fetch('/api/profile', {
-        method: 'GET',
-        credentials: 'include'
+      const response = await authenticatedFetch('/api/profile', {
+        method: 'GET'
       });
       
       if (response.ok) {
@@ -88,12 +94,8 @@ function Profile() {
       setError('');
       setSuccess('');
       
-      const response = await fetch('/api/profile', {
+      const response = await authenticatedFetch('/api/profile', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
         body: JSON.stringify(editForm)
       });
 
@@ -128,12 +130,8 @@ function Profile() {
       setError('');
       setSuccess('');
       
-      const response = await fetch('/api/profile/change-password', {
+      const response = await authenticatedFetch('/api/profile/change-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
         body: JSON.stringify({
           currentPassword: passwordForm.currentPassword,
           newPassword: passwordForm.newPassword

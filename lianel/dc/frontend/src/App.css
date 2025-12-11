@@ -14,7 +14,7 @@
 
 .App {
   min-height: 100vh;
-  background: url('./lw-background.png') center center/cover no-repeat;
+  background: url('../public/lw-background.png') center center/cover no-repeat;
   background-attachment: fixed;
   position: relative;
   display: flex;

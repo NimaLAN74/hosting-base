@@ -98,3 +98,35 @@ Once automation script is created, it should:
 5. Deploy using docker-compose
 6. Verify deployment
 
+## Keycloak Logout Parameter Fix (December 11, 2025)
+
+**Issue**: Logout endpoint was returning HTTP 400 with `invalid_redirect_uri` error
+
+**Root Cause**: The keycloak-js library constructs logout requests with parameter `post_logout_redirect_uri`, but Keycloak 26.4.6's logout endpoint expects `redirect_uri`. This is a version incompatibility.
+
+**Solution**: Modified the logout function in `frontend/src/keycloak.js` to manually construct the logout URL with the correct parameter name:
+
+```javascript
+// Instead of: keycloak.logout({redirectUri: redirectUri})
+// Use this to bypass the library's parameter naming:
+
+const logoutUrl = `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
+window.location.href = logoutUrl;
+```
+
+**Testing Verification**:
+```bash
+# This returns 400 (wrong parameter)
+curl -sk "https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?post_logout_redirect_uri=https://lianel.se/"
+
+# This returns 200 (correct parameter)
+curl -sk "https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?redirect_uri=https://lianel.se/"
+```
+
+**Deployment Status**: ✅ Fixed logout function deployed in main.090662e1.js (December 11, 2025)
+
+**Files Modified**:
+- `frontend/src/keycloak.js` - Logout function (lines 113-137)
+
+**References**: See `AUTHENTICATION-KEYCLOAK-GUIDE.md` for complete Keycloak 26.4.6 setup and configuration guide.
+

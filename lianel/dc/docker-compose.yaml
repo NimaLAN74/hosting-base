@@ -1,3 +1,8 @@
+networks:
+  lianel-network:
+    external: true
+    name: lianel-network
+
 services:
   frontend:
     image: lianel-frontend:latest
@@ -42,7 +47,3 @@ services:
     restart: unless-stopped
     networks:
       - lianel-network
-
-networks:
-  lianel-network:
-    external: true

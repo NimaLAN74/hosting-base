@@ -1,48 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useKeycloak } from './KeycloakProvider';
 import './UserDropdown.css';
 
 function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
-  const [userInfo, setUserInfo] = useState(null);
   const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    // Get user info from headers set by OAuth2-proxy
-    const getUserInfo = async () => {
-      try {
-        // Fetch user info from profile service API
-        const response = await fetch('/api/profile', {
-          method: 'GET',
-          credentials: 'include'
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setUserInfo({
-            username: data.username || 'User',
-            email: data.email || '',
-            name: data.name || data.firstName || data.username || 'User'
-          });
-        } else {
-          // Fallback: use defaults
-          setUserInfo({
-            username: 'User',
-            email: '',
-            name: 'User'
-          });
-        }
-      } catch (error) {
-        // Fallback user info
-        setUserInfo({
-          username: 'User',
-          email: '',
-          name: 'User'
-        });
-      }
-    };
-
-    getUserInfo();
-  }, []);
+  const { userInfo, logout: keycloakLogout } = useKeycloak();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -58,24 +21,8 @@ function UserDropdown() {
   }, []);
 
   const handleLogout = () => {
-    // Front-channel logout flow:
-    // 1. Clear OAuth2-proxy session first
-    // 2. Redirect to Keycloak logout endpoint WITHOUT redirect_uri
-    // 3. Keycloak shows logout confirmation page
-    // 4. User clicks logout, Keycloak clears session
-    // 5. User manually navigates back or Keycloak redirects
-    
-    // Clear OAuth2-proxy session
-    fetch('/oauth2/sign_out', { method: 'GET', credentials: 'include' })
-      .then(() => {
-        // Redirect to Keycloak logout WITHOUT post_logout_redirect_uri to avoid validation error
-        // Keycloak will show logout confirmation page
-        window.location.href = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy';
-      })
-      .catch(() => {
-        // Fallback: direct redirect
-        window.location.href = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy';
-      });
+    // Keycloak handles logout and redirects to post_logout_redirect_uri
+    keycloakLogout();
   };
 
   const getInitials = () => {

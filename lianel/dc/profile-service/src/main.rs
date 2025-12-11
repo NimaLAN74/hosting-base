@@ -7,11 +7,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
+use serde_json::Value;
+use base64::Engine;
 
 #[derive(Debug, Clone)]
 struct AppConfig {
@@ -19,6 +23,85 @@ struct AppConfig {
     keycloak_realm: String,
     keycloak_admin_user: String,
     keycloak_admin_password: String,
+}
+
+#[derive(Debug, Clone)]
+struct KeycloakValidator {
+    config: AppConfig,
+}
+
+impl KeycloakValidator {
+    fn new(config: AppConfig) -> Self {
+        Self { config }
+    }
+
+    // Validate token using Keycloak's introspection endpoint
+    async fn validate_token(&self, token: &str) -> Result<KeycloakTokenClaims, anyhow::Error> {
+        // First, try to decode the token to get claims (without signature verification)
+        // Then validate via introspection endpoint
+        let client = reqwest::Client::new();
+        
+        // Get admin token for introspection
+        let admin_token = get_admin_token(&self.config).await?;
+        
+        // Introspect token
+        let response = client
+            .post(format!(
+                "{}/realms/{}/protocol/openid-connect/token/introspect",
+                self.config.keycloak_url, self.config.keycloak_realm
+            ))
+            .form(&[
+                ("token", token),
+                ("client_id", "backend-api"),
+            ])
+            .header("Authorization", format!("Bearer {}", admin_token))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Token introspection failed"));
+        }
+
+        let introspect_result: Value = response.json().await?;
+        
+        if !introspect_result.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Err(anyhow::anyhow!("Token is not active"));
+        }
+
+        // Parse token to get claims (we trust introspection result)
+        // Decode without verification to get claims
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 {
+            return Err(anyhow::anyhow!("Invalid token format"));
+        }
+
+        let claims_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[1])?;
+        let claims: KeycloakTokenClaims = serde_json::from_slice(&claims_json)?;
+
+        Ok(claims)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct KeycloakTokenClaims {
+    sub: String,
+    preferred_username: Option<String>,
+    email: Option<String>,
+    given_name: Option<String>,
+    family_name: Option<String>,
+    name: Option<String>,
+    email_verified: Option<bool>,
+    exp: usize,
+    iat: Option<usize>,
+    iss: String,
+    aud: Option<String>,
+    realm_access: Option<RealmAccess>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RealmAccess {
+    roles: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -134,9 +217,52 @@ struct HealthResponse {
 )]
 struct ApiDoc;
 
-// Extract user info from headers
-fn extract_user_from_headers(headers: &HeaderMap) -> Result<(String, String, Option<String>), StatusCode> {
-    // Try to get username/preferred_username first, fallback to user ID
+// Extract and validate Keycloak token from Authorization header
+async fn validate_keycloak_token(
+    headers: &HeaderMap,
+    validator: &KeycloakValidator,
+) -> Result<KeycloakTokenClaims, StatusCode> {
+    // Get Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .or_else(|| headers.get("Authorization"))
+        .and_then(|h| h.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Extract Bearer token
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .or_else(|| auth_header.strip_prefix("bearer "))
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Validate token via introspection
+    validator.validate_token(token)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)
+}
+
+// Extract user info from Keycloak token (backward compatibility with header-based auth)
+async fn extract_user_from_token_or_headers(
+    headers: &HeaderMap,
+    validator: Option<&KeycloakValidator>,
+) -> Result<(String, String, Option<String>), StatusCode> {
+    // Try Keycloak token first
+    if let Some(v) = validator {
+        match validate_keycloak_token(headers, v).await {
+            Ok(claims) => {
+                let username = claims.preferred_username
+                    .unwrap_or_else(|| claims.sub.clone());
+                let email = claims.email
+                    .unwrap_or_else(|| format!("{}@unknown", username));
+                return Ok((username, email, Some(claims.sub)));
+            }
+            Err(_) => {
+                // Fall back to headers if token validation fails
+            }
+        }
+    }
+
+    // Fallback to header-based extraction (for backward compatibility)
     let username = headers
         .get("x-auth-request-preferred-username")
         .or_else(|| headers.get("x-preferred-username"))
@@ -151,7 +277,6 @@ fn extract_user_from_headers(headers: &HeaderMap) -> Result<(String, String, Opt
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Get user ID if available (might be UUID)
     let user_id = headers
         .get("x-auth-request-user-id")
         .or_else(|| headers.get("x-user-id"))
@@ -296,9 +421,10 @@ async fn is_admin(
 )]
 async fn get_profile(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
-    let (username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator))
+        .await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -421,7 +547,7 @@ async fn get_profile(
 )]
 async fn update_profile(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
     if payload.firstName.is_none() && payload.lastName.is_none() && payload.email.is_none() {
@@ -434,7 +560,7 @@ async fn update_profile(
         ));
     }
 
-    let (username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -588,7 +714,7 @@ async fn update_profile(
 )]
 async fn change_password(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     if payload.new_password.len() < 8 {
@@ -601,7 +727,7 @@ async fn change_password(
         ));
     }
 
-    let (username, email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (username, email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     // Get actual username for password verification (not UUID)
@@ -738,9 +864,9 @@ async fn change_password(
 )]
 async fn check_admin(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (_username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -798,9 +924,9 @@ async fn check_admin(
 )]
 async fn list_users(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<UserListResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (_username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -935,9 +1061,9 @@ async fn list_users(
 async fn get_user_by_id(
     headers: HeaderMap,
     Path(user_id): Path<String>,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
-    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+    let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -1064,7 +1190,7 @@ async fn get_user_by_id(
 )]
 async fn create_user(
     headers: HeaderMap,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
     if payload.password.len() < 8 {
@@ -1077,7 +1203,7 @@ async fn create_user(
         ));
     }
 
-    let (_username, _email, user_id_from_header) = extract_user_from_headers(&headers)
+    let (_username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -1267,10 +1393,10 @@ async fn create_user(
 async fn update_user(
     headers: HeaderMap,
     Path(user_id): Path<String>,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
-    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+    let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -1431,9 +1557,9 @@ async fn update_user(
 async fn delete_user(
     headers: HeaderMap,
     Path(user_id): Path<String>,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+    let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -1543,7 +1669,7 @@ async fn delete_user(
 async fn admin_change_password(
     headers: HeaderMap,
     Path(user_id): Path<String>,
-    axum::extract::State(config): axum::extract::State<AppConfig>,
+    axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<AdminChangePasswordRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     if payload.new_password.len() < 8 {
@@ -1556,7 +1682,7 @@ async fn admin_change_password(
         ));
     }
 
-    let (_username, _email, current_user_id) = extract_user_from_headers(&headers)
+    let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
     let admin_token = get_admin_token(&config)
@@ -1683,6 +1809,9 @@ async fn main() {
     tracing::info!("Keycloak URL: {}", config.keycloak_url);
     tracing::info!("Keycloak Realm: {}", config.keycloak_realm);
 
+    // Initialize Keycloak validator
+    let validator = Arc::new(KeycloakValidator::new(config.clone()));
+
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .route("/api/profile", get(get_profile).put(update_profile))
@@ -1698,7 +1827,7 @@ async fn main() {
                 .layer(CorsLayer::permissive())
                 .into_inner(),
         )
-        .with_state(config);
+        .with_state((config, validator));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await

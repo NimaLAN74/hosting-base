@@ -48,22 +48,14 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
-      - GF_SERVER_ROOT_URL=https://www.lianel.se/monitoring
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_ROOT_URL=https://monitoring.lianel.se
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
       - GF_INSTALL_PLUGINS=
-      # Auth Proxy Configuration (OAuth2 Proxy handles authentication)
-      - GF_AUTH_PROXY_ENABLED=true
-      - GF_AUTH_PROXY_HEADER_NAME=X-Email
-      - GF_AUTH_PROXY_HEADER_PROPERTY=email
-      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      - GF_AUTH_PROXY_WHITELIST=172.18.0.0/16
-      - GF_AUTH_PROXY_HEADERS=Email:X-Email Name:X-User
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_USERS_AUTO_ASSIGN_ORG=true
-      - GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer
+      - GRAFANA_OAUTH_CLIENT_SECRET=${GRAFANA_OAUTH_CLIENT_SECRET}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini
     expose:
       - "3000"
     restart: unless-stopped
