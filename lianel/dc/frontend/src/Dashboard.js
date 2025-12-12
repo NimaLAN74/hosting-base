@@ -4,7 +4,7 @@ import UserDropdown from './UserDropdown';
 import './Dashboard.css';
 
 function Dashboard() {
-  const { keycloak } = useKeycloak();
+  const { keycloak, hasRole } = useKeycloak();
   const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
 
   const services = [
@@ -31,7 +31,15 @@ function Dashboard() {
       url: '#',
       status: 'active',
       gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
-    }
+    },
+    ...(hasRole && hasRole('admin') ? [{
+      name: 'Admin Console',
+      description: 'Manage users and access',
+      icon: '🛡️',
+      url: '/admin/users',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
+    }] : [])
   ];
 
   const recentActivity = [

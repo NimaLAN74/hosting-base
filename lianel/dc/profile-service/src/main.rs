@@ -10,12 +10,14 @@ use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower::ServiceBuilder;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer, AllowOrigin, AllowHeaders};
 use tower_http::trace::TraceLayer;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 use serde_json::Value;
 use base64::Engine;
+use axum::extract::Query;
+use http::HeaderValue;
 
 #[derive(Debug, Clone)]
 struct AppConfig {
@@ -155,6 +157,13 @@ struct AdminChangePasswordRequest {
 struct UserListResponse {
     users: Vec<UserProfile>,
     total: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListUsersQuery {
+    page: Option<usize>,
+    size: Option<usize>,
+    search: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -925,6 +934,7 @@ async fn check_admin(
 async fn list_users(
     headers: HeaderMap,
     axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
+    Query(params): Query<ListUsersQuery>,
 ) -> Result<Json<UserListResponse>, (StatusCode, Json<ErrorResponse>)> {
     let (_username, _email, user_id_from_header) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
@@ -971,12 +981,31 @@ async fn list_users(
     }
 
     let client = reqwest::Client::new();
-    let response = client
+
+    // Pagination and search mapping to Keycloak parameters
+    let page = params.page.unwrap_or(1).max(1);
+    let size = params.size.unwrap_or(20).clamp(1, 100);
+    let first = (page - 1) * size;
+
+    // Build query for users endpoint
+    let mut req = client
         .get(format!(
             "{}/admin/realms/{}/users",
             config.keycloak_url, config.keycloak_realm
         ))
-        .header("Authorization", format!("Bearer {}", admin_token))
+        .header("Authorization", format!("Bearer {}", admin_token));
+
+    // Apply pagination
+    req = req.query(&[("first", first.to_string()), ("max", size.to_string())]);
+
+    // Apply search if provided
+    if let Some(search) = params.search.as_ref() {
+        if !search.trim().is_empty() {
+            req = req.query(&[("search", search.trim())]);
+        }
+    }
+
+    let response = req
         .send()
         .await
         .map_err(|e| {
@@ -1037,10 +1066,29 @@ async fn list_users(
         })
         .collect();
 
-    Ok(Json(UserListResponse {
-        total: user_profiles.len(),
-        users: user_profiles,
-    }))
+    // Fetch total count using Keycloak count endpoint (with same filters)
+    let mut count_req = client
+        .get(format!(
+            "{}/admin/realms/{}/users/count",
+            config.keycloak_url, config.keycloak_realm
+        ))
+        .header("Authorization", format!("Bearer {}", admin_token));
+
+    if let Some(search) = params.search.as_ref() {
+        if !search.trim().is_empty() {
+            count_req = count_req.query(&[("search", search.trim())]);
+        }
+    }
+
+    let total = match count_req.send().await {
+        Ok(rsp) if rsp.status().is_success() => match rsp.json::<serde_json::Value>().await {
+            Ok(val) => val.as_u64().unwrap_or(user_profiles.len() as u64) as usize,
+            Err(_) => user_profiles.len(),
+        },
+        _ => user_profiles.len(),
+    };
+
+    Ok(Json(UserListResponse { total, users: user_profiles }))
 }
 
 /// Get user by ID (admin only)
@@ -1812,6 +1860,36 @@ async fn main() {
     // Initialize Keycloak validator
     let validator = Arc::new(KeycloakValidator::new(config.clone()));
 
+    // Build CORS from environment (tighten to production origins)
+    let allowed_origins_env = env::var("ALLOWED_ORIGINS").unwrap_or_else(|_| "https://lianel.se,https://www.lianel.se".to_string());
+    let origins: Vec<&str> = allowed_origins_env
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let allow_origin = if origins.is_empty() {
+        AllowOrigin::list(vec![HeaderValue::from_static("https://lianel.se")])
+    } else {
+        let mut vals: Vec<HeaderValue> = Vec::new();
+        for o in origins {
+            if let Ok(h) = HeaderValue::from_str(o) {
+                vals.push(h);
+            }
+        }
+        if vals.is_empty() {
+            AllowOrigin::list(vec![HeaderValue::from_static("https://lianel.se")])
+        } else {
+            AllowOrigin::list(vals)
+        }
+    };
+
+    let cors = CorsLayer::new()
+        .allow_origin(allow_origin)
+        .allow_methods([http::Method::GET, http::Method::POST, http::Method::PUT, http::Method::DELETE, http::Method::OPTIONS])
+        .allow_headers(AllowHeaders::mirror_request())
+        .allow_credentials(true);
+
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .route("/api/profile", get(get_profile).put(update_profile))
@@ -1824,7 +1902,7 @@ async fn main() {
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
-                .layer(CorsLayer::permissive())
+                .layer(cors)
                 .into_inner(),
         )
         .with_state((config, validator));
