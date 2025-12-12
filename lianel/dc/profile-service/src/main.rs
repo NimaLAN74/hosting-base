@@ -1,6 +1,6 @@
 use axum::{
     extract::Path,
-    http::{HeaderMap, StatusCode},
+    http::{self, HeaderMap, StatusCode},
     response::Json,
     routing::{delete, get, post, put},
     Router,
@@ -8,9 +8,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer, AllowOrigin, AllowHeaders};
+use tower_http::cors::{CorsLayer, AllowOrigin, AllowHeaders};
 use tower_http::trace::TraceLayer;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;

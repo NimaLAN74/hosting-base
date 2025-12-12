@@ -64,11 +64,11 @@ jobs:
 
       - name: Save Docker image as tar.gz
         run: |
-          # Use the same method as frontend workflow
-          IMAGE_TAG="${{ steps.meta.outputs.tags }}" 
-          LATEST_TAG=$(echo "$IMAGE_TAG" | tr ' ' '\n' | grep ':latest' | head -1)
-          docker pull "$LATEST_TAG"
-          docker save "$LATEST_TAG" | gzip > profile-service-image.tar.gz
+          # Always use the canonical ghcr latest tag
+          CANONICAL_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "Pulling ${CANONICAL_TAG}"
+          docker pull "$CANONICAL_TAG"
+          docker save "$CANONICAL_TAG" | gzip > profile-service-image.tar.gz
           ls -lh profile-service-image.tar.gz
 
       - name: Upload image artifact

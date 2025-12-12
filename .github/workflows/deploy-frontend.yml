@@ -65,11 +65,11 @@ jobs:
 
       - name: Save Docker image as tar.gz
         run: |
-          # Use the lowercase tag from metadata action
-          IMAGE_TAG="${{ steps.meta.outputs.tags }}" 
-          LATEST_TAG=$(echo "$IMAGE_TAG" | tr ' ' '\n' | grep ':latest' | head -1)
-          docker pull "$LATEST_TAG"
-          docker save "$LATEST_TAG" | gzip > frontend-image.tar.gz
+          # Always use the canonical ghcr latest tag (metadata already pushed it)
+          CANONICAL_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "Pulling ${CANONICAL_TAG}"
+          docker pull "$CANONICAL_TAG"
+          docker save "$CANONICAL_TAG" | gzip > frontend-image.tar.gz
           ls -lh frontend-image.tar.gz
 
       - name: Upload image artifact
@@ -152,7 +152,7 @@ jobs:
             docker rm lianel-frontend 2>/dev/null || true
             
             # Deploy using docker compose (v2) - use frontend compose file
-            docker compose -f docker-compose.frontend.yaml up -d frontend
+            docker compose -f docker-compose.frontend.yaml up -d --no-build frontend
             
             # Verify deployment
             echo "=== Verifying deployment ==="
