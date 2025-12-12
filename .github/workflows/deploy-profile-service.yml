@@ -14,7 +14,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ toLower(github.repository) }}/lianel-profile-service
+  # Lowercase handled in shell when pulling
+  IMAGE_NAME: ${{ github.repository }}/lianel-profile-service
 
 jobs:
   build-and-deploy:
@@ -64,8 +65,8 @@ jobs:
 
       - name: Save Docker image as tar.gz
         run: |
-          # Always use the canonical ghcr latest tag
-          CANONICAL_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          IMAGE_REPO_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          CANONICAL_TAG="${{ env.REGISTRY }}/${IMAGE_REPO_LC}:latest"
           echo "Pulling ${CANONICAL_TAG}"
           docker pull "$CANONICAL_TAG"
           docker save "$CANONICAL_TAG" | gzip > profile-service-image.tar.gz
