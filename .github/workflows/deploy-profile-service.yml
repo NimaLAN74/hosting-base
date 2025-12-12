@@ -14,7 +14,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/lianel-profile-service
+  IMAGE_NAME: ${{ toLower(github.repository) }}/lianel-profile-service
 
 jobs:
   build-and-deploy:

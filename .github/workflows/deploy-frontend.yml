@@ -15,7 +15,7 @@ on:
 env:
   REGISTRY: ghcr.io
   # Metadata action will automatically convert to lowercase
-  IMAGE_NAME: ${{ github.repository }}/lianel-frontend
+  IMAGE_NAME: ${{ toLower(github.repository) }}/lianel-frontend
 
 jobs:
   build-and-deploy:
