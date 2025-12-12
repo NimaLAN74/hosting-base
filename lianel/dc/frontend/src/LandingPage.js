@@ -49,32 +49,32 @@ function LandingPage() {
 
   const solutions = [
     {
-      title: 'EU Energy & Geospatial Intelligence',
-      description: 'Advanced analytics platform for energy market intelligence and geospatial data.',
-      status: 'Available Now',
+      title: 'Custom SaaS Solutions',
+      description: 'Tailored platforms built on our proven infrastructure stack.',
+      status: 'Available',
       statusColor: '#10b981',
-      features: ['Real-time energy data', 'Geospatial analysis', 'Market forecasting', 'EU regulatory compliance'],
+      features: ['Rapid development', 'Your domain expertise', 'Enterprise-ready', 'Scalable architecture'],
       gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
     },
     {
-      title: 'Custom SaaS Solutions',
-      description: 'Tailored platforms built on our proven infrastructure stack.',
-      status: 'Coming Soon',
-      statusColor: '#f59e0b',
-      features: ['Rapid development', 'Your domain expertise', 'Enterprise-ready', 'Scalable architecture'],
+      title: 'Technical Consulting',
+      description: 'Expert guidance for architecture, technology selection, and implementation.',
+      status: 'Available',
+      statusColor: '#10b981',
+      features: ['Architecture design', 'Technology selection', 'Best practices', 'Performance optimization'],
       gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
     }
   ];
 
   const techStack = [
-    { name: 'React', category: 'Frontend' },
-    { name: 'Rust', category: 'Backend' },
-    { name: 'Docker', category: 'Infrastructure' },
-    { name: 'Kubernetes', category: 'Orchestration' },
-    { name: 'PostgreSQL', category: 'Database' },
-    { name: 'Apache Airflow', category: 'Workflows' },
-    { name: 'Keycloak', category: 'Security' },
-    { name: 'Grafana', category: 'Monitoring' }
+    { name: 'Modern Frontend', category: 'User Interface' },
+    { name: 'High-Performance Backend', category: 'Services' },
+    { name: 'Container Orchestration', category: 'Infrastructure' },
+    { name: 'Cloud-Native', category: 'Architecture' },
+    { name: 'Scalable Databases', category: 'Data' },
+    { name: 'Workflow Automation', category: 'Operations' },
+    { name: 'Enterprise Security', category: 'Authentication' },
+    { name: 'Real-time Monitoring', category: 'Observability' }
   ];
 
   return (
