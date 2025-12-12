@@ -133,7 +133,7 @@ jobs:
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
-            set -e
+            set -euxo pipefail
             echo "=== Loading Docker image ==="
             cd /root/lianel/dc
             
@@ -141,7 +141,7 @@ jobs:
             docker load < frontend-image.tar.gz
             
             # Get the loaded image name and tag it
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-frontend\|hosting-base\|nimalan74" | head -1)
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "ghcr.io/.*/lianel-frontend:|lianel-frontend:" | head -1 || true)
             if [ -n "$LOADED_IMAGE" ]; then
               docker tag "$LOADED_IMAGE" lianel-frontend:latest || true
             fi
@@ -152,7 +152,11 @@ jobs:
             docker rm lianel-frontend 2>/dev/null || true
             
             # Deploy using docker compose (v2) - use frontend compose file
-            docker compose -f docker-compose.frontend.yaml up -d --no-build frontend
+            if command -v docker-compose >/dev/null 2>&1; then
+              docker-compose -f docker-compose.frontend.yaml up -d --no-build frontend
+            else
+              docker compose -f docker-compose.frontend.yaml up -d --no-build frontend
+            fi
             
             # Verify deployment
             echo "=== Verifying deployment ==="

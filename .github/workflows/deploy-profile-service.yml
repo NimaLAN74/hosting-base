@@ -128,7 +128,7 @@ jobs:
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
-            set -e
+            set -euxo pipefail
             echo "=== Loading Docker image ==="
             cd /root/lianel/dc
             
@@ -136,7 +136,7 @@ jobs:
             docker load < profile-service-image.tar.gz
             
             # Get the loaded image name and tag it
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "lianel-profile-service\|hosting-base\|nimalan74" | head -1)
+            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "ghcr.io/.*/lianel-profile-service:|lianel-profile-service:" | head -1 || true)
             if [ -n "$LOADED_IMAGE" ]; then
               docker tag "$LOADED_IMAGE" lianel-profile-service:latest || true
             fi
@@ -148,7 +148,11 @@ jobs:
             
             # Deploy using multiple compose files to include keycloak dependency
             # Image is already loaded, so we prevent Docker Compose from trying to build
-            docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
+            if command -v docker-compose >/dev/null 2>&1; then
+              docker-compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
+            else
+              docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
+            fi
             
             # Verify deployment
             echo "=== Verifying deployment ==="
