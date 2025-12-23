@@ -4,97 +4,133 @@ import Keycloak from 'keycloak-js';
 const keycloakConfig = {
   url: 'https://auth.lianel.se',
   realm: 'lianel',
-  clientId: 'frontend-client',
-  redirectUri: window.location.origin + window.location.pathname
+  clientId: 'frontend-client'
 };
 
 // Initialize Keycloak instance
 const keycloak = new Keycloak(keycloakConfig);
 
 // Keycloak initialization options
-// Only used when we have an authorization code (callback)
-// For initial page load, we skip check-sso entirely and redirect directly to login
+// Note: check-sso with iframe won't work cross-domain (auth.lianel.se -> lianel.se)
+// X-Frame-Options blocks the iframe, so we disable it and use token-based persistence
 const initOptions = {
-  // Don't set onLoad - this means no auto-login
-  // Valid values are: 'login-required' or 'check-sso', but we want neither
-  checkLoginIframe: false,
+  checkLoginIframe: false,  // DISABLED: X-Frame-Options blocks cross-domain iframe
   enableLogging: true,
   pkceMethod: 'S256',
-  flow: 'standard',
-  redirectUri: window.location.origin + window.location.pathname
+  flow: 'standard'
 };
 
 /**
  * Initialize Keycloak and return a promise
+ * Uses localStorage to persist token across page refreshes
  * @returns {Promise<boolean>} True if authenticated, false otherwise
  */
 export const initKeycloak = () => {
   return new Promise((resolve, reject) => {
-    // Check if we're coming from Keycloak callback (has code in URL)
-    // Keycloak returns code as query parameter (?code=...) not hash (#code=...)
+    // Check for callback from Keycloak (authorization code)
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-    
-    // Clear any stale session data
-    sessionStorage.removeItem('KEYCLOAK_AUTH_DATA');
-    sessionStorage.removeItem('KEYCLOAK_TOKEN');
-    localStorage.removeItem('KEYCLOAK_AUTH_DATA');
-    
-    if (code) {
-      // We have an authorization code from Keycloak callback - initialize normally
-      console.log('Found authorization code, initializing Keycloak...');
-      keycloak.init(initOptions)
-        .then((authenticated) => {
-          if (authenticated) {
-            console.log('User authenticated successfully');
-            // Clear the code from URL to prevent re-processing
-            const newUrl = window.location.pathname;
-            window.history.replaceState({}, '', newUrl);
-            // Set up token refresh
-            setInterval(() => {
-              keycloak.updateToken(70)
-                .then((refreshed) => {
-                  if (refreshed) console.log('Token refreshed');
-                })
-                .catch(() => console.error('Failed to refresh token'));
-            }, 60000);
-            resolve(true);
-          } else {
-            console.log('Not authenticated after callback');
-            resolve(false);
+
+    // Initialize Keycloak
+    keycloak.init(initOptions)
+      .then((authenticated) => {
+        // If we have a code, we went through the callback flow
+        if (code) {
+          console.log('Processing authorization callback');
+          // Clean up the callback URL
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+
+        // Keycloak auto-loaded token from sessionStorage/cookie if available
+        if (authenticated && keycloak.token) {
+          console.log('User authenticated, token available');
+          // Store token in localStorage for persistence across sessions
+          try {
+            localStorage.setItem('keycloak_token', keycloak.token);
+            localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+            localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+          } catch (e) {
+            console.warn('Could not store token in localStorage:', e);
           }
-        })
-        .catch((error) => {
-          console.error('Keycloak init error:', error);
-          resolve(false);
-        });
-    } else {
-      // No authorization code - just initialize without auto-login
-      keycloak.init(initOptions)
-        .then((authenticated) => {
-          if (authenticated) {
-            console.log('User already authenticated');
-            // Set up token refresh
-            setInterval(() => {
-              keycloak.updateToken(70)
-                .then((refreshed) => {
-                  if (refreshed) console.log('Token refreshed');
-                })
-                .catch(() => console.error('Failed to refresh token'));
-            }, 60000);
-            resolve(true);
-          } else {
-            // Not authenticated - just resolve false (no auto-redirect)
-            console.log('Not authenticated, waiting for user action...');
-            resolve(false);
+          
+          // Set up token refresh every minute
+          const refreshInterval = setInterval(() => {
+            keycloak.updateToken(70)
+              .then((refreshed) => {
+                if (refreshed) {
+                  console.log('Token refreshed');
+                  // Update stored token
+                  try {
+                    localStorage.setItem('keycloak_token', keycloak.token);
+                    localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+                    localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+                  } catch (e) {
+                    console.warn('Could not update token in localStorage:', e);
+                  }
+                }
+              })
+              .catch((error) => {
+                console.error('Token refresh failed:', error);
+                clearInterval(refreshInterval);
+              });
+          }, 60000);
+          
+          resolve(true);
+        } else {
+          // Not authenticated - check if we have a stored token
+          const storedToken = localStorage.getItem('keycloak_token');
+          const tokenTimestamp = localStorage.getItem('keycloak_token_timestamp');
+          const now = Date.now();
+          const tokenAge = tokenTimestamp ? (now - parseInt(tokenTimestamp)) / 1000 : Infinity;
+          
+          // Token valid if less than 5 minutes old (typically expires in 5 min)
+          if (storedToken && tokenAge < 300) {
+            console.log('Restoring token from localStorage (age: ' + Math.round(tokenAge) + 's)');
+            // Manually restore the token
+            keycloak.token = storedToken;
+            keycloak.refreshToken = localStorage.getItem('keycloak_refresh_token') || storedToken;
+            keycloak.authenticated = true;
+            
+            // Verify token is still valid by checking expiry
+            try {
+              const parts = storedToken.split('.');
+              if (parts.length === 3) {
+                const payload = JSON.parse(atob(parts[1]));
+                const exp = payload.exp * 1000; // Convert to ms
+                if (exp > now) {
+                  console.log('Restored token is valid, expires in', Math.round((exp - now) / 1000), 'seconds');
+                  // Set up token refresh
+                  setInterval(() => {
+                    keycloak.updateToken(70)
+                      .then((refreshed) => {
+                        if (refreshed) {
+                          console.log('Token refreshed');
+                          try {
+                            localStorage.setItem('keycloak_token', keycloak.token);
+                          } catch (e) {
+                            console.warn('Could not update token:', e);
+                          }
+                        }
+                      })
+                      .catch((error) => console.error('Token refresh failed:', error));
+                  }, 60000);
+                  resolve(true);
+                  return;
+                }
+              }
+            } catch (e) {
+              console.warn('Could not verify stored token:', e);
+            }
           }
-        })
-        .catch((error) => {
-          console.error('Keycloak init error:', error);
-          // On error, just resolve false - user can click login button
+          
+          console.log('Not authenticated - no valid token available');
           resolve(false);
-        });
-    }
+        }
+      })
+      .catch((error) => {
+        console.error('Keycloak init error:', error);
+        resolve(false);
+      });
   });
 };
 
@@ -102,39 +138,40 @@ export const initKeycloak = () => {
  * Login function - redirects to Keycloak login
  */
 export const login = () => {
+  // Clear any stored token to avoid using a stale session when switching users
+  try {
+    keycloak.clearToken();
+    localStorage.removeItem('keycloak_token');
+    localStorage.removeItem('keycloak_refresh_token');
+    localStorage.removeItem('keycloak_token_timestamp');
+  } catch (e) {
+    console.warn('Could not clear stored token before login:', e);
+  }
   // Use Keycloak's built-in login method which handles PKCE automatically
   return keycloak.login({
-    redirectUri: window.location.origin + window.location.pathname,
+    redirectUri: window.location.origin + '/',
     prompt: 'login'  // Force re-authentication
   });
 };
 
 /**
- * Logout function - clears Keycloak session and redirects to landing page
- * ROOT CAUSE FIX: keycloak-js sends "post_logout_redirect_uri" parameter,
- * but Keycloak 26.4.6 expects "redirect_uri". We construct the URL manually.
+ * Logout function - use Keycloak.js built-in logout for better redirect handling
  */
 export const logout = () => {
-  const redirectUri = window.location.origin === 'https://www.lianel.se' 
-    ? 'https://www.lianel.se/' 
-    : 'https://lianel.se/';
-  
-  // Clear frontend state immediately
+  const redirectUri = `${window.location.origin}/`;
+
+  // Clear only Keycloak-specific tokens from localStorage
+  // Do NOT use localStorage.clear() or sessionStorage.clear() as they wipe all data
   try {
-    keycloak.clearToken();
-    sessionStorage.clear();
-    localStorage.clear();
+    localStorage.removeItem('keycloak_token');
+    localStorage.removeItem('keycloak_refresh_token');
+    localStorage.removeItem('keycloak_token_timestamp');
   } catch (e) {
-    console.error('Error clearing storage:', e);
+    console.error('Error clearing keycloak tokens:', e);
   }
-  
-  // Construct logout URL with correct parameter name (redirect_uri, not post_logout_redirect_uri)
-  const logoutUrl = `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
-  
-  console.log('Logging out with correct parameter: redirect_uri');
-  
-  // Redirect to logout endpoint - Keycloak will invalidate the session
-  // and redirect back to our landing page
+
+  // Build explicit logout URL to ensure redirect, avoiding the Keycloak info page
+  const logoutUrl = keycloak.createLogoutUrl({ redirectUri });
   window.location.href = logoutUrl;
 };
 

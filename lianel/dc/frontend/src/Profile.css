@@ -78,15 +78,17 @@
 }
 
 .profile-actions {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+  justify-items: center;
+  align-items: stretch;
   margin-top: 30px;
 }
 
 .profile-button {
-  padding: 12px 30px;
-  border-radius: 8px;
+  padding: 14px 32px;
+  border-radius: 10px;
   font-size: 1rem;
   font-weight: 600;
   text-decoration: none;
@@ -94,6 +96,9 @@
   cursor: pointer;
   transition: all 0.3s ease;
   display: inline-block;
+  width: 100%;
+  max-width: 240px;
+  text-align: center;
 }
 
 .profile-button-primary {
@@ -210,6 +215,19 @@
   padding: 40px;
 }
 
+.profile-admin-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px solid rgba(0, 0, 0, 0.08);
+}
+
+.profile-admin-title {
+  font-size: 1.1rem;
+  color: var(--dark-blue);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .profile-card {
@@ -221,11 +239,11 @@
   }
 
   .profile-actions {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .profile-button {
-    width: 100%;
+    max-width: none;
   }
 }
 

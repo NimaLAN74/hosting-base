@@ -1,8 +1,8 @@
 # Production Deployment Guide - Keycloak Logout Fix
 
-**Version**: 1.0  
-**Date**: December 11, 2025  
-**Status**: Ready for Production Deployment
+**Version**: 1.1  
+**Date**: December 23, 2025  
+**Status**: Ready for Production Deployment with Updated OAuth & Security Configuration
 
 ---
 
@@ -12,10 +12,13 @@ This guide covers the deployment of the Keycloak logout fix to production. All c
 
 ### What's Being Deployed
 
-- **Frontend build**: main.090662e1.js
-- **Components affected**: Logout function only
-- **Zero breaking changes**: All other functionality unchanged
-- **Deployment time**: ~5 minutes
+- **Keycloak service**: Containerized in docker-compose (v26.4.6)
+- **Frontend**: Updated with OAuth configuration
+- **Profile Service**: Backend client secret authentication
+- **Airflow**: OAuth2 Proxy integration with callback redirect
+- **Components affected**: Authentication, authorization, and SSO flows
+- **Key changes**: OAuth user registration enabled, CSRF disabled for OAuth, backend client secret security
+- **Deployment time**: ~10 minutes
 
 ---
 
@@ -23,14 +26,16 @@ This guide covers the deployment of the Keycloak logout fix to production. All c
 
 - [x] Root cause identified and documented
 - [x] Solution implemented and tested
-- [x] Frontend built with fix
-- [x] Container image created and tested
-- [x] All documentation created
+- [x] Frontend, Profile Service, and Airflow configs updated
+- [x] Container images created and tested
+- [x] All documentation created and updated
 - [x] Git commits complete with full history
-- [x] Unit tests passed
+- [x] OAuth registration enabled for automatic user provisioning
+- [x] Backend client secret security implemented
+- [x] Keycloak service containerized
 - [x] Endpoint tests verified
 - [x] Rollback plan available
-- [ ] **User acceptance testing** (pending)
+- [ ] **Full system integration testing** (pending)
 - [ ] **Production sign-off** (pending)
 
 ---

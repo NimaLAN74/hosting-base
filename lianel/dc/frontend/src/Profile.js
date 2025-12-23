@@ -6,7 +6,7 @@ import './App.css';
 import './Profile.css';
 
 function Profile() {
-  const { authenticated, authenticatedFetch, userInfo: keycloakUserInfo, login } = useKeycloak();
+  const { authenticated, authenticatedFetch, userInfo: keycloakUserInfo, login, hasRole } = useKeycloak();
   const [userInfo, setUserInfo] = useState({
     id: '',
     username: '',
@@ -342,6 +342,21 @@ function Profile() {
                   </div>
                 )}
               </div>
+
+              {/* Admin tools (visible only for admins) */}
+              {hasRole && hasRole('admin') && (
+                <div className="profile-admin-section">
+                  <h3 className="profile-admin-title">Admin Tools</h3>
+                  <div className="profile-actions">
+                    <Link to="/admin/users" className="profile-button profile-button-primary">
+                      Manage Users
+                    </Link>
+                    <a href="/swagger-ui" className="profile-button profile-button-secondary">
+                      Profile Service API
+                    </a>
+                  </div>
+                </div>
+              )}
 
               <div className="profile-actions">
                 {editing ? (

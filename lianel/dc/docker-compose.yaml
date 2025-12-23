@@ -4,6 +4,31 @@ networks:
     name: lianel-network
 
 services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.6
+    env_file:
+      - .env
+    container_name: keycloak
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://172.17.0.1:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: auth.lianel.se
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: "/"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    command: start
+    expose:
+      - "8080"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+
   frontend:
     image: lianel-frontend:latest
     container_name: lianel-frontend
@@ -19,14 +44,14 @@ services:
     env_file:
       - .env
     environment:
-      PORT: 3000
-      KEYCLOAK_URL: http://keycloak:8080
+      PORT: 9000
+      KEYCLOAK_URL: https://auth.lianel.se
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
       KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       RUST_LOG: info
     expose:
-      - "3000"
+      - "9000"
     depends_on:
       - keycloak
     restart: unless-stopped
@@ -44,6 +69,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - frontend
+      - keycloak
     restart: unless-stopped
     networks:
       - lianel-network

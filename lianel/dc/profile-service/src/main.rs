@@ -24,6 +24,7 @@ struct AppConfig {
     keycloak_realm: String,
     keycloak_admin_user: String,
     keycloak_admin_password: String,
+    backend_client_secret: String,
 }
 
 #[derive(Debug, Clone)]
@@ -54,8 +55,8 @@ impl KeycloakValidator {
             .form(&[
                 ("token", token),
                 ("client_id", "backend-api"),
+                ("client_secret", &self.config.backend_client_secret),
             ])
-            .header("Authorization", format!("Bearer {}", admin_token))
             .send()
             .await?;
 
@@ -1845,6 +1846,8 @@ async fn main() {
             .expect("KEYCLOAK_ADMIN_USER environment variable is required"),
         keycloak_admin_password: env::var("KEYCLOAK_ADMIN_PASSWORD")
             .expect("KEYCLOAK_ADMIN_PASSWORD environment variable is required"),
+        backend_client_secret: env::var("BACKEND_CLIENT_SECRET")
+            .expect("BACKEND_CLIENT_SECRET environment variable is required"),
     };
 
     let port = env::var("PORT")

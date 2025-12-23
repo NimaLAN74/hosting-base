@@ -1,4 +1,17 @@
 /* Global App Styles */
+:root {
+  --primary-blue: #2c5aa0;
+  --secondary-blue: #4a8fe7;
+  --accent-gold: #f6c445;
+  --dark-blue: #1f2a44;
+  --dark-gray: #596273;
+  --white: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.12);
+  --shadow-hover: rgba(0, 0, 0, 0.18);
+  --bg-start: #0f172a;
+  --bg-end: #1f3b73;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -11,12 +24,21 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.05), transparent 25%),
+    radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.06), transparent 22%),
+    linear-gradient(135deg, var(--bg-start), var(--bg-end));
+  min-height: 100vh;
+  color: var(--dark-blue);
 }
 
 .App {
   min-height: 100vh;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 60%);
 }
 
 .container {
   width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
 }

@@ -9,6 +9,14 @@ function Dashboard() {
 
   const services = [
     {
+      name: 'User Profile',
+      description: 'View and edit your user profile',
+      icon: '👤',
+      url: '/profile',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
+    },
+    {
       name: 'Apache Airflow',
       description: 'Workflow orchestration and management',
       icon: '⚙️',
@@ -20,26 +28,36 @@ function Dashboard() {
       name: 'Grafana Monitoring',
       description: 'Real-time system monitoring and analytics',
       icon: '📊',
-      url: '/monitoring/',
+      url: 'https://monitoring.lianel.se',
       status: 'active',
       gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
     },
-    {
-      name: 'Profile Service',
-      description: 'User profile management',
-      icon: '👤',
-      url: '#',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
-    },
-    ...(hasRole && hasRole('admin') ? [{
-      name: 'Admin Console',
-      description: 'Manage users and access',
-      icon: '🛡️',
-      url: '/admin/users',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
-    }] : [])
+    ...(hasRole && hasRole('admin') ? [
+      {
+        name: 'Profile Management',
+        description: 'Admin tools to manage users',
+        icon: '🧑‍💼',
+        url: '/admin/users',
+        status: 'active',
+        gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+      },
+      {
+        name: 'Profile Service API',
+        description: 'User profile management service (Admin only)',
+        icon: '🔧',
+        url: '/swagger-ui',
+        status: 'active',
+        gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+      },
+      {
+        name: 'Admin Console',
+        description: 'Manage users and access',
+        icon: '🛡️',
+        url: '/admin/users',
+        status: 'active',
+        gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
+      }
+    ] : [])
   ];
 
   const recentActivity = [
@@ -81,7 +99,7 @@ function Dashboard() {
                   key={index} 
                   href={service.url} 
                   className="service-card"
-                  target={service.url.startsWith('http') ? '_blank' : '_self'}
+                  target={service.url.startsWith('http') ? '_self' : '_self'}
                   rel={service.url.startsWith('http') ? 'noopener noreferrer' : ''}
                 >
                   <div className="service-header" style={{ background: service.gradient }}>
@@ -130,7 +148,7 @@ function Dashboard() {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-icon">🚀</div>
-                <div className="stat-value">3</div>
+                <div className="stat-value">{hasRole && hasRole('admin') ? 5 : 3}</div>
                 <div className="stat-label">Active Services</div>
               </div>
               <div className="stat-card">
