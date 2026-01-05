@@ -116,13 +116,13 @@ jobs:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE_TAG_FULL="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
             set -euxo pipefail
             IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
-            GITHUB_PAT="${GITHUB_PAT}"
+            GITHUB_TOKEN="${GITHUB_TOKEN}"
             echo "=== Deploying frontend from registry ==="
             cd /root/lianel/dc
             
@@ -138,13 +138,12 @@ jobs:
               docker images | grep "$(echo $IMAGE_TAG | cut -d: -f1)" || true
             else
               PULL_EXIT_CODE=$?
-              echo "⚠️  Pull failed (exit code: $PULL_EXIT_CODE), package might be private"
-              echo "Trying with authentication..."
-              # If GITHUB_PAT secret exists, use it (optional)
-              if [ -n "$GITHUB_PAT" ]; then
-                echo "Using GITHUB_PAT for authentication..."
-                echo "$GITHUB_PAT" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1 || {
-                  echo "⚠️  Warning: Docker login failed, continuing anyway..."
+              echo "⚠️  Pull failed (exit code: $PULL_EXIT_CODE), package is private - authenticating..."
+              # Use GITHUB_TOKEN for authentication (automatically available in workflows)
+              if [ -n "$GITHUB_TOKEN" ]; then
+                echo "Using GITHUB_TOKEN for authentication..."
+                echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1 || {
+                  echo "⚠️  Warning: Docker login failed"
                 }
                 if docker pull "$IMAGE_TAG" 2>&1; then
                   echo "✅ Image pulled successfully with authentication"
@@ -156,11 +155,11 @@ jobs:
                   exit 1
                 fi
               else
-                echo "❌ Error: Failed to pull image (package is likely private)"
+                echo "❌ Error: Failed to pull image (package is private and no token available)"
                 echo "Image: $IMAGE_TAG"
                 echo "💡 Solutions:"
                 echo "   1. Make package public: Settings → Packages → [package] → Package settings → Change visibility"
-                echo "   2. Or add GITHUB_PAT secret with a Personal Access Token"
+                echo "   2. Or ensure GITHUB_TOKEN is available (should be automatic in workflows)"
                 exit 1
               fi
             fi
