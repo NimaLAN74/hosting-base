@@ -75,12 +75,28 @@ jobs:
           PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
           echo "Making package public: $PACKAGE_NAME"
           
+          # URL encode the package name (replace / with %2F)
+          PACKAGE_NAME_ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          echo "Encoded package name: $PACKAGE_NAME_ENCODED"
+          
           # Use GitHub API to make package public
-          gh api \
-            -X PATCH \
-            "/user/packages/container/${PACKAGE_NAME}" \
-            -f visibility=public \
-            || echo "⚠️  Note: Package might already be public or API call failed (this is OK)"
+          # Try user endpoint first (for personal accounts)
+          if gh api -X PATCH "/user/packages/container/${PACKAGE_NAME_ENCODED}" -f visibility=public 2>&1; then
+            echo "✅ Package made public via user endpoint"
+          else
+            echo "⚠️  User endpoint failed, trying org endpoint..."
+            # Try org endpoint (for organization accounts)
+            ORG_NAME=$(echo "$PACKAGE_NAME" | cut -d'/' -f1)
+            PACKAGE_PATH=$(echo "$PACKAGE_NAME" | cut -d'/' -f2-)
+            PACKAGE_PATH_ENCODED=$(echo "$PACKAGE_PATH" | sed 's/\//%2F/g')
+            if gh api -X PATCH "/orgs/${ORG_NAME}/packages/container/${PACKAGE_PATH_ENCODED}" -f visibility=public 2>&1; then
+              echo "✅ Package made public via org endpoint"
+            else
+              echo "⚠️  Warning: Failed to make package public automatically"
+              echo "💡 Please make it public manually: https://github.com/NimaLAN74?tab=packages"
+              echo "   Package: $PACKAGE_NAME"
+            fi
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
