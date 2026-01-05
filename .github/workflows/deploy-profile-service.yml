@@ -131,27 +131,77 @@ jobs:
           chmod 700 ~/.ssh
           
           # Write SSH key - handle multiline properly
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          # Use printf to ensure proper newline handling
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           
-          # Verify key
+          # Verify key file exists and has content
           if [ ! -s ~/.ssh/deploy_key ]; then
-            echo "❌ Error: SSH key file is empty"
+            echo "❌ Error: SSH key file is empty or missing"
+            echo "Please check that SSH_PRIVATE_KEY secret contains the complete private key"
             exit 1
           fi
           
-          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n')
-          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
-            echo "❌ Error: SSH key format incorrect"
-            echo "First line: '$FIRST_LINE'"
-            head -3 ~/.ssh/deploy_key
+          # Check file size (should be at least 100 bytes for a valid key)
+          KEY_SIZE=$(wc -c < ~/.ssh/deploy_key)
+          if [ "$KEY_SIZE" -lt 100 ]; then
+            echo "❌ Error: SSH key file is too small ($KEY_SIZE bytes)"
+            echo "Expected at least 100 bytes for a valid private key"
+            echo "First 100 chars: $(head -c 100 ~/.ssh/deploy_key)"
             exit 1
+          fi
+          
+          # Verify key format (must start with -----BEGIN)
+          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
+          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
+            echo "❌ Error: SSH key format is incorrect"
+            echo "First line: '$FIRST_LINE'"
+            echo ""
+            echo "The SSH_PRIVATE_KEY secret should contain:"
+            echo "  - Complete private key starting with: -----BEGIN OPENSSH PRIVATE KEY-----"
+            echo "  - Ending with: -----END OPENSSH PRIVATE KEY-----"
+            echo "  - All lines in between"
+            echo ""
+            echo "Current key file preview (first 5 lines):"
+            head -5 ~/.ssh/deploy_key
+            echo ""
+            echo "If you see 'ssh-ed25519' as text, that's wrong - that's the key type, not the key itself"
+            exit 1
+          fi
+          
+          # Verify key ends with -----END
+          LAST_LINE=$(tail -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
+          if [[ ! "$LAST_LINE" =~ ^-----END ]]; then
+            echo "⚠️  Warning: SSH key might not end correctly"
+            echo "Last line: '$LAST_LINE'"
+          fi
+          
+          # Check for common mistakes
+          if grep -q "^ssh-ed25519 " ~/.ssh/deploy_key; then
+            echo "❌ Error: SSH key contains 'ssh-ed25519' as text"
+            echo "This looks like a public key, not a private key!"
+            echo "The SSH_PRIVATE_KEY secret should contain the PRIVATE key, not the public key"
+            echo ""
+            echo "To get the private key, run: cat ~/.ssh/id_ed25519_host"
+            echo "The private key starts with: -----BEGIN OPENSSH PRIVATE KEY-----"
+            exit 1
+          fi
+          
+          # Test key format with ssh-keygen (if available)
+          if command -v ssh-keygen >/dev/null 2>&1; then
+            if ! ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null 2>&1; then
+              echo "⚠️  Warning: ssh-keygen validation failed (key might be invalid)"
+              echo "But continuing anyway..."
+            fi
           fi
           
           if [ -n "$REMOTE_HOST" ]; then
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
+          
           echo "✅ SSH key ready"
+          echo "Key file size: $KEY_SIZE bytes"
+          echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
       - name: Deploy to Remote Host
         env:
