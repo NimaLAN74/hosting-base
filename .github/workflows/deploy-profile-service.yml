@@ -116,28 +116,43 @@ jobs:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
         run: |
           IMAGE_TAG_FULL="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
             set -euxo pipefail
             IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
+            GITHUB_PAT="${GITHUB_PAT}"
             echo "=== Deploying profile service from registry ==="
             cd /root/lianel/dc
             
-            # Login to GitHub Container Registry
-            echo "🔐 Logging into GitHub Container Registry..."
-            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || {
-              echo "⚠️  Warning: Registry login failed, trying public pull..."
-            }
-            
-            # Pull image directly from registry (no artifact needed - saves storage)
+            # Pull image directly from registry
+            # If package is private, login first (optional - only if GITHUB_PAT secret exists)
             echo "📥 Pulling image from registry..."
             IMAGE_TAG="${IMAGE_TAG_FULL}"
-            docker pull "$IMAGE_TAG" || {
-              echo "❌ Error: Failed to pull image from registry"
-              echo "Image: $IMAGE_TAG"
-              exit 1
-            }
+            
+            # Try to pull (works if package is public)
+            if ! docker pull "$IMAGE_TAG" 2>/dev/null; then
+              echo "⚠️  Pull failed, package might be private. Trying with authentication..."
+              # If GITHUB_PAT secret exists, use it (optional)
+              if [ -n "$GITHUB_PAT" ]; then
+                echo "$GITHUB_PAT" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+                docker pull "$IMAGE_TAG" || {
+                  echo "❌ Error: Failed to pull image even with authentication"
+                  echo "Image: $IMAGE_TAG"
+                  echo "💡 Make package public: Settings → Packages → Package name → Package settings → Change visibility"
+                  exit 1
+                }
+              else
+                echo "❌ Error: Failed to pull image (package is likely private)"
+                echo "Image: $IMAGE_TAG"
+                echo "💡 Solutions:"
+                echo "   1. Make package public: Settings → Packages → [package] → Package settings → Change visibility"
+                echo "   2. Or add GITHUB_PAT secret with a Personal Access Token"
+                exit 1
+              fi
+            fi
+            echo "✅ Image pulled successfully"
             
             # Tag for local use
             echo "🏷️  Tagging image..."
