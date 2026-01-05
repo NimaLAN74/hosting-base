@@ -109,13 +109,13 @@ jobs:
       - name: Setup SSH Key
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
-          # Write SSH key properly (handle multiline)
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          # Write SSH key properly - use printf to handle multiline correctly
+          # Remove any potential BOM or extra whitespace
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           
           # Verify key file exists and has content
@@ -125,9 +125,21 @@ jobs:
           fi
           
           # Verify key format (should start with -----BEGIN)
-          if ! head -1 ~/.ssh/deploy_key | grep -q "BEGIN"; then
-            echo "⚠️  Warning: SSH key might not be in correct format"
-            echo "First line: $(head -1 ~/.ssh/deploy_key)"
+          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n')
+          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
+            echo "❌ Error: SSH key format is incorrect"
+            echo "First line: '$FIRST_LINE'"
+            echo "First 50 chars: $(head -c 50 ~/.ssh/deploy_key)"
+            echo "Key file content preview:"
+            head -5 ~/.ssh/deploy_key
+            exit 1
+          fi
+          
+          # Verify key ends with -----END
+          LAST_LINE=$(tail -1 ~/.ssh/deploy_key | tr -d '\r\n')
+          if [[ ! "$LAST_LINE" =~ ^-----END ]]; then
+            echo "⚠️  Warning: SSH key might not end correctly"
+            echo "Last line: '$LAST_LINE'"
           fi
           
           if [ -n "$REMOTE_HOST" ]; then
@@ -135,6 +147,7 @@ jobs:
           fi
           echo "✅ SSH key setup complete"
           echo "Key file size: $(wc -c < ~/.ssh/deploy_key) bytes"
+          echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
       - name: Test SSH Connection
         env:
