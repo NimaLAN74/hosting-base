@@ -132,27 +132,37 @@ jobs:
             IMAGE_TAG="${IMAGE_TAG_FULL}"
             
             # Try to pull (works if package is public)
-            if ! docker pull "$IMAGE_TAG" 2>/dev/null; then
-              echo "⚠️  Pull failed, package might be private. Trying with authentication..."
+            echo "Attempting to pull: $IMAGE_TAG"
+            PULL_OUTPUT=$(docker pull "$IMAGE_TAG" 2>&1) || PULL_FAILED=1
+            if [ -n "$PULL_FAILED" ]; then
+              echo "⚠️  Pull failed, package might be private. Output: $PULL_OUTPUT"
+              echo "Trying with authentication..."
               # If GITHUB_PAT secret exists, use it (optional)
               if [ -n "$GITHUB_PAT" ]; then
-                echo "$GITHUB_PAT" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
-                docker pull "$IMAGE_TAG" || {
+                echo "Using GITHUB_PAT for authentication..."
+                echo "$GITHUB_PAT" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1 || {
+                  echo "⚠️  Warning: Docker login failed, continuing anyway..."
+                }
+                if ! docker pull "$IMAGE_TAG" 2>&1; then
                   echo "❌ Error: Failed to pull image even with authentication"
                   echo "Image: $IMAGE_TAG"
                   echo "💡 Make package public: Settings → Packages → Package name → Package settings → Change visibility"
                   exit 1
-                }
+                fi
               else
                 echo "❌ Error: Failed to pull image (package is likely private)"
                 echo "Image: $IMAGE_TAG"
+                echo "Pull output: $PULL_OUTPUT"
                 echo "💡 Solutions:"
                 echo "   1. Make package public: Settings → Packages → [package] → Package settings → Change visibility"
                 echo "   2. Or add GITHUB_PAT secret with a Personal Access Token"
                 exit 1
               fi
+            else
+              echo "✅ Pull successful: $PULL_OUTPUT"
             fi
             echo "✅ Image pulled successfully"
+            docker images | grep "$(echo $IMAGE_TAG | cut -d: -f1)" || true
             
             # Tag for local use
             echo "🏷️  Tagging image..."
