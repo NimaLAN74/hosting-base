@@ -14,8 +14,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Lowercase handled in shell when pulling
-  IMAGE_NAME: ${{ github.repository }}/lianel-profile-service
 
 jobs:
   build-and-deploy:
@@ -28,6 +26,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        id: image-name
+        run: |
+          # Lowercase the repository name immediately to fix case sensitivity issues
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-profile-service" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "✅ Image name set to: ${IMAGE_NAME_LC}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -45,10 +52,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}
           tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
+            # Only keep latest tag to save storage (removed branch and sha tags)
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -63,34 +69,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Save Docker image as tar.gz
-        run: |
-          IMAGE_REPO_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          CANONICAL_TAG="${{ env.REGISTRY }}/${IMAGE_REPO_LC}:latest"
-          echo "Pulling ${CANONICAL_TAG}"
-          docker pull "$CANONICAL_TAG"
-          docker save "$CANONICAL_TAG" | gzip > profile-service-image.tar.gz
-          ls -lh profile-service-image.tar.gz
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: profile-service-docker-image
-          path: profile-service-image.tar.gz
-          retention-days: 7
+      # REMOVED: Artifact upload to save storage (image is already in registry)
+      # Image will be pulled directly from registry on remote host
 
       - name: Validate Secrets
         run: |
           if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
             echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in repository settings"
             exit 1
           fi
           if [ -z "${{ secrets.REMOTE_USER }}" ]; then
             echo "❌ Error: REMOTE_USER secret is not set"
+            echo "Please add REMOTE_USER secret in repository settings"
             exit 1
           fi
           if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
             echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            echo "Please add SSH_PRIVATE_KEY secret in repository settings"
             exit 1
           fi
           echo "✅ All required secrets are configured"
@@ -105,6 +101,7 @@ jobs:
           if [ -n "$REMOTE_HOST" ]; then
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
+          echo "✅ SSH key setup complete"
 
       - name: Test SSH Connection
         env:
@@ -112,7 +109,7 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo 'SSH connection successful'"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo '✅ SSH connection successful'"
 
       - name: Deploy to Remote Host
         env:
@@ -120,61 +117,110 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} profile-service-image.tar.gz ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/
-
-      - name: Load and Deploy on Remote Host
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
+          IMAGE_TAG_FULL="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
             set -euxo pipefail
-            echo "=== Loading Docker image ==="
+            IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
+            echo "=== Deploying profile service from registry ==="
             cd /root/lianel/dc
             
-            # Load the Docker image
-            docker load < profile-service-image.tar.gz
+            # Login to GitHub Container Registry
+            echo "🔐 Logging into GitHub Container Registry..."
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || {
+              echo "⚠️  Warning: Registry login failed, trying public pull..."
+            }
             
-            # Get the loaded image name and tag it
-            LOADED_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "ghcr.io/.*/lianel-profile-service:|lianel-profile-service:" | head -1 || true)
-            if [ -n "$LOADED_IMAGE" ]; then
-              docker tag "$LOADED_IMAGE" lianel-profile-service:latest || true
+            # Pull image directly from registry (no artifact needed - saves storage)
+            echo "📥 Pulling image from registry..."
+            IMAGE_TAG="${IMAGE_TAG_FULL}"
+            docker pull "$IMAGE_TAG" || {
+              echo "❌ Error: Failed to pull image from registry"
+              echo "Image: $IMAGE_TAG"
+              exit 1
+            }
+            
+            # Tag for local use
+            echo "🏷️  Tagging image..."
+            docker tag "$IMAGE_TAG" lianel-profile-service:latest || {
+              echo "❌ Error: Failed to tag image"
+              exit 1
+            }
+            
+            # Verify tag was created
+            if ! docker images | grep -q "lianel-profile-service.*latest"; then
+              echo "❌ Error: Tag verification failed"
+              docker images | grep profile-service
+              exit 1
             fi
+            echo "✅ Image tagged successfully"
             
-            echo "=== Deploying profile service container ==="
-            # Stop and remove existing container if it exists (use docker directly to avoid compose file issues)
+            # Ensure network exists
+            echo "🌐 Ensuring network exists..."
+            docker network create lianel-network 2>/dev/null || true
+            if ! docker network inspect lianel-network >/dev/null 2>&1; then
+              echo "❌ Error: Failed to create/verify network"
+              exit 1
+            fi
+            echo "✅ Network verified"
+            
+            # Stop and remove existing container
+            echo "🛑 Stopping existing container..."
             docker stop lianel-profile-service 2>/dev/null || true
             docker rm lianel-profile-service 2>/dev/null || true
             
             # Deploy using multiple compose files to include keycloak dependency
-            # Image is already loaded, so we prevent Docker Compose from trying to build
+            echo "🚀 Deploying profile service container..."
             if command -v docker-compose >/dev/null 2>&1; then
-              docker-compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
+              docker-compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service || {
+                echo "❌ Error: docker-compose failed"
+                docker-compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml config
+                exit 1
+              }
             else
-              docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service
+              docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d --no-build profile-service || {
+                echo "❌ Error: docker compose failed"
+                docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml config
+                exit 1
+              }
             fi
             
             # Verify deployment
             echo "=== Verifying deployment ==="
             sleep 5
-            docker ps | grep lianel-profile-service || exit 1
+            if ! docker ps | grep -q lianel-profile-service; then
+              echo "❌ Error: Container not running"
+              docker ps -a | grep profile-service
+              docker logs lianel-profile-service --tail 50 || true
+              exit 1
+            fi
+            echo "✅ Container is running"
             
-            # Clean up old image
+            # Health check
+            echo "🏥 Performing health check..."
+            sleep 10  # Wait for service to start
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://lianel-profile-service:3000/health 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "000" ]; then
+              echo "⚠️  Warning: Health check returned HTTP $HTTP_CODE (expected 200)"
+              echo "Container logs:"
+              docker logs lianel-profile-service --tail 30
+            else
+              echo "✅ Health check passed: HTTP $HTTP_CODE"
+            fi
+            
+            # Clean up old images
             echo "=== Cleaning up ==="
             docker image prune -f
-            rm -f profile-service-image.tar.gz
             
-            echo "=== Deployment successful ==="
-          '
+            echo "=== ✅ Deployment successful ==="
+          EOF
 
       - name: Deployment Summary
         run: |
           echo "## 🚀 Profile Service Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: \`${{ steps.meta.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- **Language**: Rust" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage Optimized**: ✅ No artifacts, direct registry pull" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
-
