@@ -134,9 +134,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE_TAG_FULL="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          echo "🔍 Debug: Constructed image tag: $IMAGE_TAG_FULL"
+          echo "🔍 Debug: Registry: ${{ env.REGISTRY }}"
+          echo "🔍 Debug: Image name: ${{ steps.image-name.outputs.image_name }}"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
             set -euxo pipefail
             IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
+            echo "🔍 Debug: Received image tag on remote: $IMAGE_TAG_FULL"
             GITHUB_TOKEN="${GITHUB_TOKEN}"
             echo "=== Deploying frontend from registry ==="
             cd /root/lianel/dc
@@ -145,6 +149,21 @@ jobs:
             # If package is private, login first (optional - only if GITHUB_PAT secret exists)
             echo "📥 Pulling image from registry..."
             IMAGE_TAG="${IMAGE_TAG_FULL}"
+            
+            # Debug: Show image tag details
+            echo "Image tag to pull: $IMAGE_TAG"
+            echo "Image tag length: ${#IMAGE_TAG}"
+            echo "Image tag components:"
+            echo "  - Full: $IMAGE_TAG"
+            echo "  - Registry: $(echo $IMAGE_TAG | cut -d'/' -f1)"
+            echo "  - Path: $(echo $IMAGE_TAG | cut -d'/' -f2-)"
+            
+            # Basic validation (check for required components)
+            if [[ -z "$IMAGE_TAG" ]] || [[ ! "$IMAGE_TAG" =~ : ]]; then
+              echo "❌ Error: Invalid image tag format: $IMAGE_TAG"
+              echo "Expected format: registry/owner/repo/image:tag"
+              exit 1
+            fi
             
             # Try to pull (works if package is public)
             echo "Attempting to pull: $IMAGE_TAG"
