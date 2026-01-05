@@ -113,64 +113,30 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
-          # Write SSH key properly - use printf to handle multiline correctly
-          # Remove any potential BOM or extra whitespace
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          # Write SSH key - handle multiline properly
+          cat > ~/.ssh/deploy_key << 'KEYEOF'
+${{ secrets.SSH_PRIVATE_KEY }}
+KEYEOF
           chmod 600 ~/.ssh/deploy_key
           
-          # Verify key file exists and has content
+          # Verify key
           if [ ! -s ~/.ssh/deploy_key ]; then
-            echo "❌ Error: SSH key file is empty or missing"
+            echo "❌ Error: SSH key file is empty"
             exit 1
           fi
           
-          # Verify key format (should start with -----BEGIN)
           FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n')
           if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
-            echo "❌ Error: SSH key format is incorrect"
+            echo "❌ Error: SSH key format incorrect"
             echo "First line: '$FIRST_LINE'"
-            echo "First 50 chars: $(head -c 50 ~/.ssh/deploy_key)"
-            echo "Key file content preview:"
-            head -5 ~/.ssh/deploy_key
+            head -3 ~/.ssh/deploy_key
             exit 1
-          fi
-          
-          # Verify key ends with -----END
-          LAST_LINE=$(tail -1 ~/.ssh/deploy_key | tr -d '\r\n')
-          if [[ ! "$LAST_LINE" =~ ^-----END ]]; then
-            echo "⚠️  Warning: SSH key might not end correctly"
-            echo "Last line: '$LAST_LINE'"
           fi
           
           if [ -n "$REMOTE_HOST" ]; then
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
-          echo "✅ SSH key setup complete"
-          echo "Key file size: $(wc -c < ~/.ssh/deploy_key) bytes"
-          echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
-
-      - name: Test SSH Connection
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          # Verify key file before using
-          if [ ! -f ~/.ssh/deploy_key ]; then
-            echo "❌ Error: SSH key file not found"
-            exit 1
-          fi
-          
-          # Test SSH connection with verbose output for debugging
-          echo "Testing SSH connection to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
-          ssh -v -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo '✅ SSH connection successful'" 2>&1 | head -20 || {
-            echo "❌ SSH connection failed"
-            echo "Key file check:"
-            ls -la ~/.ssh/deploy_key
-            echo "First few lines of key:"
-            head -3 ~/.ssh/deploy_key
-            exit 1
-          }
+          echo "✅ SSH key ready"
 
       - name: Deploy to Remote Host
         env:
@@ -179,176 +145,16 @@ jobs:
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          IMAGE_TAG_FULL="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
-          echo "🔍 Debug: Constructed image tag: $IMAGE_TAG_FULL"
-          echo "🔍 Debug: Registry: ${{ env.REGISTRY }}"
-          echo "🔍 Debug: Image name: ${{ steps.image-name.outputs.image_name }}"
-          # Verify SSH key before connecting
-          if [ ! -f ~/.ssh/deploy_key ]; then
-            echo "❌ Error: SSH key file not found"
-            exit 1
-          fi
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          echo "Deploying: $IMAGE_TAG"
           
-          echo "Connecting to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
-            set -euxo pipefail
-            IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
-            echo "🔍 Debug: Received image tag on remote: $IMAGE_TAG_FULL"
-            GITHUB_TOKEN="${GITHUB_TOKEN}"
-            echo "=== Deploying frontend from registry ==="
-            cd /root/lianel/dc
-            
-            # Pull image directly from registry
-            # If package is private, login first (optional - only if GITHUB_PAT secret exists)
-            echo "📥 Pulling image from registry..."
-            IMAGE_TAG="${IMAGE_TAG_FULL}"
-            
-            # Debug: Show image tag details
-            echo "Image tag to pull: $IMAGE_TAG"
-            echo "Image tag length: ${#IMAGE_TAG}"
-            echo "Image tag components:"
-            echo "  - Full: $IMAGE_TAG"
-            echo "  - Registry: $(echo $IMAGE_TAG | cut -d'/' -f1)"
-            echo "  - Path: $(echo $IMAGE_TAG | cut -d'/' -f2-)"
-            
-            # Basic validation (check for required components)
-            if [[ -z "$IMAGE_TAG" ]] || [[ ! "$IMAGE_TAG" =~ : ]]; then
-              echo "❌ Error: Invalid image tag format: $IMAGE_TAG"
-              echo "Expected format: registry/owner/repo/image:tag"
-              exit 1
-            fi
-            
-            # Try to pull (works if package is public)
-            echo "Attempting to pull: $IMAGE_TAG"
-            if docker pull "$IMAGE_TAG" 2>&1; then
-              echo "✅ Image pulled successfully"
-              docker images | grep "$(echo $IMAGE_TAG | cut -d: -f1)" || true
-            else
-              PULL_EXIT_CODE=$?
-              echo "⚠️  Pull failed (exit code: $PULL_EXIT_CODE), package is private - authenticating..."
-              # Use GITHUB_TOKEN for authentication (automatically available in workflows)
-              if [ -n "$GITHUB_TOKEN" ]; then
-                echo "Using GITHUB_TOKEN for authentication..."
-                echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1
-                LOGIN_EXIT=$?
-                if [ $LOGIN_EXIT -ne 0 ]; then
-                  echo "⚠️  Warning: Docker login failed (exit code: $LOGIN_EXIT)"
-                  echo "This might be a permissions issue. Check workflow permissions include 'packages: write'"
-                else
-                  echo "✅ Docker login successful"
-                fi
-                if docker pull "$IMAGE_TAG" 2>&1; then
-                  echo "✅ Image pulled successfully with authentication"
-                  docker images | grep "$(echo $IMAGE_TAG | cut -d: -f1)" || true
-                else
-                  echo "❌ Error: Failed to pull image even with authentication"
-                  echo "Image: $IMAGE_TAG"
-                  echo "💡 Make package public: Settings → Packages → Package name → Package settings → Change visibility"
-                  exit 1
-                fi
-              else
-                echo "❌ Error: Failed to pull image (package is private and no token available)"
-                echo "Image: $IMAGE_TAG"
-                echo "💡 Solutions:"
-                echo "   1. Make package public: Settings → Packages → [package] → Package settings → Change visibility"
-                echo "   2. Or ensure GITHUB_TOKEN is available (should be automatic in workflows)"
-                exit 1
-              fi
-            fi
-            
-            # Tag for local use
-            echo "🏷️  Tagging image..."
-            docker tag "$IMAGE_TAG" lianel-frontend:latest || {
-              echo "❌ Error: Failed to tag image"
-              exit 1
-            }
-            
-            # Verify tag was created
-            if ! docker images | grep -q "lianel-frontend.*latest"; then
-              echo "❌ Error: Tag verification failed"
-              docker images | grep frontend
-              exit 1
-            fi
-            echo "✅ Image tagged successfully"
-            
-            # Ensure network exists
-            echo "🌐 Ensuring network exists..."
-            docker network create lianel-network 2>/dev/null || true
-            if ! docker network inspect lianel-network >/dev/null 2>&1; then
-              echo "❌ Error: Failed to create/verify network"
-              exit 1
-            fi
-            echo "✅ Network verified"
-            
-            # Stop and remove existing container
-            echo "🛑 Stopping existing container..."
-            docker stop lianel-frontend 2>/dev/null || true
-            docker rm lianel-frontend 2>/dev/null || true
-            
-            # Deploy using docker-compose.yaml (image-only, no build section)
-            echo "🚀 Deploying frontend container..."
-            echo "Current directory: $(pwd)"
-            echo "Available compose files:"
-            ls -la docker-compose*.yaml 2>/dev/null || echo "No compose files found"
-            
-            # Use docker-compose.yaml which has image-only definition
-            if [ -f docker-compose.yaml ]; then
-              echo "Using docker-compose.yaml"
-              if command -v docker-compose >/dev/null 2>&1; then
-                docker-compose -f docker-compose.yaml up -d frontend 2>&1 || {
-                  echo "❌ Error: docker-compose failed"
-                  echo "Compose file validation:"
-                  docker-compose -f docker-compose.yaml config 2>&1 || true
-                  echo "Container status:"
-                  docker ps -a | grep frontend || true
-                  exit 1
-                }
-              else
-                docker compose -f docker-compose.yaml up -d frontend 2>&1 || {
-                  echo "❌ Error: docker compose failed"
-                  echo "Compose file validation:"
-                  docker compose -f docker-compose.yaml config 2>&1 || true
-                  echo "Container status:"
-                  docker ps -a | grep frontend || true
-                  exit 1
-                }
-              fi
-            else
-              echo "❌ Error: docker-compose.yaml not found"
-              echo "Files in current directory:"
-              ls -la
-              exit 1
-            fi
-            
-            # Verify deployment
-            echo "=== Verifying deployment ==="
-            sleep 5
-            if ! docker ps | grep -q lianel-frontend; then
-              echo "❌ Error: Container not running"
-              docker ps -a | grep frontend
-              docker logs lianel-frontend --tail 50 || true
-              exit 1
-            fi
-            echo "✅ Container is running"
-            
-            # Health check
-            echo "🏥 Performing health check..."
-            sleep 10  # Wait for service to start
-            HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://lianel.se/ 2>/dev/null || echo "000")
-            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "302" ] && [ "$HTTP_CODE" != "401" ]; then
-              echo "⚠️  Warning: Health check returned HTTP $HTTP_CODE (expected 200, 302, or 401)"
-              echo "Container logs:"
-              docker logs lianel-frontend --tail 30
-            else
-              echo "✅ Health check passed: HTTP $HTTP_CODE"
-            fi
-            
-            # Clean up old images
-            echo "=== Cleaning up ==="
-            docker image prune -f
-            
-            echo "=== ✅ Deployment successful ==="
-          EOF
+          # Simple SSH command - just call the deployment script
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-frontend.sh '$IMAGE_TAG'"
 
       - name: Deployment Summary
         run: |
