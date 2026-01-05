@@ -109,14 +109,13 @@ jobs:
       - name: Setup SSH Key
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
           # Write SSH key - handle multiline properly
-          cat > ~/.ssh/deploy_key << 'KEYEOF'
-${{ secrets.SSH_PRIVATE_KEY }}
-KEYEOF
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           
           # Verify key
