@@ -22,7 +22,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      packages: read
 
     steps:
       - name: Checkout repository
@@ -143,9 +142,14 @@ jobs:
               # Use GITHUB_TOKEN for authentication (automatically available in workflows)
               if [ -n "$GITHUB_TOKEN" ]; then
                 echo "Using GITHUB_TOKEN for authentication..."
-                echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1 || {
-                  echo "⚠️  Warning: Docker login failed"
-                }
+                echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>&1
+                LOGIN_EXIT=$?
+                if [ $LOGIN_EXIT -ne 0 ]; then
+                  echo "⚠️  Warning: Docker login failed (exit code: $LOGIN_EXIT)"
+                  echo "This might be a permissions issue. Check workflow permissions include 'packages: write'"
+                else
+                  echo "✅ Docker login successful"
+                fi
                 if docker pull "$IMAGE_TAG" 2>&1; then
                   echo "✅ Image pulled successfully with authentication"
                   docker images | grep "$(echo $IMAGE_TAG | cut -d: -f1)" || true
