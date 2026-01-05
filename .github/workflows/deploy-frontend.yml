@@ -142,7 +142,22 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo '✅ SSH connection successful'"
+          # Verify key file before using
+          if [ ! -f ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file not found"
+            exit 1
+          fi
+          
+          # Test SSH connection with verbose output for debugging
+          echo "Testing SSH connection to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
+          ssh -v -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo '✅ SSH connection successful'" 2>&1 | head -20 || {
+            echo "❌ SSH connection failed"
+            echo "Key file check:"
+            ls -la ~/.ssh/deploy_key
+            echo "First few lines of key:"
+            head -3 ~/.ssh/deploy_key
+            exit 1
+          }
 
       - name: Deploy to Remote Host
         env:
@@ -155,7 +170,14 @@ jobs:
           echo "🔍 Debug: Constructed image tag: $IMAGE_TAG_FULL"
           echo "🔍 Debug: Registry: ${{ env.REGISTRY }}"
           echo "🔍 Debug: Image name: ${{ steps.image-name.outputs.image_name }}"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
+          # Verify SSH key before connecting
+          if [ ! -f ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file not found"
+            exit 1
+          fi
+          
+          echo "Connecting to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} bash -s << EOF
             set -euxo pipefail
             IMAGE_TAG_FULL="${IMAGE_TAG_FULL}"
             echo "🔍 Debug: Received image tag on remote: $IMAGE_TAG_FULL"
