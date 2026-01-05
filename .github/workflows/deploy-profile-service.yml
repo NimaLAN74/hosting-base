@@ -109,14 +109,32 @@ jobs:
       - name: Setup SSH Key
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 700 ~/.ssh
+          
+          # Write SSH key properly (handle multiline)
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          
+          # Verify key file exists and has content
+          if [ ! -s ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file is empty or missing"
+            exit 1
+          fi
+          
+          # Verify key format (should start with -----BEGIN)
+          if ! head -1 ~/.ssh/deploy_key | grep -q "BEGIN"; then
+            echo "⚠️  Warning: SSH key might not be in correct format"
+            echo "First line: $(head -1 ~/.ssh/deploy_key)"
+          fi
+          
           if [ -n "$REMOTE_HOST" ]; then
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
           echo "✅ SSH key setup complete"
+          echo "Key file size: $(wc -c < ~/.ssh/deploy_key) bytes"
 
       - name: Test SSH Connection
         env:
