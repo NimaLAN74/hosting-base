@@ -69,6 +69,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Make package public automatically
+        if: success()
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          echo "Making package public: $PACKAGE_NAME"
+          
+          # Use GitHub API to make package public
+          gh api \
+            -X PATCH \
+            "/user/packages/container/${PACKAGE_NAME}" \
+            -f visibility=public \
+            || echo "⚠️  Note: Package might already be public or API call failed (this is OK)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       # REMOVED: Artifact upload to save storage (image is already in registry)
       # Image will be pulled directly from registry on remote host
 
