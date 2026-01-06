@@ -59,10 +59,23 @@ impl KeycloakValidator {
             let userinfo: Value = userinfo_response.json().await?;
             
             // Decode token to get additional claims (exp, iat, etc.)
+            // JWT tokens use URL-safe base64 encoding, may need padding
             let parts: Vec<&str> = token.split('.').collect();
             if parts.len() == 3 {
-                if let Ok(claims_json) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-                    if let Ok(mut claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_json) {
+                // Try URL_SAFE_NO_PAD first, then fall back to URL_SAFE with padding
+                let claims_json = general_purpose::URL_SAFE_NO_PAD
+                    .decode(parts[1])
+                    .or_else(|_| {
+                        // Add padding if needed and try again
+                        let mut padded = parts[1].to_string();
+                        while padded.len() % 4 != 0 {
+                            padded.push('=');
+                        }
+                        general_purpose::URL_SAFE.decode(&padded)
+                    });
+                
+                if let Ok(claims_bytes) = claims_json {
+                    if let Ok(mut claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_bytes) {
                         // Update with userinfo data (more reliable)
                         claims.preferred_username = userinfo.get("preferred_username")
                             .and_then(|v| v.as_str())
@@ -142,10 +155,23 @@ impl KeycloakValidator {
             
             if introspect_result.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
                 // Parse token to get claims
+                // JWT tokens use URL-safe base64 encoding, may need padding
                 let parts: Vec<&str> = token.split('.').collect();
                 if parts.len() == 3 {
-                    if let Ok(claims_json) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-                        if let Ok(claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_json) {
+                    // Try URL_SAFE_NO_PAD first, then fall back to URL_SAFE with padding
+                    let claims_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .decode(parts[1])
+                        .or_else(|_| {
+                            // Add padding if needed and try again
+                            let mut padded = parts[1].to_string();
+                            while padded.len() % 4 != 0 {
+                                padded.push('=');
+                            }
+                            base64::engine::general_purpose::URL_SAFE.decode(&padded)
+                        });
+                    
+                    if let Ok(claims_bytes) = claims_json {
+                        if let Ok(claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_bytes) {
                             return Ok(claims);
                         }
                     }
