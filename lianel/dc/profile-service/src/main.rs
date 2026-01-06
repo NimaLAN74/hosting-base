@@ -117,6 +117,7 @@ impl KeycloakValidator {
                     .map(|v| v as usize),
                 iss: format!("{}/realms/{}", self.config.keycloak_url, self.config.keycloak_realm),
                 aud: None,
+                realm_access: None,
             });
         }
         
