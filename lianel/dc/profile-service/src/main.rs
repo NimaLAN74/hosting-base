@@ -37,17 +37,93 @@ impl KeycloakValidator {
         Self { config }
     }
 
-    // Validate token using Keycloak's introspection endpoint
+    // Validate token using Keycloak's userinfo endpoint (works with public client tokens)
+    // Falls back to introspection if userinfo fails
     async fn validate_token(&self, token: &str) -> Result<KeycloakTokenClaims, anyhow::Error> {
-        // First, try to decode the token to get claims (without signature verification)
-        // Then validate via introspection endpoint
         let client = reqwest::Client::new();
         
-        // Get admin token for introspection
+        // First, try userinfo endpoint (works with tokens from any client, including public clients)
+        let userinfo_url = format!(
+            "{}/realms/{}/protocol/openid-connect/userinfo",
+            self.config.keycloak_url, self.config.keycloak_realm
+        );
+        
+        let userinfo_response = client
+            .get(&userinfo_url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        if userinfo_response.status().is_success() {
+            // Userinfo endpoint works - token is valid
+            let userinfo: Value = userinfo_response.json().await?;
+            
+            // Decode token to get additional claims (exp, iat, etc.)
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() == 3 {
+                if let Ok(claims_json) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
+                    if let Ok(mut claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_json) {
+                        // Update with userinfo data (more reliable)
+                        claims.preferred_username = userinfo.get("preferred_username")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        claims.email = userinfo.get("email")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        claims.given_name = userinfo.get("given_name")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        claims.family_name = userinfo.get("family_name")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        claims.name = userinfo.get("name")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        claims.email_verified = userinfo.get("email_verified")
+                            .and_then(|v| v.as_bool());
+                        return Ok(claims);
+                    }
+                }
+            }
+            
+            // Fallback: construct claims from userinfo
+            return Ok(KeycloakTokenClaims {
+                sub: userinfo.get("sub")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                preferred_username: userinfo.get("preferred_username")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                email: userinfo.get("email")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                given_name: userinfo.get("given_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                family_name: userinfo.get("family_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                name: userinfo.get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                email_verified: userinfo.get("email_verified")
+                    .and_then(|v| v.as_bool()),
+                exp: userinfo.get("exp")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize,
+                iat: userinfo.get("iat")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize),
+                iss: format!("{}/realms/{}", self.config.keycloak_url, self.config.keycloak_realm),
+                aud: None,
+            });
+        }
+        
+        // Fallback to introspection (for confidential client tokens)
         let admin_token = get_admin_token(&self.config).await?;
         
-        // Introspect token
-        let response = client
+        let introspect_response = client
             .post(format!(
                 "{}/realms/{}/protocol/openid-connect/token/introspect",
                 self.config.keycloak_url, self.config.keycloak_realm
@@ -60,28 +136,23 @@ impl KeycloakValidator {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Token introspection failed"));
+        if introspect_response.status().is_success() {
+            let introspect_result: Value = introspect_response.json().await?;
+            
+            if introspect_result.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
+                // Parse token to get claims
+                let parts: Vec<&str> = token.split('.').collect();
+                if parts.len() == 3 {
+                    if let Ok(claims_json) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
+                        if let Ok(claims) = serde_json::from_slice::<KeycloakTokenClaims>(&claims_json) {
+                            return Ok(claims);
+                        }
+                    }
+                }
+            }
         }
 
-        let introspect_result: Value = response.json().await?;
-        
-        if !introspect_result.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
-            return Err(anyhow::anyhow!("Token is not active"));
-        }
-
-        // Parse token to get claims (we trust introspection result)
-        // Decode without verification to get claims
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() != 3 {
-            return Err(anyhow::anyhow!("Invalid token format"));
-        }
-
-        let claims_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(parts[1])?;
-        let claims: KeycloakTokenClaims = serde_json::from_slice(&claims_json)?;
-
-        Ok(claims)
+        Err(anyhow::anyhow!("Token validation failed: userinfo and introspection both failed"))
     }
 }
 
