@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 use serde_json::Value;
-use base64::Engine;
+use base64::{Engine, engine::general_purpose};
 use axum::extract::Query;
 use http::HeaderValue;
 
@@ -159,7 +159,7 @@ impl KeycloakValidator {
                 let parts: Vec<&str> = token.split('.').collect();
                 if parts.len() == 3 {
                     // Try URL_SAFE_NO_PAD first, then fall back to URL_SAFE with padding
-                    let claims_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    let claims_json = general_purpose::URL_SAFE_NO_PAD
                         .decode(parts[1])
                         .or_else(|_| {
                             // Add padding if needed and try again
@@ -167,7 +167,7 @@ impl KeycloakValidator {
                             while padded.len() % 4 != 0 {
                                 padded.push('=');
                             }
-                            base64::engine::general_purpose::URL_SAFE.decode(&padded)
+                            general_purpose::URL_SAFE.decode(&padded)
                         });
                     
                     if let Ok(claims_bytes) = claims_json {
