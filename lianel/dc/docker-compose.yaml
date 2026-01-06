@@ -44,14 +44,15 @@ services:
     env_file:
       - .env
     environment:
-      PORT: 9000
+      PORT: 3000
       KEYCLOAK_URL: https://auth.lianel.se
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
       KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      BACKEND_CLIENT_SECRET: ${BACKEND_CLIENT_SECRET}
       RUST_LOG: info
     expose:
-      - "9000"
+      - "3000"
     depends_on:
       - keycloak
     restart: unless-stopped
