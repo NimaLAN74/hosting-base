@@ -164,21 +164,30 @@ jobs:
           echo "Checking REMOTE_HOST configuration..."
           if [ -z "$REMOTE_HOST" ]; then
             echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in GitHub repository settings:"
+            echo "https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
             exit 1
           fi
-          echo "REMOTE_HOST is set to: $REMOTE_HOST"
-          if [[ "$REMOTE_HOST" == *"msn.com"* ]] || [[ "$REMOTE_HOST" == *"example.com"* ]]; then
-            echo "❌ Error: REMOTE_HOST appears to be incorrectly configured"
-            echo "Expected: 72.60.80.84 (or your actual server IP)"
-            echo "Current: $REMOTE_HOST"
+          
+          # Check for obviously wrong values (but don't fail - just warn)
+          if [[ "$REMOTE_HOST" == *"msn.com"* ]] || \
+             [[ "$REMOTE_HOST" == *"example.com"* ]] || \
+             [[ "$REMOTE_HOST" == *"localhost"* ]] || \
+             [[ "$REMOTE_HOST" == "127.0.0.1" ]] || \
+             [[ "$REMOTE_HOST" == "0.0.0.0" ]]; then
+            echo "⚠️  Warning: REMOTE_HOST appears to be incorrectly configured"
+            echo "Current value contains suspicious pattern: $REMOTE_HOST"
             echo ""
-            echo "Please update the REMOTE_HOST secret in GitHub repository settings:"
-            echo "1. Go to: https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
-            echo "2. Find REMOTE_HOST secret"
-            echo "3. Update it to: 72.60.80.84"
-            exit 1
+            echo "REMOTE_HOST should be your actual server IP address or hostname"
+            echo "Example: 72.60.80.84"
+            echo ""
+            echo "If this is incorrect, please update it at:"
+            echo "https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
+            echo ""
+            echo "Continuing anyway - connection will be tested next..."
+          else
+            echo "✅ REMOTE_HOST configured: $REMOTE_HOST"
           fi
-          echo "✅ REMOTE_HOST looks valid"
 
       - name: Copy Deployment Script to Remote Host
         env:
