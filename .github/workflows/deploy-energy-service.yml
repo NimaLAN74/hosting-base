@@ -1,0 +1,243 @@
+name: Deploy Energy Service to Production
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/energy-service/**'
+      - 'lianel/dc/docker-compose.backend.yaml'
+      - 'lianel/dc/docker-compose.yaml'
+      - '.github/workflows/deploy-energy-service.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Energy Service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        id: image-name
+        run: |
+          # Lowercase the repository name immediately to fix case sensitivity issues
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-energy-service" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "✅ Image name set to: ${IMAGE_NAME_LC}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}
+          tags: |
+            # Only keep latest tag to save storage (removed branch and sha tags)
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lianel/dc/energy-service
+          file: ./lianel/dc/energy-service/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make package public automatically
+        if: success()
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          echo "Making package public: $PACKAGE_NAME"
+          
+          # URL encode the package name (replace / with %2F)
+          PACKAGE_NAME_ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          echo "Encoded package name: $PACKAGE_NAME_ENCODED"
+          
+          # Use GitHub API to make package public
+          # Try user endpoint first (for personal accounts)
+          if gh api -X PATCH "/user/packages/container/${PACKAGE_NAME_ENCODED}" -f visibility=public 2>&1; then
+            echo "✅ Package made public via user endpoint"
+          else
+            echo "⚠️  User endpoint failed, trying org endpoint..."
+            # Try org endpoint (for organization accounts)
+            ORG_NAME=$(echo "$PACKAGE_NAME" | cut -d'/' -f1)
+            PACKAGE_PATH=$(echo "$PACKAGE_NAME" | cut -d'/' -f2-)
+            PACKAGE_PATH_ENCODED=$(echo "$PACKAGE_PATH" | sed 's/\//%2F/g')
+            if gh api -X PATCH "/orgs/${ORG_NAME}/packages/container/${PACKAGE_PATH_ENCODED}" -f visibility=public 2>&1; then
+              echo "✅ Package made public via org endpoint"
+            else
+              echo "⚠️  Warning: Failed to make package public automatically"
+              echo "💡 Please make it public manually: https://github.com/NimaLAN74?tab=packages"
+              echo "   Package: $PACKAGE_NAME"
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            echo "Please add REMOTE_USER secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            echo "Please add SSH_PRIVATE_KEY secret in repository settings"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Write SSH key - handle multiline properly
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Verify key file exists and has content
+          if [ ! -s ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file is empty or missing"
+            exit 1
+          fi
+          
+          # Check file size (should be at least 100 bytes for a valid key)
+          KEY_SIZE=$(wc -c < ~/.ssh/deploy_key)
+          if [ "$KEY_SIZE" -lt 100 ]; then
+            echo "❌ Error: SSH key file is too small ($KEY_SIZE bytes)"
+            exit 1
+          fi
+          
+          # Verify key format (must start with -----BEGIN)
+          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
+          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
+            echo "❌ Error: SSH key format is incorrect"
+            exit 1
+          fi
+          
+          if [ -n "$REMOTE_HOST" ]; then
+            ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          
+          echo "✅ SSH key ready"
+
+      - name: Deploy to Remote Host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          echo "Deploying: $IMAGE_TAG"
+          
+          # Create deployment script on remote host
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cat > /root/deploy-energy-service.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+set -e
+
+IMAGE_TAG=\$1
+SERVICE_NAME=\"energy-service\"
+
+echo \"🚀 Deploying Energy Service...\"
+echo \"Image: \$IMAGE_TAG\"
+
+# Pull image from registry
+echo \"📥 Pulling image from registry...\"
+echo \"\$GITHUB_TOKEN\" | docker login ghcr.io -u \"\$GITHUB_ACTOR\" --password-stdin 2>/dev/null || true
+docker pull \"\$IMAGE_TAG\" || {
+  echo \"⚠️  Failed to pull from registry, trying to load from local...\"
+}
+
+# Navigate to docker compose directory
+cd /root/lianel/dc || exit 1
+
+# Stop existing container
+echo \"🛑 Stopping existing container...\"
+docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml stop \$SERVICE_NAME 2>/dev/null || true
+docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml rm -f \$SERVICE_NAME 2>/dev/null || true
+
+# Tag image for local use
+docker tag \"\$IMAGE_TAG\" \"lianel-energy-service:latest\" 2>/dev/null || true
+
+# Start service
+echo \"▶️  Starting service...\"
+docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d \$SERVICE_NAME
+
+# Wait a moment for container to start
+sleep 3
+
+# Verify container is running
+if docker ps --format '{{.Names}}' | grep -q \"^lianel-energy-service\$\"; then
+  echo \"✅ Container is running\"
+  docker ps --filter \"name=lianel-energy-service\" --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\"
+else
+  echo \"❌ Container failed to start\"
+  docker logs lianel-energy-service --tail 50
+  exit 1
+fi
+
+echo \"✅ Energy Service deployment complete!\"
+DEPLOY_SCRIPT
+chmod +x /root/deploy-energy-service.sh"
+
+          # Execute deployment
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG'"
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Energy Service Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Language**: Rust" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage Optimized**: ✅ No artifacts, direct registry pull" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+

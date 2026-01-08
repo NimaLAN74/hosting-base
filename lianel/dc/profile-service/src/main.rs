@@ -152,11 +152,11 @@ impl KeycloakValidator {
 
         if introspect_response.status().is_success() {
             let introspect_result: Value = introspect_response.json().await?;
-            
+        
             if introspect_result.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
                 // Parse token to get claims
                 // JWT tokens use URL-safe base64 encoding, may need padding
-                let parts: Vec<&str> = token.split('.').collect();
+        let parts: Vec<&str> = token.split('.').collect();
                 if parts.len() == 3 {
                     // Try URL_SAFE_NO_PAD first, then fall back to URL_SAFE with padding
                     let claims_json = general_purpose::URL_SAFE_NO_PAD
@@ -319,7 +319,7 @@ struct HealthResponse {
         version = "1.0.0"
     ),
     servers(
-        (url = "https://lianel.se", description = "Production server")
+        (url = "https://www.lianel.se", description = "Production server")
     )
 )]
 struct ApiDoc;
@@ -1918,7 +1918,7 @@ async fn admin_change_password(
 /// Health check endpoint
 #[utoipa::path(
     get,
-    path = "/health",
+    path = "/api/profile/health",
     tag = "health",
     responses(
         (status = 200, description = "Service is healthy", body = HealthResponse)
