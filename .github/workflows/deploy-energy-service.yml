@@ -157,16 +157,61 @@ jobs:
           
           echo "✅ SSH key ready"
 
+      - name: Validate Remote Host Configuration
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        run: |
+          echo "Checking REMOTE_HOST configuration..."
+          if [ -z "$REMOTE_HOST" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            exit 1
+          fi
+          echo "REMOTE_HOST is set to: $REMOTE_HOST"
+          if [[ "$REMOTE_HOST" == *"msn.com"* ]] || [[ "$REMOTE_HOST" == *"example.com"* ]]; then
+            echo "❌ Error: REMOTE_HOST appears to be incorrectly configured"
+            echo "Expected: 72.60.80.84 (or your actual server IP)"
+            echo "Current: $REMOTE_HOST"
+            echo ""
+            echo "Please update the REMOTE_HOST secret in GitHub repository settings:"
+            echo "1. Go to: https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
+            echo "2. Find REMOTE_HOST secret"
+            echo "3. Update it to: 72.60.80.84"
+            exit 1
+          fi
+          echo "✅ REMOTE_HOST looks valid"
+
       - name: Copy Deployment Script to Remote Host
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
+          echo "Connecting to: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
+          
+          # Test SSH connection first
+          echo "Testing SSH connection..."
+          if ! ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "echo 'SSH connection successful'" 2>&1; then
+            echo "❌ Error: Failed to connect to ${REMOTE_HOST}"
+            echo "Please verify:"
+            echo "1. REMOTE_HOST is correct: ${REMOTE_HOST}"
+            echo "2. REMOTE_PORT is correct: ${REMOTE_PORT}"
+            echo "3. SSH_PRIVATE_KEY is correct"
+            echo "4. Server is accessible from GitHub Actions runners"
+            exit 1
+          fi
+          
           # Copy script from repo to remote host
+          echo "Copying deployment script..."
           scp -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
             -P ${REMOTE_PORT} \
             ./lianel/dc/deploy-energy-service.sh \
             ${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-energy-service.sh
@@ -175,6 +220,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "chmod +x /root/deploy-energy-service.sh"
@@ -190,11 +236,13 @@ jobs:
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
           echo "Deploying: $IMAGE_TAG"
+          echo "Target: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
           
           # Execute deployment script
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG' '${GITHUB_TOKEN}' '${{ github.actor }}'"
