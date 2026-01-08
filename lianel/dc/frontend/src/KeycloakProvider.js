@@ -1,6 +1,6 @@
 // Keycloak Context Provider for React
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { initKeycloak, login, logout, getToken, getUserInfo, isAuthenticated, hasRole, authenticatedFetch } from './keycloak';
+import { initKeycloak, login, logout, getToken, getUserInfo, isAuthenticated, hasRole, authenticatedFetch, keycloak } from './keycloak';
 
 const KeycloakContext = createContext(null);
 
@@ -32,14 +32,28 @@ export const KeycloakProvider = ({ children }) => {
         setKeycloakReady(true);
       });
 
-    // Listen for token updates
-    const updateToken = () => {
+    // Listen for token updates and force refresh to get updated roles
+    const updateToken = async () => {
       if (isAuthenticated()) {
-        setUserInfo(getUserInfo());
+        try {
+          // Force token refresh to get updated roles
+          const refreshed = await keycloak.updateToken(70);
+          if (refreshed) {
+            console.log('Token refreshed, updating user info');
+            setUserInfo(getUserInfo());
+          } else {
+            // Token still valid, just update user info
+            setUserInfo(getUserInfo());
+          }
+        } catch (error) {
+          console.error('Token refresh failed:', error);
+          setUserInfo(getUserInfo()); // Still update with current token
+        }
       }
     };
 
-    // Check token updates every 30 seconds
+    // Check token updates every 30 seconds and force refresh on mount
+    updateToken(); // Refresh immediately on mount
     const tokenInterval = setInterval(updateToken, 30000);
 
     return () => {

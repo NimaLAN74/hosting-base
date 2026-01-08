@@ -19,6 +19,10 @@ function Dashboard() {
     return roleLower === 'admin' || roleLower === 'realm-admin';
   });
   
+  // Calculate isAdmin first
+  const hasAdminRole = keycloak?.authenticated && (hasRoleResult || hasRoleInToken);
+  const isAdmin = !!hasAdminRole;
+  
   // Debug logging (ALWAYS log for troubleshooting)
   if (keycloak?.authenticated) {
     console.log('=== DASHBOARD ADMIN ROLE DEBUG ===');
@@ -30,11 +34,9 @@ function Dashboard() {
     console.log('Dashboard - isAdmin result:', hasRoleResult || hasRoleInToken);
     console.log('Dashboard - Final isAdmin:', isAdmin);
     console.log('Dashboard - adminServices will be:', isAdmin ? 'SHOWN' : 'HIDDEN');
+    console.log('Dashboard - Full tokenParsed:', JSON.stringify(keycloak?.tokenParsed, null, 2));
     console.log('===================================');
   }
-  
-  const hasAdminRole = keycloak?.authenticated && (hasRoleResult || hasRoleInToken);
-  const isAdmin = !!hasAdminRole;
 
   // Base services available to all users
   const baseServices = [

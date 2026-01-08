@@ -10,6 +10,9 @@ const keycloakConfig = {
 // Initialize Keycloak instance
 const keycloak = new Keycloak(keycloakConfig);
 
+// Export keycloak instance for direct access when needed
+export { keycloak };
+
 // Keycloak initialization options
 // Note: check-sso with iframe won't work cross-domain (auth.lianel.se -> lianel.se)
 // X-Frame-Options blocks the iframe, so we disable it and use token-based persistence
