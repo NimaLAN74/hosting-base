@@ -71,14 +71,16 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Database connection verified");
 
     // Build application
+    // Note: Routes don't include /api/energy prefix because Nginx strips it
+    // Nginx rewrites /api/energy/annual -> /annual before proxying
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .route("/health", get(handlers::health::health_check))
         .route("/api/info", get(handlers::metadata::get_service_info))
-        .route("/api/energy/annual", get(handlers::energy::get_energy_annual))
-        .route("/api/energy/annual/by-country/:country_code", get(handlers::energy::get_energy_by_country))
-        .route("/api/energy/annual/by-year/:year", get(handlers::energy::get_energy_by_year))
-        .route("/api/energy/annual/summary", get(handlers::energy::get_energy_summary))
+        .route("/annual", get(handlers::energy::get_energy_annual))
+        .route("/annual/by-country/:country_code", get(handlers::energy::get_energy_by_country))
+        .route("/annual/by-year/:year", get(handlers::energy::get_energy_by_year))
+        .route("/annual/summary", get(handlers::energy::get_energy_summary))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
