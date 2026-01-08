@@ -97,4 +97,4 @@ curl http://localhost:3001/health
 
 🚧 **In Development** - Core endpoints implemented, ready for testing and deployment.
 
-# Trigger deployment - Cast NUMERIC to DOUBLE PRECISION in SQL
+# Trigger deployment - Use CAST() syntax for NUMERIC to DOUBLE PRECISION

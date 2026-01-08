@@ -78,7 +78,7 @@ pub async fn get_energy_records(
             p.product_name,
             e.flow_code,
             f.flow_name,
-            e.value_gwh::DOUBLE PRECISION as value_gwh,
+            CAST(e.value_gwh AS DOUBLE PRECISION) as value_gwh,
             e.unit,
             e.source_table,
             e.ingestion_timestamp
@@ -169,7 +169,7 @@ pub async fn get_energy_summary(
         r#"
         SELECT 
             {} as group_key,
-            SUM(e.value_gwh)::DOUBLE PRECISION as total_gwh,
+            CAST(SUM(e.value_gwh) AS DOUBLE PRECISION) as total_gwh,
             COUNT(*) as record_count
         FROM fact_energy_annual e
         WHERE {}
