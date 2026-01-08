@@ -1,0 +1,70 @@
+name: Verify Keycloak User Roles
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: 'User ID to verify'
+        required: true
+        default: '03aa0110-1f64-44dd-96f7-875713c1d15b'
+
+jobs:
+  verify-user:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.REMOTE_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Verify User Roles
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          USER_ID: ${{ github.event.inputs.user_id }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "cd /root/lianel/dc && ./scripts/verify-user-roles.sh ${USER_ID}"
+
+      - name: Assign Admin Role (if needed)
+        if: failure()
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          USER_ID: ${{ github.event.inputs.user_id }}
+        run: |
+          echo "⚠️  User does not have admin role. Attempting to assign..."
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "cd /root/lianel/dc && ./scripts/assign-admin-role.sh ${USER_ID}" || true
