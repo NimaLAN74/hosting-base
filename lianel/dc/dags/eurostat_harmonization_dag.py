@@ -32,7 +32,7 @@ dag = DAG(
     'eurostat_harmonization',
     default_args=default_args,
     description='Harmonize and transform Eurostat data',
-    schedule=None,  # Triggered externally after ingestion
+    schedule=None,  # Triggered by coordinator DAG after all ingestion completes
     catchup=False,
     tags=['data-transformation', 'harmonization', 'eurostat'],
     max_active_runs=1,
