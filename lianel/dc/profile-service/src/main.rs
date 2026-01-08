@@ -1918,7 +1918,7 @@ async fn admin_change_password(
 /// Health check endpoint
 #[utoipa::path(
     get,
-    path = "/api/profile/health",
+    path = "/health",
     tag = "health",
     responses(
         (status = 200, description = "Service is healthy", body = HealthResponse)

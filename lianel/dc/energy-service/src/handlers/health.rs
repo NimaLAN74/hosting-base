@@ -4,7 +4,7 @@ use sqlx::PgPool;
 
 #[utoipa::path(
     get,
-    path = "/api/energy/health",
+    path = "/health",
     tag = "health",
     responses(
         (status = 200, description = "Service is healthy", body = serde_json::Value)
