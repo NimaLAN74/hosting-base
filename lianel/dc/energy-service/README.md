@@ -97,4 +97,4 @@ curl http://localhost:3001/health
 
 🚧 **In Development** - Core endpoints implemented, ready for testing and deployment.
 
-# Trigger deployment
+# Trigger deployment - Fix NUMERIC to f64 type conversion for value_gwh

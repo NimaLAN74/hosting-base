@@ -126,7 +126,8 @@ pub async fn get_energy_records(
             product_name: row.get(5),
             flow_code: row.get(6),
             flow_name: row.get(7),
-            value_gwh: row.get(8),
+            // Convert NUMERIC to f64
+            value_gwh: row.get::<rust_decimal::Decimal, _>(8).to_f64_retain().unwrap_or(0.0),
             unit: row.get(9),
             source_table: row.get(10),
             ingestion_timestamp: row.get(11),
@@ -195,7 +196,7 @@ pub async fn get_energy_summary(
         .map(|row| {
             (
                 row.get::<String, _>(0),
-                row.get::<f64, _>(1),
+                row.get::<rust_decimal::Decimal, _>(1).to_f64_retain().unwrap_or(0.0),
                 row.get::<i64, _>(2),
             )
         })
