@@ -241,53 +241,6 @@ jobs:
             echo "✅ REMOTE_HOST configured: $REMOTE_HOST"
           fi
 
-      - name: Copy Deployment Script to Remote Host
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          echo "Connecting to: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
-          
-          # Test SSH connection first
-          echo "Testing SSH connection..."
-          if ! ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "echo 'SSH connection successful'" 2>&1; then
-            echo "❌ Error: Failed to connect to ${REMOTE_HOST}"
-            echo "Please verify:"
-            echo "1. REMOTE_HOST is correct: ${REMOTE_HOST}"
-            echo "2. REMOTE_PORT is correct: ${REMOTE_PORT}"
-            echo "3. SSH_PRIVATE_KEY is correct"
-            echo "4. Server is accessible from GitHub Actions runners"
-            exit 1
-          fi
-          
-          # Copy script from repo to remote host
-          echo "Copying deployment script..."
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -P ${REMOTE_PORT} \
-            ./lianel/dc/deploy-energy-service.sh \
-            ${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-energy-service.sh
-          
-          # Make script executable on remote host
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "chmod +x /root/deploy-energy-service.sh"
-          
-          echo "✅ Deployment script copied to remote host"
-
       - name: Deploy to Remote Host
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
@@ -297,59 +250,15 @@ jobs:
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
           echo "Deploying: $IMAGE_TAG"
-          echo "Target: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
           
-          # Execute deployment script
+          # Simple SSH command - just call the deployment script (assumes it exists on remote host)
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG' '${GITHUB_TOKEN}' '${{ github.actor }}'"
 
-      - name: Copy Verification Script to Remote Host
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          # Copy verification script to remote host
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -P ${REMOTE_PORT} \
-            ./lianel/dc/verify-energy-service.sh \
-            ${REMOTE_USER}@${REMOTE_HOST}:/root/verify-energy-service.sh
-          
-          # Make script executable on remote host
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "chmod +x /root/verify-energy-service.sh"
-          
-          echo "✅ Verification script copied to remote host"
-
-      - name: Verify Deployment
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          echo "Running deployment verification..."
-          
-          # Run verification script on remote host
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=10 \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/lianel/dc && /root/verify-energy-service.sh"
 
       - name: Deployment Summary
         run: |
