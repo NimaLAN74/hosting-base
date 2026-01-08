@@ -42,7 +42,7 @@ use db::create_pool;
         (name = "info", description = "Service information endpoints"),
     ),
     servers(
-        (url = "https://www.lianel.se", description = "Production server")
+        (url = "https://www.lianel.se/api/energy", description = "Production server")
     )
 )]
 struct ApiDoc;

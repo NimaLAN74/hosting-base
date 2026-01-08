@@ -319,7 +319,7 @@ struct HealthResponse {
         version = "1.0.0"
     ),
     servers(
-        (url = "https://www.lianel.se", description = "Production server")
+        (url = "https://www.lianel.se/api/profile", description = "Production server")
     )
 )]
 struct ApiDoc;
