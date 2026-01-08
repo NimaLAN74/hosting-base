@@ -19,9 +19,19 @@ export const energyApi = {
   },
 
   async getServiceInfo() {
-    const res = await authenticatedFetch('/api/energy/api/info');
-    if (!res.ok) throw new Error('Failed to fetch service info');
-    return res.json();
+    try {
+      const res = await authenticatedFetch('/api/energy/api/info');
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to fetch service info: ${res.status} ${res.statusText} - ${errorText}`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err.message.includes('Not authenticated')) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      throw err;
+    }
   },
 
   async getEnergyAnnual({
@@ -40,9 +50,19 @@ export const energyApi = {
     if (flow_code) params.flow_code = flow_code;
     if (source_table) params.source_table = source_table;
 
-    const res = await authenticatedFetch(`/api/energy/annual${buildQuery(params)}`);
-    if (!res.ok) throw new Error('Failed to fetch energy data');
-    return res.json();
+    try {
+      const res = await authenticatedFetch(`/api/energy/annual${buildQuery(params)}`);
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to fetch energy data: ${res.status} ${res.statusText} - ${errorText}`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err.message.includes('Not authenticated')) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      throw err;
+    }
   },
 
   async getEnergyByCountry(countryCode, { limit = 100, offset = 0 } = {}) {
@@ -66,8 +86,18 @@ export const energyApi = {
     if (country_code) params.country_code = country_code;
     if (year) params.year = year;
 
-    const res = await authenticatedFetch(`/api/energy/annual/summary${buildQuery(params)}`);
-    if (!res.ok) throw new Error('Failed to fetch energy summary');
-    return res.json();
+    try {
+      const res = await authenticatedFetch(`/api/energy/annual/summary${buildQuery(params)}`);
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to fetch energy summary: ${res.status} ${res.statusText} - ${errorText}`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err.message.includes('Not authenticated')) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      throw err;
+    }
   }
 };

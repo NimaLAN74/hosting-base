@@ -7,8 +7,13 @@ function Dashboard() {
   const { keycloak, hasRole } = useKeycloak();
   const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
 
-  // Check if user is admin - ensure keycloak is ready and authenticated
-  const isAdmin = keycloak?.authenticated && hasRole && hasRole('admin');
+  // Check if user is admin - check both hasRole function and token directly
+  // Keycloak stores roles in tokenParsed.realm_access.roles array
+  const hasAdminRole = keycloak?.authenticated && (
+    (hasRole && typeof hasRole === 'function' && hasRole('admin')) ||
+    (keycloak?.tokenParsed?.realm_access?.roles?.includes('admin'))
+  );
+  const isAdmin = !!hasAdminRole;
 
   // Base services available to all users
   const baseServices = [
