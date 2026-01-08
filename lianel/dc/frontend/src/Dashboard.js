@@ -7,6 +7,9 @@ function Dashboard() {
   const { keycloak, hasRole } = useKeycloak();
   const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
 
+  // Check if user is admin - ensure keycloak is ready and authenticated
+  const isAdmin = keycloak?.authenticated && hasRole && hasRole('admin');
+
   // Base services available to all users
   const baseServices = [
     {
@@ -28,7 +31,7 @@ function Dashboard() {
   ];
 
   // Admin-only services
-  const adminServices = hasRole && hasRole('admin') ? [
+  const adminServices = isAdmin ? [
     {
       name: 'Apache Airflow',
       description: 'Workflow orchestration and management',
@@ -86,7 +89,7 @@ function Dashboard() {
   const recentActivity = [
     { action: 'Energy data accessed', service: 'Energy Service', time: '2 hours ago', status: 'success' },
     { action: 'Profile viewed', service: 'Profile Service', time: '5 hours ago', status: 'info' },
-    ...(hasRole && hasRole('admin') ? [
+    ...(isAdmin ? [
       { action: 'Workflow executed', service: 'Airflow', time: '1 day ago', status: 'success' }
     ] : [])
   ];

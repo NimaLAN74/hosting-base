@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { energyApi } from './energyApi';
+import UserDropdown from '../UserDropdown';
+import '../App.css';
 import './Energy.css';
 
 function Energy() {
@@ -77,26 +80,46 @@ function Energy() {
 
   if (loading && !energyData) {
     return (
-      <div className="energy-container">
-        <div className="loading">Loading energy data...</div>
+      <div className="App">
+        <div className="container">
+          <div className="loading">Loading energy data...</div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="energy-container">
-      <div className="energy-header">
-        <h1>EU Energy Data</h1>
-        {serviceInfo && (
-          <div className="service-stats">
-            <span>📊 {serviceInfo.database.total_records.toLocaleString()} records</span>
-            <span>🌍 {serviceInfo.database.countries} countries</span>
-            <span>📅 {serviceInfo.database.years} years</span>
+    <div className="App">
+      <div className="container">
+        <header className="header">
+          <h1 className="logo">
+            <div className="logo-icon">LW</div>
+            Lianel World
+          </h1>
+          <div className="header-right">
+            <UserDropdown />
           </div>
-        )}
-      </div>
+        </header>
+        
+        <main className="main">
+          <div className="energy-container">
+            <div className="energy-header">
+              <div className="energy-title-section">
+                <h1>EU Energy Data</h1>
+                <Link to="/" className="back-to-home-btn">
+                  ← Back to Home
+                </Link>
+              </div>
+              {serviceInfo && (
+                <div className="service-stats">
+                  <span>📊 {serviceInfo.database.total_records.toLocaleString()} records</span>
+                  <span>🌍 {serviceInfo.database.countries} countries</span>
+                  <span>📅 {serviceInfo.database.years} years</span>
+                </div>
+              )}
+            </div>
 
-      {error && <div className="error-message">{error}</div>}
+            {error && <div className="error-message">{error}</div>}
 
       {/* Filters */}
       <div className="filters-panel">
@@ -233,6 +256,13 @@ function Energy() {
           )}
         </div>
       )}
+          </div>
+        </main>
+        
+        <footer className="footer">
+          <p>&copy; 2025 Lianel World. All rights reserved.</p>
+        </footer>
+      </div>
     </div>
   );
 }
