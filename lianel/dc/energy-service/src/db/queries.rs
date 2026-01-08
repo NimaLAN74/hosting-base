@@ -1,4 +1,6 @@
 use sqlx::{PgPool, Row};
+use sqlx::types::BigDecimal;
+use bigdecimal::ToPrimitive;
 use crate::models::*;
 
 pub async fn get_energy_records(
@@ -78,7 +80,7 @@ pub async fn get_energy_records(
             p.product_name,
             e.flow_code,
             f.flow_name,
-            CAST(e.value_gwh AS DOUBLE PRECISION) as value_gwh,
+            e.value_gwh,
             e.unit,
             e.source_table,
             e.ingestion_timestamp
@@ -126,7 +128,7 @@ pub async fn get_energy_records(
             product_name: row.get(5),
             flow_code: row.get(6),
             flow_name: row.get(7),
-            value_gwh: row.get::<f64, _>(8),
+            value_gwh: row.get::<BigDecimal, _>(8).to_f64().unwrap_or(0.0),
             unit: row.get(9),
             source_table: row.get(10),
             ingestion_timestamp: row.get(11),
@@ -169,7 +171,7 @@ pub async fn get_energy_summary(
         r#"
         SELECT 
             {} as group_key,
-            CAST(SUM(e.value_gwh) AS DOUBLE PRECISION) as total_gwh,
+            SUM(e.value_gwh) as total_gwh,
             COUNT(*) as record_count
         FROM fact_energy_annual e
         WHERE {}
@@ -195,7 +197,7 @@ pub async fn get_energy_summary(
         .map(|row| {
             (
                 row.get::<String, _>(0),
-                row.get::<f64, _>(1),
+                row.get::<BigDecimal, _>(1).to_f64().unwrap_or(0.0),
                 row.get::<i64, _>(2),
             )
         })
