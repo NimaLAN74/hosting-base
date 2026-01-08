@@ -205,6 +205,25 @@ pub async fn get_energy_summary(
 }
 
 pub async fn get_database_stats(pool: &PgPool) -> Result<(i64, i32, i32, i32), sqlx::Error> {
+    // First check if the table exists
+    let table_exists: bool = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'fact_energy_annual'
+        )
+        "#,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if !table_exists {
+        // Table doesn't exist yet - return zeros
+        return Ok((0, 0, 0, 0));
+    }
+
+    // Table exists - get stats
     let row = sqlx::query(
         r#"
         SELECT 
