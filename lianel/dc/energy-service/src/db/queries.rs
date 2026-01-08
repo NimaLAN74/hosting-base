@@ -204,7 +204,7 @@ pub async fn get_energy_summary(
     Ok(results)
 }
 
-pub async fn get_database_stats(pool: &PgPool) -> Result<(i64, i32, i32, i32), sqlx::Error> {
+pub async fn get_database_stats(pool: &PgPool) -> Result<(i64, i64, i64, i64), sqlx::Error> {
     // First check if the table exists
     let table_exists: bool = sqlx::query_scalar::<_, bool>(
         r#"
@@ -239,10 +239,10 @@ pub async fn get_database_stats(pool: &PgPool) -> Result<(i64, i32, i32, i32), s
     .await?;
 
     Ok((
-        row.get(0),
-        row.get(1),
-        row.get(2),
-        row.get(3),
+        row.get::<i64, _>(0),
+        row.get::<i64, _>(1),
+        row.get::<i64, _>(2),
+        row.get::<i64, _>(3),
     ))
 }
 
