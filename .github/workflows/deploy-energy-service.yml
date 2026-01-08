@@ -250,14 +250,41 @@ jobs:
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
           echo "Deploying: $IMAGE_TAG"
+          echo "Target: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
           
-          # Simple SSH command - just call the deployment script (assumes it exists on remote host)
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG' '${GITHUB_TOKEN}' '${{ github.actor }}'"
+          # Retry SSH connection with exponential backoff
+          MAX_RETRIES=3
+          RETRY_DELAY=5
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i of $MAX_RETRIES..."
+            if ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=3 \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG' '${GITHUB_TOKEN}' '${{ github.actor }}'"; then
+              echo "✅ Deployment successful"
+              exit 0
+            else
+              EXIT_CODE=$?
+              echo "⚠️  Attempt $i failed with exit code $EXIT_CODE"
+              if [ $i -lt $MAX_RETRIES ]; then
+                echo "Waiting ${RETRY_DELAY}s before retry..."
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            fi
+          done
+          
+          echo "❌ All $MAX_RETRIES connection attempts failed"
+          echo "This could be due to:"
+          echo "1. Network issues between GitHub Actions and remote host"
+          echo "2. Firewall blocking GitHub Actions IP ranges"
+          echo "3. SSH service issues on remote host"
+          exit 1
 
 
       - name: Deployment Summary
