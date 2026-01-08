@@ -17,6 +17,14 @@ function Dashboard() {
       gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
     },
     {
+      name: 'EU Energy Data',
+      description: 'Explore EU energy statistics and analytics',
+      icon: '⚡',
+      url: '/energy',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
+    },
+    {
       name: 'Apache Airflow',
       description: 'Workflow orchestration and management',
       icon: '⚙️',

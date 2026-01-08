@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Profile from './Profile';
 import LandingPage from './LandingPage';
 import Dashboard from './Dashboard';
+import Energy from './energy/Energy';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -29,6 +30,7 @@ function App() {
         <div className="container">
           <Routes>
             <Route path="/profile" element={<Profile />} />
+            <Route path="/energy" element={<Energy />} />
             <Route
               path="/admin/users"
               element={
