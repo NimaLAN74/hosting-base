@@ -58,18 +58,29 @@ docker stop $CONTAINER_NAME 2>/dev/null || true
 docker rm $CONTAINER_NAME 2>/dev/null || true
 
 # Use docker-compose.backend.yaml (energy-service is defined there)
-docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d $SERVICE_NAME
+# Try docker compose first, fallback to docker-compose
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  docker compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d $SERVICE_NAME
+elif command -v docker-compose >/dev/null 2>&1; then
+  docker-compose -f docker-compose.infra.yaml -f docker-compose.backend.yaml up -d $SERVICE_NAME
+else
+  echo "❌ Error: Neither 'docker compose' nor 'docker-compose' found"
+  exit 1
+fi
 
 # Wait a moment for container to start
-sleep 3
+sleep 5
 
-# Verify container is running
-if docker ps --format '{{.Names}}' | grep -q "^lianel-energy-service$"; then
+# Verify container is running (exact name match)
+if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   echo "✅ Container is running"
-  docker ps --filter "name=lianel-energy-service" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+  docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}"
 else
   echo "❌ Container failed to start"
-  docker logs lianel-energy-service --tail 50
+  echo "Checking stopped containers:"
+  docker ps -a --filter "name=${CONTAINER_NAME}" || true
+  echo "Recent logs:"
+  docker logs ${CONTAINER_NAME} --tail 50 2>&1 || true
   exit 1
 fi
 

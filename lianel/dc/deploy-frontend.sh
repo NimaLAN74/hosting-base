@@ -1,50 +1,74 @@
 #!/bin/bash
-# Deployment script for frontend updates
-# Usage: ./deploy-frontend.sh
+set -euo pipefail
 
-set -e
+IMAGE_TAG="$1"
+SERVICE_NAME="frontend"
+LOCAL_TAG="lianel-frontend:latest"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR" || exit 1
+echo "=== Deploying Frontend ==="
+echo "Image: $IMAGE_TAG"
 
-echo "🚀 Deploying frontend updates..."
-echo ""
+cd /root/lianel/dc
 
-# Step 1: Ensure network exists
-echo "1️⃣  Ensuring lianel-network exists..."
-docker network create lianel-network 2>/dev/null || true
-echo "   ✅ Network ready"
-echo ""
+# Clear any stale Docker auth
+docker logout ghcr.io 2>/dev/null || true
 
-# Step 2: Remove old container
-echo "2️⃣  Removing old frontend container..."
-docker rm -f lianel-frontend 2>/dev/null || true
-echo "   ✅ Old container removed"
-echo ""
-
-# Step 3: Start new container with infra compose file
-echo "3️⃣  Starting new frontend container..."
-docker compose -f docker-compose.infra.yaml -f docker-compose.yaml up -d frontend
-sleep 3
-echo "   ✅ Container started"
-echo ""
-
-# Step 4: Fix network configuration
-echo "4️⃣  Configuring network..."
-docker network disconnect dc_default lianel-frontend 2>/dev/null || true
-docker network connect lianel-network lianel-frontend 2>/dev/null || true
-echo "   ✅ Network configured"
-echo ""
-
-# Step 5: Verify
-echo "5️⃣  Verifying deployment..."
-STATUS=$(curl -sk -w '%{http_code}' -o /dev/null 'https://lianel.se/' 2>/dev/null || echo "000")
-if [ "$STATUS" = "200" ]; then
-    echo "   ✅ Frontend is responding (HTTP $STATUS)"
-    echo ""
-    echo "🎉 Deployment successful!"
-    echo "   Frontend: https://lianel.se"
+# Try to pull
+echo "Pulling image..."
+if docker pull "$IMAGE_TAG" 2>&1; then
+  echo "✅ Image pulled successfully"
 else
-    echo "   ⚠️  Frontend returned HTTP $STATUS (expected 200)"
-    echo "   Check with: curl -sk 'https://lianel.se/'"
+  PULL_EXIT=$?
+  echo "⚠️  Pull failed (exit code: $PULL_EXIT), trying with authentication..."
+  if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
+    echo "Authenticating with GitHub..."
+    echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin 2>&1 || true
+    if docker pull "$IMAGE_TAG" 2>&1; then
+      echo "✅ Image pulled successfully with authentication"
+    else
+      echo "❌ Error: Failed to pull image even with authentication"
+      exit 1
+    fi
+  else
+    echo "❌ Error: Failed to pull image and no authentication available"
+    exit 1
+  fi
 fi
+
+# Tag for local use
+echo "Tagging image..."
+docker tag "$IMAGE_TAG" "$LOCAL_TAG"
+
+# Restart container - use docker compose (newer) or docker-compose (older)
+echo "Restarting container..."
+docker stop lianel-$SERVICE_NAME 2>/dev/null || true
+docker rm lianel-$SERVICE_NAME 2>/dev/null || true
+
+# Try docker compose first, fallback to docker-compose
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  docker compose -f docker-compose.yaml up -d $SERVICE_NAME
+elif command -v docker-compose >/dev/null 2>&1; then
+  docker-compose -f docker-compose.yaml up -d $SERVICE_NAME
+else
+  echo "❌ Error: Neither 'docker compose' nor 'docker-compose' found"
+  exit 1
+fi
+
+# Verify
+sleep 5
+if docker ps --format '{{.Names}}' | grep -q "^lianel-$SERVICE_NAME$"; then
+  echo "✅ Deployment successful"
+  docker ps --filter "name=lianel-$SERVICE_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+else
+  echo "❌ Container not running"
+  echo "Checking stopped containers:"
+  docker ps -a --filter "name=lianel-$SERVICE_NAME" || true
+  echo "Recent logs:"
+  docker logs lianel-$SERVICE_NAME --tail 20 2>&1 || true
+  exit 1
+fi
+
+# Cleanup
+docker image prune -f
+
+echo "=== Done ==="
