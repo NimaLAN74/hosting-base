@@ -7,7 +7,8 @@ function Dashboard() {
   const { keycloak, hasRole } = useKeycloak();
   const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
 
-  const services = [
+  // Base services available to all users
+  const baseServices = [
     {
       name: 'User Profile',
       description: 'View and edit your user profile',
@@ -23,7 +24,11 @@ function Dashboard() {
       url: '/energy',
       status: 'active',
       gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
-    },
+    }
+  ];
+
+  // Admin-only services
+  const adminServices = hasRole && hasRole('admin') ? [
     {
       name: 'Apache Airflow',
       description: 'Workflow orchestration and management',
@@ -40,38 +45,50 @@ function Dashboard() {
       status: 'active',
       gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
     },
-    ...(hasRole && hasRole('admin') ? [
-      {
-        name: 'Profile Management',
-        description: 'Admin tools to manage users',
-        icon: '🧑‍💼',
-        url: '/admin/users',
-        status: 'active',
-        gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
-      },
-      {
-        name: 'Profile Service API',
-        description: 'User profile management service (Admin only)',
-        icon: '🔧',
-        url: '/swagger-ui',
-        status: 'active',
-        gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
-      },
-      {
-        name: 'Admin Console',
-        description: 'Manage users and access',
-        icon: '🛡️',
-        url: '/admin/users',
-        status: 'active',
-        gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
-      }
-    ] : [])
-  ];
+    {
+      name: 'Profile Management',
+      description: 'Admin tools to manage users',
+      icon: '🧑‍💼',
+      url: '/admin/users',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+    },
+    {
+      name: 'Profile Service API',
+      description: 'User profile management service (Admin only)',
+      icon: '🔧',
+      url: '/swagger-ui',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+    },
+    {
+      name: 'Energy Service API',
+      description: 'Energy data service API documentation (Admin only)',
+      icon: '🔧',
+      url: '/api/energy/swagger-ui',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
+    },
+    {
+      name: 'Admin Console',
+      description: 'Manage users and access',
+      icon: '🛡️',
+      url: '/admin/users',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
+    }
+  ] : [];
 
+  // Combine services: base services for everyone, admin services for admins
+  const services = [...baseServices, ...adminServices];
+
+  // Recent activity - show different activities based on role
   const recentActivity = [
-    { action: 'Workflow executed', service: 'Airflow', time: '2 hours ago', status: 'success' },
-    { action: 'Dashboard viewed', service: 'Grafana', time: '5 hours ago', status: 'info' },
-    { action: 'Profile updated', service: 'Profile Service', time: '1 day ago', status: 'success' }
+    { action: 'Energy data accessed', service: 'Energy Service', time: '2 hours ago', status: 'success' },
+    { action: 'Profile viewed', service: 'Profile Service', time: '5 hours ago', status: 'info' },
+    ...(hasRole && hasRole('admin') ? [
+      { action: 'Workflow executed', service: 'Airflow', time: '1 day ago', status: 'success' }
+    ] : [])
   ];
 
   return (
@@ -156,7 +173,7 @@ function Dashboard() {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-icon">🚀</div>
-                <div className="stat-value">{hasRole && hasRole('admin') ? 5 : 3}</div>
+                <div className="stat-value">{services.length}</div>
                 <div className="stat-label">Active Services</div>
               </div>
               <div className="stat-card">
