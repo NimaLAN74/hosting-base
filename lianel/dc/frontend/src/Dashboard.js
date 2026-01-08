@@ -9,10 +9,18 @@ function Dashboard() {
 
   // Check if user is admin - check both hasRole function and token directly
   // Keycloak stores roles in tokenParsed.realm_access.roles array
-  const hasAdminRole = keycloak?.authenticated && (
-    (hasRole && typeof hasRole === 'function' && hasRole('admin')) ||
-    (keycloak?.tokenParsed?.realm_access?.roles?.includes('admin'))
-  );
+  const roles = keycloak?.tokenParsed?.realm_access?.roles || [];
+  const hasRoleResult = hasRole && typeof hasRole === 'function' ? hasRole('admin') : false;
+  const hasRoleInToken = roles.includes('admin');
+  
+  // Debug logging (remove in production)
+  if (keycloak?.authenticated) {
+    console.log('Dashboard - User roles:', roles);
+    console.log('Dashboard - hasRole("admin"):', hasRoleResult);
+    console.log('Dashboard - roles.includes("admin"):', hasRoleInToken);
+  }
+  
+  const hasAdminRole = keycloak?.authenticated && (hasRoleResult || hasRoleInToken);
   const isAdmin = !!hasAdminRole;
 
   // Base services available to all users
