@@ -97,4 +97,4 @@ curl http://localhost:3001/health
 
 🚧 **In Development** - Core endpoints implemented, ready for testing and deployment.
 
-# Trigger deployment - Use BigDecimal for NUMERIC type handling
+# Trigger deployment - Fix TIMESTAMP type mismatch by casting to TIMESTAMPTZ

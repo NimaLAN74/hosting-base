@@ -83,7 +83,7 @@ pub async fn get_energy_records(
             e.value_gwh,
             e.unit,
             e.source_table,
-            e.ingestion_timestamp
+            e.ingestion_timestamp::TIMESTAMPTZ as ingestion_timestamp
         FROM fact_energy_annual e
         LEFT JOIN dim_country c ON e.country_code = c.country_code
         LEFT JOIN dim_energy_product p ON e.product_code = p.product_code
