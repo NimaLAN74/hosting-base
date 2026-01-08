@@ -308,6 +308,49 @@ jobs:
             ${REMOTE_USER}@${REMOTE_HOST} \
             "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-energy-service.sh '$IMAGE_TAG' '${GITHUB_TOKEN}' '${{ github.actor }}'"
 
+      - name: Copy Verification Script to Remote Host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          # Copy verification script to remote host
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
+            -P ${REMOTE_PORT} \
+            ./lianel/dc/verify-energy-service.sh \
+            ${REMOTE_USER}@${REMOTE_HOST}:/root/verify-energy-service.sh
+          
+          # Make script executable on remote host
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /root/verify-energy-service.sh"
+          
+          echo "✅ Verification script copied to remote host"
+
+      - name: Verify Deployment
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Running deployment verification..."
+          
+          # Run verification script on remote host
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=10 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/lianel/dc && /root/verify-energy-service.sh"
+
       - name: Deployment Summary
         run: |
           echo "## 🚀 Energy Service Deployment Complete" >> $GITHUB_STEP_SUMMARY
