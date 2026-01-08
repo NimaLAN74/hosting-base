@@ -9,25 +9,24 @@ function Dashboard() {
 
   // Check if user is admin - check both hasRole function and token directly
   // Keycloak stores roles in tokenParsed.realm_access.roles array
-  // Check multiple variations: 'admin', 'Admin', 'ADMIN'
+  // Backend checks for "admin" or "realm-admin" case-insensitively
   const roles = keycloak?.tokenParsed?.realm_access?.roles || [];
   const hasRoleResult = hasRole && typeof hasRole === 'function' ? hasRole('admin') : false;
   
-  // Check for admin role in various cases
-  const hasRoleInToken = roles.some(role => 
-    role.toLowerCase() === 'admin' || 
-    role === 'admin' || 
-    role === 'Admin' || 
-    role === 'ADMIN'
-  );
+  // Check for admin role in various cases (matching backend logic)
+  const hasRoleInToken = roles.some(role => {
+    const roleLower = role.toLowerCase();
+    return roleLower === 'admin' || roleLower === 'realm-admin';
+  });
   
   // Debug logging (remove in production)
   if (keycloak?.authenticated) {
     console.log('Dashboard - User roles:', roles);
     console.log('Dashboard - hasRole("admin"):', hasRoleResult);
-    console.log('Dashboard - roles.includes("admin"):', hasRoleInToken);
+    console.log('Dashboard - roles check (admin/realm-admin):', hasRoleInToken);
     console.log('Dashboard - Full tokenParsed:', keycloak?.tokenParsed);
     console.log('Dashboard - realm_access:', keycloak?.tokenParsed?.realm_access);
+    console.log('Dashboard - isAdmin result:', hasRoleResult || hasRoleInToken);
   }
   
   const hasAdminRole = keycloak?.authenticated && (hasRoleResult || hasRoleInToken);
