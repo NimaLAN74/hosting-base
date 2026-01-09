@@ -20,7 +20,7 @@ export const energyApi = {
 
   async getServiceInfo() {
     try {
-      const res = await authenticatedFetch('/api/energy/api/info');
+      const res = await authenticatedFetch('/api/energy/info');
       if (!res.ok) {
         const errorText = await res.text().catch(() => 'Unknown error');
         throw new Error(`Failed to fetch service info: ${res.status} ${res.statusText} - ${errorText}`);
