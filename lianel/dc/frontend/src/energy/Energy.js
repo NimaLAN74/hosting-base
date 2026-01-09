@@ -29,38 +29,55 @@ function Energy() {
   }, [filters]);
 
   // Extract unique countries and years from data
-  const extractOptions = (data) => {
+  const extractOptions = useCallback((data) => {
     if (!data || !data.data) return;
     
     const countries = new Set();
     const years = new Set();
+    const countryMap = new Map(); // Store country code -> country name mapping
     
     data.data.forEach(record => {
       if (record.country_code) {
         countries.add(record.country_code);
+        // Store country name if available
+        if (record.country_name && !countryMap.has(record.country_code)) {
+          countryMap.set(record.country_code, record.country_name);
+        }
       }
       if (record.year) {
         years.add(record.year);
       }
     });
     
-    const countryOptions = Array.from(countries)
-      .sort()
-      .map(code => {
-        const record = data.data.find(r => r.country_code === code);
-        return {
-          value: code,
-          label: record?.country_name ? `${code} - ${record.country_name}` : code
-        };
+    // Merge with existing options to preserve all countries/years
+    setAvailableCountries(prev => {
+      const existingMap = new Map(prev.map(opt => [opt.value, opt]));
+      // Add new countries
+      countries.forEach(code => {
+        if (!existingMap.has(code)) {
+          const name = countryMap.get(code);
+          existingMap.set(code, {
+            value: code,
+            label: name ? `${code} - ${name}` : code
+          });
+        }
       });
+      return Array.from(existingMap.values()).sort((a, b) => a.value.localeCompare(b.value));
+    });
     
-    const yearOptions = Array.from(years)
-      .sort((a, b) => b - a) // Sort descending
-      .map(year => ({ value: year, label: String(year) }));
-    
-    setAvailableCountries(countryOptions);
-    setAvailableYears(yearOptions);
-  };
+    setAvailableYears(prev => {
+      const existingSet = new Set(prev.map(opt => opt.value));
+      // Add new years
+      years.forEach(year => {
+        if (!existingSet.has(year)) {
+          existingSet.add(year);
+        }
+      });
+      return Array.from(existingSet)
+        .sort((a, b) => b - a)
+        .map(year => ({ value: year, label: String(year) }));
+    });
+  }, []);
 
   const fetchData = useCallback(async (currentFilters = null) => {
     try {
