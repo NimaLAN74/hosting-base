@@ -254,7 +254,16 @@ function Energy() {
       setSummary(summaryData);
     } catch (err) {
       console.error('Error fetching energy data:', err);
-      setError(err.message || 'Failed to load energy data');
+      const errorMessage = err.message || 'Failed to load energy data';
+      
+      // Provide more helpful error messages
+      if (errorMessage.includes('503') || errorMessage.includes('Service Temporarily Unavailable')) {
+        setError('Service is temporarily unavailable. This may be due to too many requests. Please try again in a moment or reduce the number of selected filters.');
+      } else if (errorMessage.includes('All API requests failed')) {
+        setError('All requests failed. Please try with fewer countries or years selected.');
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
