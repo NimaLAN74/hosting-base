@@ -63,13 +63,12 @@ docker stop lianel-$SERVICE_NAME 2>/dev/null || true
 docker rm lianel-$SERVICE_NAME 2>/dev/null || true
 
 # Try docker compose first, fallback to docker-compose
-# Use --pull always to force Docker Compose to pull the latest image
+# We already pulled and tagged the image above, so just recreate the container
+# Use --no-deps to avoid recreating dependencies (keycloak, nginx, etc.)
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f docker-compose.yaml pull $SERVICE_NAME || true
-  docker compose -f docker-compose.yaml up -d --force-recreate $SERVICE_NAME
+  docker compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME
 elif command -v docker-compose >/dev/null 2>&1; then
-  docker-compose -f docker-compose.yaml pull $SERVICE_NAME || true
-  docker-compose -f docker-compose.yaml up -d --force-recreate $SERVICE_NAME
+  docker-compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME
 else
   echo "❌ Error: Neither 'docker compose' nor 'docker-compose' found"
   exit 1
