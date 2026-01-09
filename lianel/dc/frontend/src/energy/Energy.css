@@ -143,6 +143,28 @@
 .filter-actions {
   display: flex;
   gap: 10px;
+  margin-top: 15px;
+}
+
+.active-filters {
+  margin-top: 15px;
+  padding: 12px;
+  background: rgba(74, 143, 231, 0.1);
+  border: 1px solid rgba(74, 143, 231, 0.3);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  color: var(--text-primary);
+}
+
+.filter-tag {
+  padding: 4px 10px;
+  background: rgba(74, 143, 231, 0.2);
+  border-radius: 12px;
+  font-size: 0.85em;
+  font-weight: 500;
 }
 
 .btn-primary,

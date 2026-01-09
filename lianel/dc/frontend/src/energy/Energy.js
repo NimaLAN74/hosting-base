@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
 import { energyApi } from './energyApi';
 import { TimeSeriesChart, CountryComparisonChart, ProductDistributionChart, FlowDistributionChart } from './EnergyCharts';
+import MultiSelect from './MultiSelect';
 import '../App.css';
 import './Energy.css';
 
@@ -12,16 +13,52 @@ function Energy() {
   const [serviceInfo, setServiceInfo] = useState(null);
   const [energyData, setEnergyData] = useState(null);
   const [filters, setFilters] = useState({
-    country_code: '',
-    year: '',
+    country_codes: [], // Changed to array for multi-select
+    years: [], // Changed to array for multi-select
     limit: 50,
     offset: 0
   });
   const [summary, setSummary] = useState(null);
+  const [availableCountries, setAvailableCountries] = useState([]);
+  const [availableYears, setAvailableYears] = useState([]);
 
   useEffect(() => {
     fetchData();
   }, [filters.offset]);
+
+  // Extract unique countries and years from data
+  const extractOptions = (data) => {
+    if (!data || !data.data) return;
+    
+    const countries = new Set();
+    const years = new Set();
+    
+    data.data.forEach(record => {
+      if (record.country_code) {
+        countries.add(record.country_code);
+      }
+      if (record.year) {
+        years.add(record.year);
+      }
+    });
+    
+    const countryOptions = Array.from(countries)
+      .sort()
+      .map(code => {
+        const record = data.data.find(r => r.country_code === code);
+        return {
+          value: code,
+          label: record?.country_name ? `${code} - ${record.country_name}` : code
+        };
+      });
+    
+    const yearOptions = Array.from(years)
+      .sort((a, b) => b - a) // Sort descending
+      .map(year => ({ value: year, label: String(year) }));
+    
+    setAvailableCountries(countryOptions);
+    setAvailableYears(yearOptions);
+  };
 
   const fetchData = async () => {
     try {
@@ -32,21 +69,77 @@ function Energy() {
       const info = await energyApi.getServiceInfo();
       setServiceInfo(info);
 
-      // Fetch energy data
-      const params = {
-        limit: parseInt(filters.limit) || 50,
-        offset: filters.offset || 0
-      };
-      if (filters.country_code) params.country_code = filters.country_code;
-      if (filters.year) params.year = parseInt(filters.year);
+      // Fetch energy data - handle multiple countries/years
+      let allData = [];
+      let totalCount = 0;
+      
+      if (filters.country_codes.length > 0 || filters.years.length > 0) {
+        // If filters are selected, fetch for each combination
+        const countryList = filters.country_codes.length > 0 ? filters.country_codes : [null];
+        const yearList = filters.years.length > 0 ? filters.years : [null];
+        
+        const promises = [];
+        for (const country of countryList) {
+          for (const year of yearList) {
+            const params = {
+              limit: 10000, // Get all matching records
+              offset: 0
+            };
+            if (country) params.country_code = country;
+            if (year) params.year = parseInt(year);
+            
+            promises.push(energyApi.getEnergyAnnual(params));
+          }
+        }
+        
+        const results = await Promise.all(promises);
+        
+        // Combine and deduplicate results
+        const dataMap = new Map();
+        results.forEach(result => {
+          if (result.data) {
+            result.data.forEach(record => {
+              const key = `${record.country_code}-${record.year}-${record.product_code}-${record.flow_code}`;
+              if (!dataMap.has(key)) {
+                dataMap.set(key, record);
+              }
+            });
+            totalCount = Math.max(totalCount, result.total || 0);
+          }
+        });
+        
+        allData = Array.from(dataMap.values());
+        
+        // Apply pagination
+        const start = filters.offset || 0;
+        const limit = parseInt(filters.limit) || 50;
+        const paginatedData = allData.slice(start, start + limit);
+        
+        setEnergyData({
+          data: paginatedData,
+          total: allData.length,
+          limit: limit,
+          offset: start
+        });
+        
+        // Extract options from full dataset
+        extractOptions({ data: allData });
+      } else {
+        // No filters - fetch normally
+        const params = {
+          limit: parseInt(filters.limit) || 50,
+          offset: filters.offset || 0
+        };
+        
+        const data = await energyApi.getEnergyAnnual(params);
+        setEnergyData(data);
+        extractOptions(data);
+      }
 
-      const data = await energyApi.getEnergyAnnual(params);
-      setEnergyData(data);
-
-      // Fetch summary
+      // Fetch summary (use first selected country/year if multiple)
       const summaryData = await energyApi.getEnergySummary({
-        country_code: filters.country_code || undefined,
-        year: filters.year ? parseInt(filters.year) : undefined,
+        country_code: filters.country_codes.length > 0 ? filters.country_codes[0] : undefined,
+        year: filters.years.length > 0 ? parseInt(filters.years[0]) : undefined,
         group_by: 'country'
       });
       setSummary(summaryData);
@@ -67,7 +160,7 @@ function Energy() {
   };
 
   const handleResetFilters = () => {
-    setFilters({ country_code: '', year: '', limit: 50, offset: 0 });
+    setFilters({ country_codes: [], years: [], limit: 50, offset: 0 });
     setTimeout(fetchData, 100);
   };
 
@@ -243,8 +336,8 @@ function Energy() {
       {energyData && energyData.data && energyData.data.length > 0 && (
         <div className="charts-section">
           <h2>Data Visualization</h2>
-          <div className="charts-grid">
-            <TimeSeriesChart data={energyData} countryCode={filters.country_code} />
+            <div className="charts-grid">
+            <TimeSeriesChart data={energyData} countryCode={filters.country_codes.length === 1 ? filters.country_codes[0] : undefined} />
             {summary && summary.summary && summary.summary.length > 0 && (
               <CountryComparisonChart summary={summary} />
             )}
