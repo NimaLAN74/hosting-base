@@ -330,8 +330,23 @@ function Energy() {
 
   // Auto-fetch when offset changes (for pagination)
   useEffect(() => {
-    fetchData();
+    // Only auto-fetch if filters are already applied (not on initial load)
+    if (filters.offset > 0 || (filters.country_codes.length > 0 || filters.years.length > 0)) {
+      fetchData();
+    }
   }, [filters.offset, fetchData]);
+
+  // Debug: Log when fullFilteredData changes
+  useEffect(() => {
+    if (fullFilteredData && fullFilteredData.data) {
+      console.log('📊 fullFilteredData updated:', {
+        recordCount: fullFilteredData.data.length,
+        activeFilters: activeFiltersForCharts,
+        sampleCountries: [...new Set(fullFilteredData.data.slice(0, 10).map(r => r.country_code))],
+        sampleYears: [...new Set(fullFilteredData.data.slice(0, 10).map(r => r.year))].sort()
+      });
+    }
+  }, [fullFilteredData, activeFiltersForCharts]);
 
   const formatNumber = (num) => {
     if (num === null || num === undefined) return 'N/A';
