@@ -552,23 +552,23 @@ function Energy() {
           ) : null}
           <div className="charts-grid">
             <TimeSeriesChart 
-              key={`timeseries-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
+              key={`timeseries-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}-${fullFilteredData.data.length}`}
               data={fullFilteredData} 
               countryCode={activeFiltersForCharts.country_codes.length === 1 ? activeFiltersForCharts.country_codes[0] : undefined}
               countryCodes={activeFiltersForCharts.country_codes.length > 1 ? activeFiltersForCharts.country_codes : undefined}
             />
             {summary && summary.summary && summary.summary.length > 0 && (
               <CountryComparisonChart 
-                key={`country-comp-${activeFiltersForCharts.country_codes.join('-')}`}
+                key={`country-comp-${activeFiltersForCharts.country_codes.join('-')}-${summary.summary.length}`}
                 summary={summary} 
               />
             )}
             <ProductDistributionChart 
-              key={`product-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
+              key={`product-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}-${fullFilteredData.data.length}`}
               data={fullFilteredData} 
             />
             <FlowDistributionChart 
-              key={`flow-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
+              key={`flow-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}-${fullFilteredData.data.length}`}
               data={fullFilteredData} 
             />
           </div>
