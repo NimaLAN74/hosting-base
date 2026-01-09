@@ -15,7 +15,25 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
+// Enhanced color palette for better visualization
+const COLORS = [
+  '#2c5aa0', // Primary blue
+  '#4a8fe7', // Secondary blue
+  '#f6c445', // Accent gold
+  '#00C49F', // Teal
+  '#FF8042', // Orange
+  '#8884d8', // Purple
+  '#82ca9d', // Green
+  '#ffc658', // Yellow
+  '#ff7300', // Red-orange
+  '#0088FE', // Bright blue
+  '#9c27b0', // Deep purple
+  '#e91e63', // Pink
+  '#00bcd4', // Cyan
+  '#4caf50', // Green
+  '#ff9800', // Orange
+  '#795548'  // Brown
+];
 
 // Time Series Chart - Energy consumption over years
 export const TimeSeriesChart = ({ data, countryCode }) => {
@@ -42,19 +60,39 @@ export const TimeSeriesChart = ({ data, countryCode }) => {
   return (
     <div className="chart-container">
       <h3>Energy Consumption Over Time{countryCode ? ` - ${countryCode}` : ''}</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="year" />
-          <YAxis />
-          <Tooltip formatter={(value) => `${value.toLocaleString()} GWh`} />
-          <Legend />
+      <ResponsiveContainer width="100%" height={350}>
+        <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
+          <XAxis 
+            dataKey="year" 
+            stroke="var(--text-secondary)"
+            style={{ fontSize: '12px' }}
+          />
+          <YAxis 
+            stroke="var(--text-secondary)"
+            style={{ fontSize: '12px' }}
+            tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+          />
+          <Tooltip 
+            formatter={(value) => [`${value.toLocaleString()} GWh`, 'Total Energy']}
+            contentStyle={{
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              color: 'var(--text-primary)'
+            }}
+            labelStyle={{ color: 'var(--text-primary)' }}
+          />
+          <Legend 
+            wrapperStyle={{ color: 'var(--text-primary)' }}
+          />
           <Line 
             type="monotone" 
             dataKey="Total Energy (GWh)" 
-            stroke="#8884d8" 
-            strokeWidth={2}
-            dot={{ r: 4 }}
+            stroke={COLORS[0]} 
+            strokeWidth={3}
+            dot={{ r: 5, fill: COLORS[0] }}
+            activeDot={{ r: 7 }}
           />
         </LineChart>
       </ResponsiveContainer>
@@ -76,14 +114,44 @@ export const CountryComparisonChart = ({ summary }) => {
   return (
     <div className="chart-container">
       <h3>Top Countries by Energy Consumption</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="country" />
-          <YAxis />
-          <Tooltip formatter={(value) => `${value.toLocaleString()} GWh`} />
-          <Legend />
-          <Bar dataKey="Total Energy (GWh)" fill="#8884d8" />
+      <ResponsiveContainer width="100%" height={350}>
+        <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
+          <XAxis 
+            dataKey="country" 
+            stroke="var(--text-secondary)"
+            style={{ fontSize: '12px' }}
+            angle={-45}
+            textAnchor="end"
+            height={80}
+          />
+          <YAxis 
+            stroke="var(--text-secondary)"
+            style={{ fontSize: '12px' }}
+            tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+          />
+          <Tooltip 
+            formatter={(value) => [`${value.toLocaleString()} GWh`, 'Total Energy']}
+            contentStyle={{
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              color: 'var(--text-primary)'
+            }}
+            labelStyle={{ color: 'var(--text-primary)' }}
+          />
+          <Legend 
+            wrapperStyle={{ color: 'var(--text-primary)' }}
+          />
+          <Bar 
+            dataKey="Total Energy (GWh)" 
+            fill={COLORS[1]}
+            radius={[8, 8, 0, 0]}
+          >
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+            ))}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -115,23 +183,40 @@ export const ProductDistributionChart = ({ data }) => {
   return (
     <div className="chart-container">
       <h3>Energy Distribution by Product Type</h3>
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={350}>
         <PieChart>
           <Pie
             data={chartData}
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-            outerRadius={80}
+            label={({ name, percent }) => percent > 0.05 ? `${name}: ${(percent * 100).toFixed(0)}%` : ''}
+            outerRadius={100}
+            innerRadius={40}
             fill="#8884d8"
             dataKey="value"
+            paddingAngle={2}
           >
             {chartData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(value) => `${value.toLocaleString()} GWh`} />
+          <Tooltip 
+            formatter={(value, name, props) => [
+              `${value.toLocaleString()} GWh (${(props.payload.percent * 100).toFixed(1)}%)`,
+              props.payload.name
+            ]}
+            contentStyle={{
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              color: 'var(--text-primary)'
+            }}
+          />
+          <Legend 
+            wrapperStyle={{ color: 'var(--text-primary)' }}
+            formatter={(value, entry) => `${entry.payload.name}: ${(entry.payload.percent * 100).toFixed(1)}%`}
+          />
         </PieChart>
       </ResponsiveContainer>
     </div>
@@ -163,23 +248,40 @@ export const FlowDistributionChart = ({ data }) => {
   return (
     <div className="chart-container">
       <h3>Energy Distribution by Flow Type</h3>
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={350}>
         <PieChart>
           <Pie
             data={chartData}
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-            outerRadius={80}
+            label={({ name, percent }) => percent > 0.05 ? `${name}: ${(percent * 100).toFixed(0)}%` : ''}
+            outerRadius={100}
+            innerRadius={40}
             fill="#8884d8"
             dataKey="value"
+            paddingAngle={2}
           >
             {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(value) => `${value.toLocaleString()} GWh`} />
+          <Tooltip 
+            formatter={(value, name, props) => [
+              `${value.toLocaleString()} GWh (${(props.payload.percent * 100).toFixed(1)}%)`,
+              props.payload.name
+            ]}
+            contentStyle={{
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              color: 'var(--text-primary)'
+            }}
+          />
+          <Legend 
+            wrapperStyle={{ color: 'var(--text-primary)' }}
+            formatter={(value, entry) => `${entry.payload.name}: ${(entry.payload.percent * 100).toFixed(1)}%`}
+          />
         </PieChart>
       </ResponsiveContainer>
     </div>

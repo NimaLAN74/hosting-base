@@ -179,9 +179,11 @@ function Energy() {
   }, [filters, availableCountries.length, availableYears.length]);
 
   const handleFilterChange = (field, value) => {
-    console.log('Filter changed:', field, value);
+    console.log('Filter changed:', field, value, 'Type:', Array.isArray(value) ? 'array' : typeof value);
     setFilters(prev => {
-      const newFilters = { ...prev, [field]: value, offset: 0 };
+      // Ensure value is an array for country_codes and years
+      const arrayValue = Array.isArray(value) ? value : (value ? [value] : []);
+      const newFilters = { ...prev, [field]: arrayValue, offset: 0 };
       console.log('New filters state:', newFilters);
       return newFilters;
     });
