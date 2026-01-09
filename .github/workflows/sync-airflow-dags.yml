@@ -1,156 +1,119 @@
-name: Sync Airflow DAGs
+name: Sync Airflow DAGs to Remote Host
 
 on:
   push:
+    branches:
+      - master
+      - main
     paths:
       - 'lianel/dc/dags/**'
       - '.github/workflows/sync-airflow-dags.yml'
-  workflow_dispatch:
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+  REMOTE_USER: ${{ secrets.REMOTE_USER }}
+  REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
 
 jobs:
   sync-dags:
+    name: Sync DAGs to Remote Host
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup SSH Key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Validate SSH Key
+      - name: Validate Secrets
         run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            exit 1
+          fi
           if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "❌ SSH_PRIVATE_KEY secret is not set"
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
             exit 1
           fi
-          
-          # Save key to file for validation
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          
-          # Validate key format
-          if ! ssh-keygen -l -f /tmp/deploy_key > /dev/null 2>&1; then
-            echo "❌ SSH_PRIVATE_KEY appears to be invalid"
-            exit 1
-          fi
-          
-          # Check if it's a private key (not public)
-          if grep -q "BEGIN PUBLIC KEY" /tmp/deploy_key 2>/dev/null; then
-            echo "❌ SSH_PRIVATE_KEY appears to be a public key, not a private key"
-            exit 1
-          fi
-          
-          echo "✅ SSH key validation passed"
-          rm -f /tmp/deploy_key
+          echo "✅ All required secrets are configured"
 
-      - name: Test SSH Connection
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o ConnectTimeout=30 \
-            -o BatchMode=yes \
-            ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} \
-            "echo 'SSH connection successful'" || {
-            echo "❌ SSH connection failed"
-            echo "Please verify:"
-            echo "  1. REMOTE_HOST is correct: ${{ secrets.REMOTE_HOST }}"
-            echo "  2. REMOTE_USER is correct: ${{ secrets.REMOTE_USER }}"
-            echo "  3. SSH_PRIVATE_KEY is correct"
-            echo "  4. Server is accessible from GitHub Actions runners"
+          # Write SSH key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Verify key format
+          if ! grep -q "^-----BEGIN" ~/.ssh/deploy_key; then
+            echo "❌ Error: SSH key format is incorrect"
             exit 1
-          }
+          fi
           
-          rm -f /tmp/deploy_key
-          echo "✅ SSH connection test passed"
+          if [ -n "$REMOTE_HOST" ]; then
+            ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          
+          echo "✅ SSH key ready"
 
-      - name: Copy DAG files to remote host
+      - name: Sync DAG Files
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          
-          REMOTE_USER="${{ secrets.REMOTE_USER }}"
-          REMOTE_HOST="${{ secrets.REMOTE_HOST }}"
-          DAGS_DIR="lianel/dc/dags"
-          
-          echo "📦 Copying DAG files to remote host..."
+          echo "Syncing DAG files to remote host..."
           
           # Create DAGs directory if it doesn't exist
-          ssh -i /tmp/deploy_key \
+          ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
-            $REMOTE_USER@$REMOTE_HOST \
-            "mkdir -p /root/lianel/dc/dags"
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/lianel/dc/dags && chmod 755 /root/lianel/dc/dags"
           
-          # Copy all DAG files
-          scp -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            $DAGS_DIR/*.py \
-            $REMOTE_USER@$REMOTE_HOST:/root/lianel/dc/dags/ 2>&1 || {
-            echo "⚠️  Some files may not have been copied (this is OK if directory is empty)"
-          }
+          # Sync all DAG files
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT}" \
+            --delete \
+            lianel/dc/dags/ \
+            ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/
           
-          # Copy README if it exists
-          if [ -f "$DAGS_DIR/README-DAG-STRUCTURE.md" ]; then
-            scp -i /tmp/deploy_key \
-              -o StrictHostKeyChecking=no \
-              $DAGS_DIR/README-DAG-STRUCTURE.md \
-              $REMOTE_USER@$REMOTE_HOST:/root/lianel/dc/dags/
-          fi
-          
-          # Set correct ownership (Airflow runs as UID 50000)
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            $REMOTE_USER@$REMOTE_HOST \
-            "chown -R 50000:0 /root/lianel/dc/dags/*.py /root/lianel/dc/dags/*.md 2>/dev/null || true"
-          
-          rm -f /tmp/deploy_key
-          echo "✅ DAG files copied successfully"
+          echo "✅ DAG files synced successfully"
 
-      - name: Restart Airflow DAG Processor
+      - name: Verify DAG Files
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
+          echo "Verifying DAG files on remote host..."
           
-          REMOTE_USER="${{ secrets.REMOTE_USER }}"
-          REMOTE_HOST="${{ secrets.REMOTE_HOST }}"
-          
-          echo "🔄 Restarting Airflow DAG processor to pick up new DAGs..."
-          
-          ssh -i /tmp/deploy_key \
+          ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
-            $REMOTE_USER@$REMOTE_HOST \
-            "cd /root/lianel/dc && docker restart dc-airflow-dag-processor-1 2>&1" || {
-            echo "⚠️  Could not restart DAG processor (container may have different name)"
-            echo "   DAGs will be picked up on next DAG processor cycle (usually within 1 minute)"
-          }
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "ls -la /root/lianel/dc/dags/*.py | wc -l && echo 'DAG files found'"
           
-          rm -f /tmp/deploy_key
-          echo "✅ DAG processor restarted"
-
-      - name: Verify DAGs are accessible
-        run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          
-          REMOTE_USER="${{ secrets.REMOTE_USER }}"
-          REMOTE_HOST="${{ secrets.REMOTE_HOST }}"
-          
-          echo "🔍 Verifying DAGs are accessible in Airflow..."
-          
-          # Wait a bit for DAG processor to pick up changes
-          sleep 10
-          
-          # List DAGs
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            $REMOTE_USER@$REMOTE_HOST \
-            "docker exec dc-airflow-scheduler-1 airflow dags list 2>&1 | grep -E 'eurostat|coordinator' | head -10" || {
-            echo "⚠️  Could not list DAGs (this is OK, they will appear shortly)"
-          }
-          
-          rm -f /tmp/deploy_key
           echo "✅ Verification complete"
+
+      - name: Sync Summary
+        run: |
+          echo "## 🔄 Airflow DAGs Synced" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source**: Repository DAGs directory" >> $GITHUB_STEP_SUMMARY
+          echo "- **Destination**: \`${{ secrets.REMOTE_HOST }}:/root/lianel/dc/dags/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "DAG files will be automatically detected by Airflow scheduler." >> $GITHUB_STEP_SUMMARY
