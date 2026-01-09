@@ -128,9 +128,11 @@ const MultiSelect = ({
                     key={value}
                     className={`multi-select-option ${isSelected ? 'selected' : ''}`}
                     onClick={(e) => {
-                      e.stopPropagation();
-                      // Prevent double-triggering by handling click on label
-                      handleToggle(value);
+                      // Only handle click if it's not on the checkbox itself
+                      if (e.target.type !== 'checkbox') {
+                        e.stopPropagation();
+                        handleToggle(value);
+                      }
                     }}
                   >
                     <input
@@ -138,9 +140,13 @@ const MultiSelect = ({
                       checked={isSelected}
                       onChange={(e) => {
                         e.stopPropagation();
+                        // Don't call handleToggle here - let the label onClick handle it
+                        // This prevents double-toggling
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
                         handleToggle(value);
                       }}
-                      onClick={(e) => e.stopPropagation()}
                     />
                     <span>{label}</span>
                   </label>
