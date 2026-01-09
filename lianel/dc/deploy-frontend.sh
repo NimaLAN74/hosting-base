@@ -24,19 +24,18 @@ cd /root/lianel/dc
 # This ensures we always get the latest image, not a cached version
 echo "Removing old local image tags to force fresh pull..."
 docker rmi "$LOCAL_TAG" 2>/dev/null || true
-docker rmi "$IMAGE_TAG" 2>/dev/null || true
 
-# Also remove any images with the same repository to clear cache
+# Remove the image by tag (but keep it if it's the same as what we'll pull)
 # This helps when the same tag is reused (like :latest)
 REPO_NAME=$(echo "$IMAGE_TAG" | cut -d':' -f1)
-echo "Removing any cached images from repository: $REPO_NAME"
-# Use a safer approach that works on all systems (xargs -r is GNU-specific)
-IMAGE_IDS=$(docker images "$REPO_NAME" --format "{{.ID}}" 2>/dev/null || true)
-if [ -n "$IMAGE_IDS" ]; then
-  echo "$IMAGE_IDS" | while read -r img_id; do
-    [ -n "$img_id" ] && docker rmi -f "$img_id" 2>/dev/null || true
-  done
-fi
+echo "Clearing any cached images from repository: $REPO_NAME"
+# Remove images with the same repository but different tags
+docker images "$REPO_NAME" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | while read -r img; do
+  if [ "$img" != "$IMAGE_TAG" ] && [ "$img" != "$LOCAL_TAG" ]; then
+    echo "Removing old image: $img"
+    docker rmi "$img" 2>/dev/null || true
+  fi
+done
 
 # Clear any stale Docker auth
 docker logout ghcr.io 2>/dev/null || true
@@ -54,7 +53,8 @@ PULL_SUCCESS=false
 
 for attempt in $(seq 1 $PULL_ATTEMPTS); do
   echo "Pull attempt $attempt of $PULL_ATTEMPTS..."
-  if docker pull "$IMAGE_TAG" 2>&1; then
+  # Use --no-cache to ensure we get the latest image, not a cached version
+  if docker pull --no-cache "$IMAGE_TAG" 2>&1; then
     echo "✅ Image pulled successfully on attempt $attempt"
     PULL_SUCCESS=true
     break
@@ -75,9 +75,37 @@ if [ "$PULL_SUCCESS" = false ]; then
   exit 1
 fi
 
+# Verify the pulled image exists
+if ! docker images "$IMAGE_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^${IMAGE_TAG}$"; then
+  echo "❌ Error: Image $IMAGE_TAG not found after pull"
+  echo "Available images:"
+  docker images | grep -E "$(echo $IMAGE_TAG | cut -d':' -f1)" | head -5
+  exit 1
+fi
+
+# Get the image digest to verify we have the latest
+IMAGE_DIGEST=$(docker inspect "$IMAGE_TAG" --format '{{index .RepoDigests 0}}' 2>/dev/null || echo "")
+if [ -n "$IMAGE_DIGEST" ]; then
+  echo "✅ Image digest: $IMAGE_DIGEST"
+fi
+
+# Remove old local tag if it exists (to force update)
+echo "Removing old local tag to ensure fresh image..."
+docker rmi "$LOCAL_TAG" 2>/dev/null || true
+
 # Tag for local use
 echo "Tagging image for local use..."
-docker tag "$IMAGE_TAG" "$LOCAL_TAG"
+if ! docker tag "$IMAGE_TAG" "$LOCAL_TAG" 2>&1; then
+  echo "❌ Error: Failed to tag image"
+  exit 1
+fi
+
+# Verify the tag was created
+if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^${LOCAL_TAG}$"; then
+  echo "❌ Error: Local tag $LOCAL_TAG not found after tagging"
+  exit 1
+fi
+echo "✅ Image tagged as $LOCAL_TAG"
 
 # Restart container - use docker compose (newer) or docker-compose (older)
 echo "Restarting container..."
@@ -93,30 +121,53 @@ if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^
   exit 1
 fi
 
+# Stop and remove existing container first to ensure clean state
+echo "Stopping and removing existing container..."
+docker stop lianel-$SERVICE_NAME 2>/dev/null || true
+docker rm lianel-$SERVICE_NAME 2>/dev/null || true
+
 # Try docker compose first, fallback to docker-compose
 # We already pulled and tagged the image above, so just recreate the container
 # Use --no-deps to avoid recreating dependencies (keycloak, nginx, etc.)
+# Use --pull never since we already pulled and tagged the image
 echo "Starting container with docker compose..."
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  if docker compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
-    echo "✅ Container started successfully"
-  else
-    COMPOSE_EXIT=$?
-    echo "❌ Error: docker compose failed (exit code: $COMPOSE_EXIT)"
-    echo "Trying alternative approach..."
-    # Fallback: start container directly
+  # First, verify the service exists in docker-compose.yaml
+  if ! docker compose -f docker-compose.yaml config --services | grep -q "^${SERVICE_NAME}$"; then
+    echo "⚠️  Warning: Service '$SERVICE_NAME' not found in docker-compose.yaml"
+    echo "Available services:"
+    docker compose -f docker-compose.yaml config --services
+    echo "Falling back to direct container start..."
     docker run -d \
       --name lianel-$SERVICE_NAME \
       --network lianel-network \
       --restart unless-stopped \
       $LOCAL_TAG || {
-      echo "❌ Error: Direct container start also failed"
+      echo "❌ Error: Direct container start failed"
       exit 1
     }
+  else
+    # Use --pull never to use the image we just pulled and tagged
+    if docker compose -f docker-compose.yaml up -d --force-recreate --no-deps --pull never $SERVICE_NAME 2>&1; then
+      echo "✅ Container started successfully with docker compose"
+    else
+      COMPOSE_EXIT=$?
+      echo "❌ Error: docker compose failed (exit code: $COMPOSE_EXIT)"
+      echo "Trying alternative approach..."
+      # Fallback: start container directly
+      docker run -d \
+        --name lianel-$SERVICE_NAME \
+        --network lianel-network \
+        --restart unless-stopped \
+        $LOCAL_TAG || {
+        echo "❌ Error: Direct container start also failed"
+        exit 1
+      }
+    fi
   fi
 elif command -v docker-compose >/dev/null 2>&1; then
   if docker-compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
-    echo "✅ Container started successfully"
+    echo "✅ Container started successfully with docker-compose"
   else
     echo "❌ Error: docker-compose failed"
     exit 1
