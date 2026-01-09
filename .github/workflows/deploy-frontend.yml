@@ -9,6 +9,7 @@ on:
       - 'lianel/dc/frontend/**'
       - 'lianel/dc/docker-compose.frontend.yaml'
       - 'lianel/dc/docker-compose.yaml'
+      - 'lianel/dc/deploy-frontend.sh'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:  # Allow manual trigger
 
