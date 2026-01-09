@@ -467,10 +467,10 @@ def log_dataset_creation(**context) -> None:
     
     insert_sql = """
         INSERT INTO meta_ingestion_log (
-            source_system, status, records_inserted, records_updated,
-            started_at, completed_at, metadata
+            source_system, table_name, status, records_inserted, records_updated,
+            metadata
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s::jsonb
+            %s, %s, %s, %s, %s, %s::jsonb
         )
     """
     
@@ -478,11 +478,10 @@ def log_dataset_creation(**context) -> None:
     
     db_hook.run(insert_sql, parameters=(
         'ml_pipeline',
+        'ml_dataset_clustering_v1',
         status,
         load_stats.get('total_records', 0),
         0,  # No updates, only inserts
-        context['execution_date'],
-        datetime.now(),
         json.dumps(summary),
     ))
     

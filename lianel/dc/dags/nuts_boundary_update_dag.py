@@ -394,10 +394,10 @@ def log_update_summary(**context) -> None:
     
     insert_sql = """
         INSERT INTO meta_ingestion_log (
-            source_system, status, records_inserted, records_updated,
-            started_at, completed_at, metadata
+            source_system, table_name, status, records_inserted, records_updated,
+            metadata
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s::jsonb
+            %s, %s, %s, %s, %s, %s::jsonb
         )
     """
     
@@ -407,11 +407,10 @@ def log_update_summary(**context) -> None:
     import json
     db_hook.run(insert_sql, parameters=(
         'gisco',
+        'dim_region',
         'success' if validation_results else 'partial',
         total_inserted,
         total_updated,
-        context['execution_date'],
-        datetime.now(),
         json.dumps(summary),
     ))
     
