@@ -47,14 +47,18 @@ if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
 fi
 
 # Force pull the latest image (always pull, even if local copy exists)
+# Remove the image first to ensure we get a fresh pull, not a cached version
+echo "Removing existing image to force fresh pull..."
+docker rmi "$IMAGE_TAG" 2>/dev/null || true
+
 echo "Pulling latest image (forcing update)..."
 PULL_ATTEMPTS=3
 PULL_SUCCESS=false
 
 for attempt in $(seq 1 $PULL_ATTEMPTS); do
   echo "Pull attempt $attempt of $PULL_ATTEMPTS..."
-  # Use --no-cache to ensure we get the latest image, not a cached version
-  if docker pull --no-cache "$IMAGE_TAG" 2>&1; then
+  # Pull the image - Docker will fetch from registry since we removed the local copy
+  if docker pull "$IMAGE_TAG" 2>&1; then
     echo "✅ Image pulled successfully on attempt $attempt"
     PULL_SUCCESS=true
     break
