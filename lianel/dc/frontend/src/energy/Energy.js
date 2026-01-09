@@ -12,6 +12,7 @@ function Energy() {
   const [error, setError] = useState('');
   const [serviceInfo, setServiceInfo] = useState(null);
   const [energyData, setEnergyData] = useState(null);
+  const [fullFilteredData, setFullFilteredData] = useState(null); // Store full dataset for charts
   const [filters, setFilters] = useState({
     country_codes: [], // Changed to array for multi-select
     years: [], // Changed to array for multi-select
@@ -179,7 +180,10 @@ function Energy() {
         allData = Array.from(dataMap.values());
         console.log('Combined data:', allData.length, 'unique records');
         
-        // Apply pagination
+        // Store full dataset for charts (before pagination)
+        setFullFilteredData({ data: allData });
+        
+        // Apply pagination for table
         const start = activeFilters.offset || 0;
         const limit = parseInt(activeFilters.limit) || 50;
         const paginatedData = allData.slice(start, start + limit);
@@ -212,6 +216,8 @@ function Energy() {
         
         const data = await energyApi.getEnergyAnnual(params);
         setEnergyData(data);
+        // For charts, use the same data when no filters (or use full dataset if available)
+        setFullFilteredData(data);
         
         // Fetch a much larger dataset to populate all available options (only on first load)
         // This ensures we get all countries and years, not just those in the first page
@@ -491,16 +497,21 @@ function Energy() {
       </div>
 
       {/* Charts Section */}
-      {energyData && energyData.data && energyData.data.length > 0 && (
+      {/* Use fullFilteredData for charts (all filtered records), energyData for table (paginated) */}
+      {fullFilteredData && fullFilteredData.data && fullFilteredData.data.length > 0 && (
         <div className="charts-section">
           <h2>Data Visualization</h2>
-            <div className="charts-grid">
-            <TimeSeriesChart data={energyData} countryCode={filters.country_codes.length === 1 ? filters.country_codes[0] : undefined} />
+          <div className="charts-grid">
+            <TimeSeriesChart 
+              data={fullFilteredData} 
+              countryCode={filters.country_codes.length === 1 ? filters.country_codes[0] : undefined}
+              countryCodes={filters.country_codes.length > 1 ? filters.country_codes : undefined}
+            />
             {summary && summary.summary && summary.summary.length > 0 && (
               <CountryComparisonChart summary={summary} />
             )}
-            <ProductDistributionChart data={energyData} />
-            <FlowDistributionChart data={energyData} />
+            <ProductDistributionChart data={fullFilteredData} />
+            <FlowDistributionChart data={fullFilteredData} />
           </div>
         </div>
       )}

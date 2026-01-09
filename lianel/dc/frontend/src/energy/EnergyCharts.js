@@ -36,11 +36,21 @@ const COLORS = [
 ];
 
 // Time Series Chart - Energy consumption over years
-export const TimeSeriesChart = ({ data, countryCode }) => {
+export const TimeSeriesChart = ({ data, countryCode, countryCodes }) => {
   if (!data || !data.data || data.data.length === 0) return null;
 
+  // Filter by selected countries if multiple countries selected
+  let filteredData = data.data;
+  if (countryCodes && countryCodes.length > 1) {
+    filteredData = data.data.filter(record => 
+      countryCodes.includes(record.country_code)
+    );
+  } else if (countryCode) {
+    filteredData = data.data.filter(record => record.country_code === countryCode);
+  }
+
   // Group by year and sum values
-  const yearData = data.data.reduce((acc, record) => {
+  const yearData = filteredData.reduce((acc, record) => {
     const year = record.year;
     if (!acc[year]) {
       acc[year] = { year, total: 0, count: 0 };
@@ -57,9 +67,15 @@ export const TimeSeriesChart = ({ data, countryCode }) => {
       'Total Energy (GWh)': Math.round(item.total * 100) / 100
     }));
 
+  const chartTitle = countryCodes && countryCodes.length > 1 
+    ? `Energy Consumption Over Time - ${countryCodes.join(', ')}`
+    : countryCode 
+      ? `Energy Consumption Over Time - ${countryCode}`
+      : 'Energy Consumption Over Time';
+
   return (
     <div className="chart-container">
-      <h3>Energy Consumption Over Time{countryCode ? ` - ${countryCode}` : ''}</h3>
+      <h3>{chartTitle}</h3>
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
@@ -227,6 +243,7 @@ export const ProductDistributionChart = ({ data }) => {
 export const FlowDistributionChart = ({ data }) => {
   if (!data || !data.data || data.data.length === 0) return null;
 
+  // Use all data (already filtered by country/year selection)
   // Group by flow
   const flowData = data.data.reduce((acc, record) => {
     const flow = record.flow_name || record.flow_code || 'Unknown';
