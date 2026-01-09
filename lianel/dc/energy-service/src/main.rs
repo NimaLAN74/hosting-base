@@ -105,3 +105,4 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Route fix: /info instead of /api/info
