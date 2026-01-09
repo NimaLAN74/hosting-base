@@ -22,10 +22,6 @@ function Energy() {
   const [availableCountries, setAvailableCountries] = useState([]);
   const [availableYears, setAvailableYears] = useState([]);
 
-  useEffect(() => {
-    fetchData();
-  }, [filters.offset]);
-
   // Extract unique countries and years from data
   const extractOptions = (data) => {
     if (!data || !data.data) return;
@@ -60,10 +56,13 @@ function Energy() {
     setAvailableYears(yearOptions);
   };
 
-  const fetchData = async () => {
+  const fetchData = async (currentFilters = null) => {
     try {
       setLoading(true);
       setError('');
+      
+      // Use provided filters or current state
+      const activeFilters = currentFilters || filters;
 
       // Fetch service info
       const info = await energyApi.getServiceInfo();
@@ -73,10 +72,10 @@ function Energy() {
       let allData = [];
       let totalCount = 0;
       
-      if (filters.country_codes.length > 0 || filters.years.length > 0) {
+      if (activeFilters.country_codes.length > 0 || activeFilters.years.length > 0) {
         // If filters are selected, fetch for each combination
-        const countryList = filters.country_codes.length > 0 ? filters.country_codes : [null];
-        const yearList = filters.years.length > 0 ? filters.years : [null];
+        const countryList = activeFilters.country_codes.length > 0 ? activeFilters.country_codes : [null];
+        const yearList = activeFilters.years.length > 0 ? activeFilters.years : [null];
         
         const promises = [];
         for (const country of countryList) {
@@ -113,8 +112,8 @@ function Energy() {
         allData = Array.from(dataMap.values());
         
         // Apply pagination
-        const start = filters.offset || 0;
-        const limit = parseInt(filters.limit) || 50;
+        const start = activeFilters.offset || 0;
+        const limit = parseInt(activeFilters.limit) || 50;
         const paginatedData = allData.slice(start, start + limit);
         
         setEnergyData({
@@ -129,8 +128,8 @@ function Energy() {
       } else {
         // No filters - fetch normally
         const params = {
-          limit: parseInt(filters.limit) || 50,
-          offset: filters.offset || 0
+          limit: parseInt(activeFilters.limit) || 50,
+          offset: activeFilters.offset || 0
         };
         
         const data = await energyApi.getEnergyAnnual(params);
@@ -147,8 +146,8 @@ function Energy() {
 
       // Fetch summary (use first selected country/year if multiple)
       const summaryData = await energyApi.getEnergySummary({
-        country_code: filters.country_codes.length > 0 ? filters.country_codes[0] : undefined,
-        year: filters.years.length > 0 ? parseInt(filters.years[0]) : undefined,
+        country_code: activeFilters.country_codes.length > 0 ? activeFilters.country_codes[0] : undefined,
+        year: activeFilters.years.length > 0 ? parseInt(activeFilters.years[0]) : undefined,
         group_by: 'country'
       });
       setSummary(summaryData);
@@ -161,17 +160,30 @@ function Energy() {
   };
 
   const handleFilterChange = (field, value) => {
-    setFilters(prev => ({ ...prev, [field]: value, offset: 0 }));
+    setFilters(prev => {
+      const newFilters = { ...prev, [field]: value, offset: 0 };
+      return newFilters;
+    });
   };
 
   const handleApplyFilters = () => {
-    fetchData();
+    // Get the latest filters from state and pass to fetchData
+    setFilters(currentFilters => {
+      fetchData(currentFilters);
+      return currentFilters;
+    });
   };
 
   const handleResetFilters = () => {
-    setFilters({ country_codes: [], years: [], limit: 50, offset: 0 });
-    setTimeout(fetchData, 100);
+    const resetFilters = { country_codes: [], years: [], limit: 50, offset: 0 };
+    setFilters(resetFilters);
+    fetchData(resetFilters);
   };
+
+  // Auto-fetch when offset changes (for pagination)
+  useEffect(() => {
+    fetchData();
+  }, [filters.offset]);
 
   const formatNumber = (num) => {
     if (num === null || num === undefined) return 'N/A';
