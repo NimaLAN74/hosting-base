@@ -293,24 +293,23 @@ function Energy() {
         <h3>Filters</h3>
         <div className="filters-grid">
           <div className="filter-group">
-            <label>Country Code (e.g., SE, DE, FR):</label>
-            <input
-              type="text"
-              value={filters.country_code}
-              onChange={(e) => handleFilterChange('country_code', e.target.value.toUpperCase())}
-              placeholder="SE"
-              maxLength="2"
+            <MultiSelect
+              label="Countries"
+              options={availableCountries}
+              selected={filters.country_codes}
+              onChange={(selected) => handleFilterChange('country_codes', selected)}
+              placeholder="Select countries..."
+              searchable={true}
             />
           </div>
           <div className="filter-group">
-            <label>Year:</label>
-            <input
-              type="number"
-              value={filters.year}
-              onChange={(e) => handleFilterChange('year', e.target.value)}
-              placeholder="2023"
-              min="2015"
-              max="2024"
+            <MultiSelect
+              label="Years"
+              options={availableYears}
+              selected={filters.years}
+              onChange={(selected) => handleFilterChange('years', selected)}
+              placeholder="Select years..."
+              searchable={true}
             />
           </div>
           <div className="filter-group">
@@ -318,6 +317,15 @@ function Energy() {
             <select
               value={filters.limit}
               onChange={(e) => handleFilterChange('limit', e.target.value)}
+              style={{
+                padding: '10px 12px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                color: 'var(--text-primary)',
+                fontSize: '1em',
+                width: '100%'
+              }}
             >
               <option value="25">25</option>
               <option value="50">50</option>
@@ -330,6 +338,21 @@ function Energy() {
           <button onClick={handleApplyFilters} className="btn-primary">Apply Filters</button>
           <button onClick={handleResetFilters} className="btn-secondary">Reset</button>
         </div>
+        {(filters.country_codes.length > 0 || filters.years.length > 0) && (
+          <div className="active-filters">
+            <strong>Active filters:</strong>
+            {filters.country_codes.length > 0 && (
+              <span className="filter-tag">
+                Countries: {filters.country_codes.join(', ')}
+              </span>
+            )}
+            {filters.years.length > 0 && (
+              <span className="filter-tag">
+                Years: {filters.years.join(', ')}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Charts Section */}
