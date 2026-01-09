@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
 import { energyApi } from './energyApi';
@@ -179,10 +179,8 @@ function Energy() {
 
   // Auto-fetch when offset changes (for pagination)
   useEffect(() => {
-    // Only auto-fetch on offset change, use current filters
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.offset]);
+  }, [filters.offset, fetchData]);
 
   const formatNumber = (num) => {
     if (num === null || num === undefined) return 'N/A';
