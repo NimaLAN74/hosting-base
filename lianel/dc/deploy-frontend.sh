@@ -111,8 +111,8 @@ if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^
 fi
 echo "✅ Image tagged as $LOCAL_TAG"
 
-# Restart container - use docker compose (newer) or docker-compose (older)
-echo "Restarting container..."
+# Stop and remove existing container first to ensure clean state
+echo "Stopping and removing existing container..."
 docker stop lianel-$SERVICE_NAME 2>/dev/null || true
 docker rm lianel-$SERVICE_NAME 2>/dev/null || true
 
@@ -124,11 +124,6 @@ if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^
   docker images | grep -E "lianel-frontend|ghcr.io" | head -5
   exit 1
 fi
-
-# Stop and remove existing container first to ensure clean state
-echo "Stopping and removing existing container..."
-docker stop lianel-$SERVICE_NAME 2>/dev/null || true
-docker rm lianel-$SERVICE_NAME 2>/dev/null || true
 
 # Try docker compose first, fallback to docker-compose
 # We already pulled and tagged the image above, so just recreate the container

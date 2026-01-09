@@ -50,13 +50,27 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
-          # Write SSH key
+          # Write SSH key - handle multiline properly
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          
+          # Verify key file exists and has content
+          if [ ! -s ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file is empty or missing"
+            exit 1
+          fi
           
           # Verify key format
           if ! grep -q "^-----BEGIN" ~/.ssh/deploy_key; then
             echo "❌ Error: SSH key format is incorrect"
+            echo "Key should start with -----BEGIN"
+            exit 1
+          fi
+          
+          # Check key size
+          KEY_SIZE=$(wc -c < ~/.ssh/deploy_key)
+          if [ "$KEY_SIZE" -lt 100 ]; then
+            echo "❌ Error: SSH key file is too small ($KEY_SIZE bytes)"
             exit 1
           fi
           
@@ -64,7 +78,16 @@ jobs:
             ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
           
-          echo "✅ SSH key ready"
+          echo "✅ SSH key ready (size: $KEY_SIZE bytes)"
+
+      - name: Install rsync (if needed)
+        run: |
+          if ! command -v rsync &> /dev/null; then
+            echo "Installing rsync..."
+            sudo apt-get update -qq && sudo apt-get install -y rsync
+          else
+            echo "✅ rsync is already installed"
+          fi
 
       - name: Sync DAG Files
         env:
@@ -80,14 +103,37 @@ jobs:
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "mkdir -p /root/lianel/dc/dags && chmod 755 /root/lianel/dc/dags"
+            "mkdir -p /root/lianel/dc/dags && chmod 755 /root/lianel/dc/dags" || {
+            echo "❌ Error: Failed to create DAGs directory on remote host"
+            exit 1
+          }
           
-          # Sync all DAG files
+          # Sync all DAG files using rsync
+          # Use -v for verbose, -z for compression, --delete to remove old files
           rsync -avz \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT}" \
             --delete \
+            --exclude='*.pyc' \
+            --exclude='__pycache__' \
+            --exclude='.git' \
             lianel/dc/dags/ \
-            ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/
+            ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/ || {
+            echo "❌ Error: rsync failed"
+            echo "Trying alternative method with scp..."
+            # Fallback: use scp for individual files
+            for file in lianel/dc/dags/*.py; do
+              if [ -f "$file" ]; then
+                scp -i ~/.ssh/deploy_key \
+                  -o StrictHostKeyChecking=no \
+                  -o UserKnownHostsFile=~/.ssh/known_hosts \
+                  -P ${REMOTE_PORT} \
+                  "$file" \
+                  ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/ || {
+                  echo "⚠️  Warning: Failed to copy $file"
+                }
+              fi
+            done
+          }
           
           echo "✅ DAG files synced successfully"
 
