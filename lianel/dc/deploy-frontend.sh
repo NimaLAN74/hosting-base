@@ -128,19 +128,42 @@ fi
 
 # Verify deployment
 echo "Waiting for container to start..."
-sleep 5
+sleep 8  # Increased wait time for container to fully start
+
+# Check if container is running
 if docker ps --format '{{.Names}}' | grep -q "^lianel-$SERVICE_NAME$"; then
-  echo "✅ Deployment successful"
-  docker ps --filter "name=lianel-$SERVICE_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+  echo "✅ Container is running"
+  docker ps --filter "name=lianel-$SERVICE_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
+  echo ""
+  
+  # Verify the container is using the correct image
+  CONTAINER_IMAGE=$(docker inspect lianel-$SERVICE_NAME --format '{{.Config.Image}}' 2>/dev/null || echo "unknown")
+  echo "Container image: $CONTAINER_IMAGE"
+  echo "Expected image: $LOCAL_TAG"
+  
+  if [ "$CONTAINER_IMAGE" != "$LOCAL_TAG" ]; then
+    echo "⚠️  Warning: Container image doesn't match expected tag"
+    echo "This might indicate the image wasn't updated correctly"
+  fi
+  
   echo ""
   echo "Image details:"
-  docker inspect "$IMAGE_TAG" --format 'Digest: {{index .RepoDigests 0}}' 2>/dev/null || echo "Digest not available"
+  docker inspect "$LOCAL_TAG" --format 'Repository: {{.RepoDigests}}' 2>/dev/null || \
+  docker inspect "$IMAGE_TAG" --format 'Digest: {{index .RepoDigests 0}}' 2>/dev/null || \
+  echo "Digest not available"
+  
+  echo ""
+  echo "✅ Deployment successful"
 else
-  echo "❌ Container not running"
+  echo "❌ Container not running after startup"
   echo "Checking stopped containers:"
-  docker ps -a --filter "name=lianel-$SERVICE_NAME" || true
+  docker ps -a --filter "name=lianel-$SERVICE_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}" || true
+  echo ""
   echo "Recent logs:"
-  docker logs lianel-$SERVICE_NAME --tail 20 2>&1 || true
+  docker logs lianel-$SERVICE_NAME --tail 30 2>&1 || true
+  echo ""
+  echo "Container exit code:"
+  docker inspect lianel-$SERVICE_NAME --format '{{.State.ExitCode}}' 2>/dev/null || echo "Could not get exit code"
   exit 1
 fi
 
