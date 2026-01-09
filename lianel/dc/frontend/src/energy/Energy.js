@@ -275,7 +275,9 @@ function Energy() {
       const errorMessage = err.message || 'Failed to load energy data';
       
       // Provide more helpful error messages
-      if (errorMessage.includes('503') || errorMessage.includes('Service Temporarily Unavailable')) {
+      if (errorMessage.includes('Not authenticated') || errorMessage.includes('Authentication required')) {
+        setError('Please log in to view energy data. Click "Sign In" in the top right corner.');
+      } else if (errorMessage.includes('503') || errorMessage.includes('Service Temporarily Unavailable')) {
         setError('Service is temporarily unavailable. This may be due to too many requests. Please try again in a moment or reduce the number of selected filters.');
       } else if (errorMessage.includes('All API requests failed')) {
         setError('All requests failed. Please try with fewer countries or years selected.');
