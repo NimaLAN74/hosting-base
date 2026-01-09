@@ -93,10 +93,13 @@ function Energy() {
         
         const results = await Promise.all(promises);
         
+        console.log('Received', results.length, 'API responses');
+        
         // Combine and deduplicate results
         const dataMap = new Map();
-        results.forEach(result => {
+        results.forEach((result, index) => {
           if (result && result.data && Array.isArray(result.data)) {
+            console.log(`Result ${index}: ${result.data.length} records`);
             result.data.forEach(record => {
               if (record) {
                 const key = `${record.country_code}-${record.year}-${record.product_code}-${record.flow_code}`;
@@ -106,15 +109,25 @@ function Energy() {
               }
             });
             totalCount = Math.max(totalCount, result.total || 0);
+          } else {
+            console.warn(`Result ${index} is invalid:`, result);
           }
         });
         
         allData = Array.from(dataMap.values());
+        console.log('Combined data:', allData.length, 'unique records');
         
         // Apply pagination
         const start = activeFilters.offset || 0;
         const limit = parseInt(activeFilters.limit) || 50;
         const paginatedData = allData.slice(start, start + limit);
+        
+        console.log('Setting energy data:', { 
+          total: allData.length, 
+          paginated: paginatedData.length,
+          start,
+          limit
+        });
         
         setEnergyData({
           data: paginatedData,
@@ -167,8 +180,12 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Get current filters and fetch data
-    fetchData(filters);
+    // Get current filters using functional update to ensure we have latest state
+    setFilters(currentFilters => {
+      console.log('Applying filters:', currentFilters);
+      fetchData(currentFilters);
+      return currentFilters;
+    });
   };
 
   const handleResetFilters = () => {
