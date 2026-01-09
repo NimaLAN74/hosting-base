@@ -288,16 +288,21 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Get the latest filters from state (React guarantees this is up-to-date)
-    // Use a callback to ensure we have the absolute latest
+    // Get the latest filters from state and reset offset
+    // Update both state and ref, then fetch data
     setFilters(prev => {
       const latestFilters = { ...prev, offset: 0 }; // Reset offset when applying filters
       filtersRef.current = latestFilters;
       console.log('Applying filters:', latestFilters);
-      // Trigger fetch with latest filters
-      fetchData(latestFilters);
       return latestFilters;
     });
+    
+    // Fetch data after state update completes
+    // Use the filters from state (will be updated by the setFilters above)
+    // We need to wait for the state update, so use the ref which we just updated
+    const filtersToUse = filtersRef.current;
+    console.log('Fetching data with filters:', filtersToUse);
+    fetchData(filtersToUse);
   };
 
   const handleResetFilters = () => {
