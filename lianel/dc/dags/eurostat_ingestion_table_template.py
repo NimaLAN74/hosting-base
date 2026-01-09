@@ -94,15 +94,20 @@ def check_ingestion_checkpoint(**context):
     db_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     # Get already-ingested country/year combinations
+    # Check last 1 day to avoid skipping data from previous test runs
+    # For initial load, you might want to set this to 0 days or check for completeness
     sql = """
         SELECT DISTINCT country_code, year
         FROM fact_energy_annual
         WHERE source_system = 'eurostat'
           AND source_table = %s
-          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '7 days'
+          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '1 day'
     """
     ingested = db_hook.get_records(sql, parameters=(TABLE_CODE,))
     ingested_set = {(row[0], row[1]) for row in ingested} if ingested else set()
+    
+    # Optional: For initial full load, you can force process all by setting:
+    # ingested_set = set()  # This will process everything
     
     # Create ingestion plan: only process what's not already ingested
     ingestion_plan = []

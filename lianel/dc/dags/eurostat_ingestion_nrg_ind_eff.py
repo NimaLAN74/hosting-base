@@ -99,7 +99,7 @@ def check_ingestion_checkpoint(**context):
         FROM fact_energy_annual
         WHERE source_system = 'eurostat'
           AND source_table = %s
-          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '7 days'
+          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '1 day'
     """
     ingested = db_hook.get_records(sql, parameters=(TABLE_CODE,))
     ingested_set = {(row[0], row[1]) for row in ingested} if ingested else set()
