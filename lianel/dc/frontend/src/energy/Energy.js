@@ -450,7 +450,7 @@ function Energy() {
           </div>
 
           {/* Pagination */}
-          {energyData.total > filters.limit && (
+          {energyData && energyData.total && energyData.total > filters.limit && (
             <div className="pagination">
               <button
                 onClick={() => setFilters(prev => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }))}
