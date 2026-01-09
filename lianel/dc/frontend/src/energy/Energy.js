@@ -426,7 +426,9 @@ function Energy() {
 
   const metrics = calculateMetrics();
 
-  if (loading && !energyData) {
+  // Show loading only if we're loading AND there's no error
+  // If there's an error, we want to show it even if loading is true
+  if (loading && !energyData && !error) {
     return (
       <PageTemplate title="EU Energy Data">
         <div className="loading">Loading energy data...</div>
