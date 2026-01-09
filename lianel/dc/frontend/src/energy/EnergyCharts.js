@@ -37,16 +37,27 @@ const COLORS = [
 
 // Time Series Chart - Energy consumption over years
 export const TimeSeriesChart = ({ data, countryCode, countryCodes }) => {
-  if (!data || !data.data || data.data.length === 0) return null;
+  if (!data || !data.data || data.data.length === 0) {
+    console.log('TimeSeriesChart: No data provided');
+    return null;
+  }
+
+  console.log('TimeSeriesChart: Rendering with', data.data.length, 'records');
+  console.log('TimeSeriesChart: countryCode:', countryCode, 'countryCodes:', countryCodes);
 
   // Filter by selected countries if multiple countries selected
+  // Note: data.data should already be filtered by the fetch, but we filter again for safety
   let filteredData = data.data;
   if (countryCodes && countryCodes.length > 1) {
     filteredData = data.data.filter(record => 
       countryCodes.includes(record.country_code)
     );
+    console.log('TimeSeriesChart: Filtered to', filteredData.length, 'records for countries:', countryCodes);
   } else if (countryCode) {
     filteredData = data.data.filter(record => record.country_code === countryCode);
+    console.log('TimeSeriesChart: Filtered to', filteredData.length, 'records for country:', countryCode);
+  } else {
+    console.log('TimeSeriesChart: Using all', filteredData.length, 'records (no country filter)');
   }
 
   // Group by year and sum values
@@ -241,7 +252,12 @@ export const ProductDistributionChart = ({ data }) => {
 
 // Flow Distribution Chart - Energy by flow type
 export const FlowDistributionChart = ({ data }) => {
-  if (!data || !data.data || data.data.length === 0) return null;
+  if (!data || !data.data || data.data.length === 0) {
+    console.log('FlowDistributionChart: No data provided');
+    return null;
+  }
+
+  console.log('FlowDistributionChart: Rendering with', data.data.length, 'records');
 
   // Use all data (already filtered by country/year selection)
   // Group by flow

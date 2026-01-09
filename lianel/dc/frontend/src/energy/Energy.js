@@ -13,6 +13,7 @@ function Energy() {
   const [serviceInfo, setServiceInfo] = useState(null);
   const [energyData, setEnergyData] = useState(null);
   const [fullFilteredData, setFullFilteredData] = useState(null); // Store full dataset for charts
+  const [activeFiltersForCharts, setActiveFiltersForCharts] = useState({ country_codes: [], years: [] }); // Store active filters for charts
   const [filters, setFilters] = useState({
     country_codes: [], // Changed to array for multi-select
     years: [], // Changed to array for multi-select
@@ -179,9 +180,18 @@ function Energy() {
         
         allData = Array.from(dataMap.values());
         console.log('Combined data:', allData.length, 'unique records');
+        console.log('Active filters for this data:', {
+          countries: activeFilters.country_codes,
+          years: activeFilters.years
+        });
         
         // Store full dataset for charts (before pagination)
         setFullFilteredData({ data: allData });
+        // Store active filters so charts know what filters were applied
+        setActiveFiltersForCharts({
+          country_codes: activeFilters.country_codes,
+          years: activeFilters.years
+        });
         
         // Apply pagination for table
         const start = activeFilters.offset || 0;
@@ -216,8 +226,10 @@ function Energy() {
         
         const data = await energyApi.getEnergyAnnual(params);
         setEnergyData(data);
-        // For charts, use the same data when no filters (or use full dataset if available)
+        // For charts, use the same data when no filters
         setFullFilteredData(data);
+        // Clear active filters for charts when no filters applied
+        setActiveFiltersForCharts({ country_codes: [], years: [] });
         
         // Fetch a much larger dataset to populate all available options (only on first load)
         // This ensures we get all countries and years, not just those in the first page
@@ -512,17 +524,33 @@ function Energy() {
       {fullFilteredData && fullFilteredData.data && fullFilteredData.data.length > 0 && (
         <div className="charts-section">
           <h2>Data Visualization</h2>
+          {activeFiltersForCharts.country_codes.length > 0 || activeFiltersForCharts.years.length > 0 ? (
+            <p className="chart-filter-info" style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              Showing data for: {activeFiltersForCharts.country_codes.length > 0 ? `Countries: ${activeFiltersForCharts.country_codes.join(', ')}` : 'All countries'} | 
+              {activeFiltersForCharts.years.length > 0 ? ` Years: ${activeFiltersForCharts.years.join(', ')}` : ' All years'}
+            </p>
+          ) : null}
           <div className="charts-grid">
             <TimeSeriesChart 
+              key={`timeseries-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
               data={fullFilteredData} 
-              countryCode={filters.country_codes.length === 1 ? filters.country_codes[0] : undefined}
-              countryCodes={filters.country_codes.length > 1 ? filters.country_codes : undefined}
+              countryCode={activeFiltersForCharts.country_codes.length === 1 ? activeFiltersForCharts.country_codes[0] : undefined}
+              countryCodes={activeFiltersForCharts.country_codes.length > 1 ? activeFiltersForCharts.country_codes : undefined}
             />
             {summary && summary.summary && summary.summary.length > 0 && (
-              <CountryComparisonChart summary={summary} />
+              <CountryComparisonChart 
+                key={`country-comp-${activeFiltersForCharts.country_codes.join('-')}`}
+                summary={summary} 
+              />
             )}
-            <ProductDistributionChart data={fullFilteredData} />
-            <FlowDistributionChart data={fullFilteredData} />
+            <ProductDistributionChart 
+              key={`product-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
+              data={fullFilteredData} 
+            />
+            <FlowDistributionChart 
+              key={`flow-dist-${activeFiltersForCharts.country_codes.join('-')}-${activeFiltersForCharts.years.join('-')}`}
+              data={fullFilteredData} 
+            />
           </div>
         </div>
       )}
