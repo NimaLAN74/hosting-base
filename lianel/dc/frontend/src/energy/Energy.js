@@ -173,8 +173,10 @@ function Energy() {
   }, [filters, availableCountries.length, availableYears.length]);
 
   const handleFilterChange = (field, value) => {
+    console.log('Filter changed:', field, value);
     setFilters(prev => {
       const newFilters = { ...prev, [field]: value, offset: 0 };
+      console.log('New filters state:', newFilters);
       return newFilters;
     });
   };
