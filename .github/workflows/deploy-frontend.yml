@@ -203,6 +203,30 @@ jobs:
           echo "Key file size: $KEY_SIZE bytes"
           echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
+      - name: Copy Deployment Script to Remote Host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Copying deployment script to remote host..."
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P ${REMOTE_PORT} \
+            lianel/dc/deploy-frontend.sh \
+            ${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-frontend.sh
+          
+          echo "Setting execute permissions on remote script..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /root/deploy-frontend.sh"
+          
+          echo "✅ Deployment script copied and made executable"
+
       - name: Deploy to Remote Host
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
