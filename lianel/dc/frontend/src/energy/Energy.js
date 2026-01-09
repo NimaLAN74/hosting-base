@@ -159,8 +159,11 @@ function Energy() {
           offset: start
         });
         
-        // Extract options from full dataset
-        extractOptions({ data: allData });
+        // Extract options from full dataset (but don't replace existing options)
+        // Only update if we have new countries/years
+        if (allData.length > 0) {
+          extractOptions({ data: allData });
+        }
       } else {
         // No filters - fetch normally
         const params = {
@@ -196,7 +199,10 @@ function Energy() {
           console.log(`Fetched ${allOptionsData.length} records for options`);
           extractOptions({ data: allOptionsData });
         } else {
-          extractOptions(data);
+          // Only update options if we have new data, don't replace existing options
+          if (data && data.data && data.data.length > 0) {
+            extractOptions(data);
+          }
         }
       }
 
