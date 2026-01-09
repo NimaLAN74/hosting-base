@@ -97,11 +97,13 @@ function Energy() {
         // Combine and deduplicate results
         const dataMap = new Map();
         results.forEach(result => {
-          if (result.data) {
+          if (result && result.data && Array.isArray(result.data)) {
             result.data.forEach(record => {
-              const key = `${record.country_code}-${record.year}-${record.product_code}-${record.flow_code}`;
-              if (!dataMap.has(key)) {
-                dataMap.set(key, record);
+              if (record) {
+                const key = `${record.country_code}-${record.year}-${record.product_code}-${record.flow_code}`;
+                if (!dataMap.has(key)) {
+                  dataMap.set(key, record);
+                }
               }
             });
             totalCount = Math.max(totalCount, result.total || 0);
