@@ -90,8 +90,18 @@ function Energy() {
       const activeFilters = currentFilters || filters;
 
       // Fetch service info
-      const info = await energyApi.getServiceInfo();
-      setServiceInfo(info);
+      try {
+        const info = await energyApi.getServiceInfo();
+        setServiceInfo(info);
+      } catch (err) {
+        // If service info fails due to auth, show error immediately
+        if (err.message && (err.message.includes('Not authenticated') || err.message.includes('Authentication required'))) {
+          setError('Please log in to view energy data. Click "Sign In" in the top right corner.');
+          setLoading(false);
+          return;
+        }
+        throw err; // Re-throw if it's a different error
+      }
 
       // Fetch energy data - handle multiple countries/years
       let allData = [];
