@@ -1,17 +1,21 @@
 import React from 'react';
 import { useKeycloak } from './KeycloakProvider';
+import keycloak from './keycloak';
 import UserDropdown from './UserDropdown';
 import './Dashboard.css';
 
 function Dashboard() {
-  const { keycloak, hasRole, authenticatedFetch } = useKeycloak();
+  const { authenticated, userInfo, hasRole, authenticatedFetch } = useKeycloak();
   const [isAdminFromAPI, setIsAdminFromAPI] = React.useState(false);
   const [adminCheckLoading, setAdminCheckLoading] = React.useState(true);
-  const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
+  const userName = userInfo?.username || userInfo?.name || 'User';
 
   // Check admin status from backend API (more reliable than token parsing)
   React.useEffect(() => {
-    if (!keycloak?.authenticated) {
+    console.log('Dashboard useEffect - authenticated:', authenticated, 'keycloak:', !!keycloak);
+    
+    if (!authenticated) {
+      console.log('Dashboard - User not authenticated, skipping admin check');
       setIsAdminFromAPI(false);
       setAdminCheckLoading(false);
       return;
@@ -34,10 +38,10 @@ function Dashboard() {
         setIsAdminFromAPI(false);
         setAdminCheckLoading(false);
       });
-  }, [keycloak?.authenticated, keycloak?.token, authenticatedFetch]);
+  }, [authenticated, authenticatedFetch]);
 
   // Also check token directly as fallback
-  const roles = keycloak?.tokenParsed?.realm_access?.roles || [];
+  const roles = userInfo?.roles || keycloak?.tokenParsed?.realm_access?.roles || [];
   const hasRoleResult = hasRole && typeof hasRole === 'function' ? hasRole('admin') : false;
   const hasRoleInToken = roles.some(role => {
     const roleLower = role.toLowerCase();
@@ -45,23 +49,30 @@ function Dashboard() {
   });
   
   // Use backend API result, fallback to token check if API fails or is loading
-  const finalIsAdmin = isAdminFromAPI || (keycloak?.authenticated && !adminCheckLoading && (hasRoleResult || hasRoleInToken));
+  const finalIsAdmin = isAdminFromAPI || (authenticated && !adminCheckLoading && (hasRoleResult || hasRoleInToken));
   
   // Debug logging (ALWAYS log for troubleshooting)
-  if (keycloak?.authenticated) {
-    console.log('=== DASHBOARD ADMIN ROLE DEBUG ===');
-    console.log('Dashboard - Backend API isAdmin:', isAdminFromAPI);
-    console.log('Dashboard - API check loading:', adminCheckLoading);
-    console.log('Dashboard - Token roles:', roles);
-    console.log('Dashboard - hasRole("admin"):', hasRoleResult);
-    console.log('Dashboard - roles check (admin/realm-admin):', hasRoleInToken);
-    console.log('Dashboard - keycloak.authenticated:', keycloak?.authenticated);
-    console.log('Dashboard - realm_access:', keycloak?.tokenParsed?.realm_access);
-    console.log('Dashboard - Final isAdmin (API + fallback):', finalIsAdmin);
-    console.log('Dashboard - adminServices will be:', finalIsAdmin ? 'SHOWN' : 'HIDDEN');
-    console.log('Dashboard - Full tokenParsed:', JSON.stringify(keycloak?.tokenParsed, null, 2));
-    console.log('===================================');
-  }
+  React.useEffect(() => {
+    if (authenticated) {
+      console.log('=== DASHBOARD ADMIN ROLE DEBUG ===');
+      console.log('Dashboard - authenticated:', authenticated);
+      console.log('Dashboard - userInfo:', userInfo);
+      console.log('Dashboard - Backend API isAdmin:', isAdminFromAPI);
+      console.log('Dashboard - API check loading:', adminCheckLoading);
+      console.log('Dashboard - Token roles:', roles);
+      console.log('Dashboard - hasRole("admin"):', hasRoleResult);
+      console.log('Dashboard - roles check (admin/realm-admin):', hasRoleInToken);
+      console.log('Dashboard - keycloak instance:', !!keycloak);
+      console.log('Dashboard - keycloak.authenticated:', keycloak?.authenticated);
+      console.log('Dashboard - realm_access:', keycloak?.tokenParsed?.realm_access);
+      console.log('Dashboard - Final isAdmin (API + fallback):', finalIsAdmin);
+      console.log('Dashboard - adminServices will be:', finalIsAdmin ? 'SHOWN' : 'HIDDEN');
+      if (keycloak?.tokenParsed) {
+        console.log('Dashboard - Full tokenParsed:', JSON.stringify(keycloak.tokenParsed, null, 2));
+      }
+      console.log('===================================');
+    }
+  }, [authenticated, isAdminFromAPI, adminCheckLoading, roles, hasRoleResult, hasRoleInToken, finalIsAdmin, keycloak, userInfo]);
 
   // Base services available to all users
   const baseServices = [

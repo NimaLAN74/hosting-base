@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { energyApi } from './energyApi';
 import UserDropdown from '../UserDropdown';
+import { TimeSeriesChart, CountryComparisonChart, ProductDistributionChart, FlowDistributionChart } from './EnergyCharts';
 import '../App.css';
 import './Energy.css';
 
@@ -164,6 +165,21 @@ function Energy() {
           <button onClick={handleResetFilters} className="btn-secondary">Reset</button>
         </div>
       </div>
+
+      {/* Charts Section */}
+      {energyData && energyData.data && energyData.data.length > 0 && (
+        <div className="charts-section">
+          <h2>Data Visualization</h2>
+          <div className="charts-grid">
+            <TimeSeriesChart data={energyData} countryCode={filters.country_code} />
+            {summary && summary.summary && summary.summary.length > 0 && (
+              <CountryComparisonChart summary={summary} />
+            )}
+            <ProductDistributionChart data={energyData} />
+            <FlowDistributionChart data={energyData} />
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       {summary && summary.summary && summary.summary.length > 0 && (
