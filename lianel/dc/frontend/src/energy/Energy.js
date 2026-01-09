@@ -157,7 +157,7 @@ function Energy() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, availableCountries.length, availableYears.length]);
 
   const handleFilterChange = (field, value) => {
     setFilters(prev => {
