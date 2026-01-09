@@ -22,8 +22,8 @@ echo "Fixing frontend network configuration..."
 docker network disconnect dc_default lianel-frontend 2>/dev/null || true
 docker network connect lianel-network lianel-frontend 2>/dev/null || true
 
-# Start profile service
-echo "Starting profile service..."
+# Start backend services (profile and energy)
+echo "Starting backend services..."
 docker compose -f docker-compose.backend.yaml up -d
 
 # Start monitoring
