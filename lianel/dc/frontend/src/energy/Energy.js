@@ -273,7 +273,7 @@ function Energy() {
     } finally {
       setLoading(false);
     }
-  }, [filters, availableCountries.length, availableYears.length]);
+  }, [filters, availableCountries.length, availableYears.length, extractOptions]);
 
   const handleFilterChange = (field, value) => {
     console.log('Filter changed:', field, value, 'Type:', Array.isArray(value) ? 'array' : typeof value);
