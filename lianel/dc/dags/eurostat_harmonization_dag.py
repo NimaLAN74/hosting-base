@@ -332,11 +332,13 @@ def log_harmonization_summary(**context):
         log_sql = """
             INSERT INTO meta_ingestion_log 
             (source_system, table_name, status, records_inserted, records_updated, 
-             records_failed, ingestion_timestamp, notes)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
+             records_failed, ingestion_timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
         """
         
+        # Log summary details in print statement (notes column doesn't exist in table)
         notes = f"Harmonization version {HARMONISATION_VERSION}: {result[1]} tables, {result[2]} countries, {result[3]} years"
+        print(f"📝 {notes}")
         
         db_hook.run(log_sql, parameters=(
             summary['source_system'],
@@ -344,8 +346,7 @@ def log_harmonization_summary(**context):
             summary['status'],
             summary['records_inserted'],
             summary['records_updated'],
-            summary['records_failed'],
-            notes
+            summary['records_failed']
         ))
         
         print(f"✅ Harmonization logged: {summary}")
