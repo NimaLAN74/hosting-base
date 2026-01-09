@@ -4,29 +4,54 @@ import UserDropdown from './UserDropdown';
 import './Dashboard.css';
 
 function Dashboard() {
-  const { keycloak, hasRole } = useKeycloak();
+  const { keycloak, hasRole, authenticatedFetch } = useKeycloak();
+  const [isAdminFromAPI, setIsAdminFromAPI] = React.useState(false);
+  const [adminCheckLoading, setAdminCheckLoading] = React.useState(true);
   const userName = keycloak?.tokenParsed?.preferred_username || keycloak?.tokenParsed?.name || 'User';
 
-  // Check if user is admin - check both hasRole function and token directly
-  // Keycloak stores roles in tokenParsed.realm_access.roles array
-  // Backend checks for "admin" or "realm-admin" case-insensitively
+  // Check admin status from backend API (more reliable than token parsing)
+  React.useEffect(() => {
+    if (!keycloak?.authenticated) {
+      setIsAdminFromAPI(false);
+      setAdminCheckLoading(false);
+      return;
+    }
+
+    // Check admin status via backend API
+    authenticatedFetch('/api/admin/check')
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`API returned ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => {
+        setIsAdminFromAPI(!!data?.isAdmin);
+        setAdminCheckLoading(false);
+      })
+      .catch(err => {
+        console.error('Failed to check admin status via API:', err);
+        setIsAdminFromAPI(false);
+        setAdminCheckLoading(false);
+      });
+  }, [keycloak?.authenticated, keycloak?.token, authenticatedFetch]);
+
+  // Also check token directly as fallback
   const roles = keycloak?.tokenParsed?.realm_access?.roles || [];
   const hasRoleResult = hasRole && typeof hasRole === 'function' ? hasRole('admin') : false;
-  
-  // Check for admin role in various cases (matching backend logic)
   const hasRoleInToken = roles.some(role => {
     const roleLower = role.toLowerCase();
     return roleLower === 'admin' || roleLower === 'realm-admin';
   });
   
-  // Calculate isAdmin first
-  const hasAdminRole = keycloak?.authenticated && (hasRoleResult || hasRoleInToken);
-  const isAdmin = !!hasAdminRole;
+  // Use backend API result, fallback to token check if API fails or is loading
+  const finalIsAdmin = isAdminFromAPI || (keycloak?.authenticated && !adminCheckLoading && (hasRoleResult || hasRoleInToken));
   
   // Debug logging (ALWAYS log for troubleshooting)
   if (keycloak?.authenticated) {
     console.log('=== DASHBOARD ADMIN ROLE DEBUG ===');
-    console.log('Dashboard - Backend API isAdmin:', isAdmin);
+    console.log('Dashboard - Backend API isAdmin:', isAdminFromAPI);
+    console.log('Dashboard - API check loading:', adminCheckLoading);
     console.log('Dashboard - Token roles:', roles);
     console.log('Dashboard - hasRole("admin"):', hasRoleResult);
     console.log('Dashboard - roles check (admin/realm-admin):', hasRoleInToken);
