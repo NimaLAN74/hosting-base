@@ -222,6 +222,7 @@ function Energy() {
       const arrayValue = Array.isArray(value) ? value : (value ? [value] : []);
       const newFilters = { ...prev, [field]: arrayValue, offset: 0 };
       console.log('New filters state:', newFilters);
+      // Don't auto-fetch when filters change - user must click "Apply Filters"
       return newFilters;
     });
   };
