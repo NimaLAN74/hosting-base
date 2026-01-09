@@ -45,34 +45,40 @@
   display: flex;
   gap: 20px;
   font-size: 0.9em;
-  color: #666;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
 }
 
 .service-stats span {
   padding: 8px 16px;
-  background: #f5f5f5;
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 8px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
 .error-message {
-  background: #fee;
-  color: #c33;
+  background: rgba(220, 38, 38, 0.2);
+  color: #ffcccc;
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
-  border: 1px solid #fcc;
+  border: 1px solid rgba(220, 38, 38, 0.5);
+  font-weight: 600;
 }
 
 .filters-panel {
-  background: #f9f9f9;
+  background: rgba(255, 255, 255, 0.1);
   padding: 20px;
   border-radius: 8px;
   margin-bottom: 30px;
+  border: 1px solid var(--border-color);
 }
 
 .filters-panel h3 {
   margin-top: 0;
-  color: #333;
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .filters-grid {
@@ -89,8 +95,8 @@
 
 .filter-group label {
   margin-bottom: 5px;
-  font-weight: 500;
-  color: #555;
+  font-weight: 600;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
@@ -129,12 +135,13 @@
 }
 
 .btn-secondary {
-  background: #e0e0e0;
-  color: #333;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #d0d0d0;
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .btn-secondary:disabled {
@@ -143,9 +150,10 @@
 }
 
 .summary-panel {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: rgba(102, 126, 234, 0.2);
+  color: var(--text-primary);
   padding: 20px;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 30px;
 }
@@ -185,20 +193,22 @@
 }
 
 .data-panel {
-  background: white;
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
+  border: 1px solid var(--border-color);
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .data-panel h3 {
   margin-top: 0;
-  color: #333;
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .total-count {
   font-size: 0.7em;
-  color: #666;
+  color: var(--text-secondary);
   font-weight: normal;
 }
 
@@ -214,7 +224,7 @@
 }
 
 .energy-table thead {
-  background: #f5f5f5;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .energy-table th {
@@ -231,26 +241,26 @@
 }
 
 .energy-table tbody tr:hover {
-  background: #f9f9f9;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .country-name,
 .detail-text {
   font-size: 0.85em;
-  color: #666;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
 .value-cell {
   font-weight: 600;
-  color: #667eea;
+  color: var(--secondary-blue);
   text-align: right;
 }
 
 .no-data {
   text-align: center;
   padding: 40px;
-  color: #999;
+  color: var(--text-muted);
 }
 
 .pagination {
@@ -262,7 +272,7 @@
 }
 
 .page-info {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
@@ -270,7 +280,7 @@
   text-align: center;
   padding: 40px;
   font-size: 1.2em;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 /* Charts Section */
@@ -292,8 +302,9 @@
 }
 
 .chart-container {
-  background: white;
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
+  border: 1px solid var(--border-color);
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
@@ -301,9 +312,9 @@
 .chart-container h3 {
   margin-top: 0;
   margin-bottom: 20px;
-  color: #333;
+  color: var(--text-primary);
   font-size: 1.2em;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 @media (max-width: 768px) {

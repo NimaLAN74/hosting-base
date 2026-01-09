@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { adminApi } from './adminApi';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import PageTemplate from '../PageTemplate';
 
 const UsersList = () => {
   const [searchParams] = useSearchParams();
@@ -45,9 +46,9 @@ const UsersList = () => {
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: '24px auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Users</h2>
+    <PageTemplate title="User Management">
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Link to="/admin/users/new" className="btn-primary" style={{ textDecoration: 'none', padding: '8px 12px', background: '#111', color: '#fff', borderRadius: 6 }}>+ New User</Link>
       </div>
 
@@ -120,7 +121,8 @@ const UsersList = () => {
           <button disabled={page >= totalPages} onClick={() => { const np = Math.min(totalPages, page + 1); setPage(np); applyFilters(np); }}>Next</button>
         </div>
       </div>
-    </div>
+      </div>
+    </PageTemplate>
   );
 };
 

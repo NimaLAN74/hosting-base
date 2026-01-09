@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import PageTemplate from '../PageTemplate';
 import { energyApi } from './energyApi';
-import UserDropdown from '../UserDropdown';
 import { TimeSeriesChart, CountryComparisonChart, ProductDistributionChart, FlowDistributionChart } from './EnergyCharts';
 import '../App.css';
 import './Energy.css';
@@ -81,44 +81,22 @@ function Energy() {
 
   if (loading && !energyData) {
     return (
-      <div className="App">
-        <div className="container">
-          <div className="loading">Loading energy data...</div>
-        </div>
-      </div>
+      <PageTemplate title="EU Energy Data">
+        <div className="loading">Loading energy data...</div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="App">
-      <div className="container">
-        <header className="header">
-          <h1 className="logo">
-            <div className="logo-icon">LW</div>
-            Lianel World
-          </h1>
-          <div className="header-right">
-            <UserDropdown />
+    <PageTemplate title="EU Energy Data">
+      <div className="energy-container">
+        {serviceInfo && (
+          <div className="service-stats">
+            <span>📊 {serviceInfo.database.total_records.toLocaleString()} records</span>
+            <span>🌍 {serviceInfo.database.countries} countries</span>
+            <span>📅 {serviceInfo.database.years} years</span>
           </div>
-        </header>
-        
-        <main className="main">
-          <div className="energy-container">
-            <div className="energy-header">
-              <div className="energy-title-section">
-                <h1>EU Energy Data</h1>
-                <Link to="/" className="back-to-home-btn">
-                  ← Back to Home
-                </Link>
-              </div>
-              {serviceInfo && (
-                <div className="service-stats">
-                  <span>📊 {serviceInfo.database.total_records.toLocaleString()} records</span>
-                  <span>🌍 {serviceInfo.database.countries} countries</span>
-                  <span>📅 {serviceInfo.database.years} years</span>
-                </div>
-              )}
-            </div>
+        )}
 
             {error && <div className="error-message">{error}</div>}
 
@@ -272,14 +250,8 @@ function Energy() {
           )}
         </div>
       )}
-          </div>
-        </main>
-        
-        <footer className="footer">
-          <p>&copy; 2025 Lianel World. All rights reserved.</p>
-        </footer>
       </div>
-    </div>
+    </PageTemplate>
   );
 }
 

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import UserDropdown from './UserDropdown';
+import PageTemplate from './PageTemplate';
 import { useKeycloak } from './KeycloakProvider';
 import './App.css';
 import './Profile.css';
@@ -185,29 +184,15 @@ function Profile() {
 
   if (loading) {
     return (
-      <div className="App">
-        <div className="container">
-          <div className="loading">Loading profile...</div>
-        </div>
-      </div>
+      <PageTemplate title="User Profile">
+        <div className="loading">Loading profile...</div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="App">
-      <div className="container">
-        <header className="header">
-          <h1 className="logo">
-            <div className="logo-icon">LW</div>
-            Lianel World
-          </h1>
-          <div className="header-right">
-            <UserDropdown />
-          </div>
-        </header>
-        
-        <main className="main">
-          <div className="profile-container">
+    <PageTemplate title="User Profile">
+      <div className="profile-container">
             <div className="profile-card">
               <div className="profile-header">
                 <div className="profile-avatar-large">
@@ -402,13 +387,7 @@ function Profile() {
               </div>
             </div>
           </div>
-        </main>
-        
-        <footer className="footer">
-          <p>&copy; 2025 Lianel World. All rights reserved.</p>
-        </footer>
-      </div>
-    </div>
+    </PageTemplate>
   );
 }
 

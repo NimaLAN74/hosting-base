@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { adminApi } from './adminApi';
+import PageTemplate from '../PageTemplate';
 
 const UserDetails = () => {
   const { id } = useParams();
@@ -23,20 +24,21 @@ const UserDetails = () => {
     return () => { mounted = false; };
   }, [id]);
 
-  if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
-  if (error) return <div style={{ padding: 24, color: 'crimson' }}>{error}</div>;
-  if (!user) return <div style={{ padding: 24 }}>User not found</div>;
+  if (loading) return <PageTemplate title="User Details"><div style={{ padding: 24 }}>Loading…</div></PageTemplate>;
+  if (error) return <PageTemplate title="User Details"><div style={{ padding: 24, color: 'crimson' }}>{error}</div></PageTemplate>;
+  if (!user) return <PageTemplate title="User Details"><div style={{ padding: 24 }}>User not found</div></PageTemplate>;
 
   return (
-    <div style={{ maxWidth: 700, margin: '24px auto' }}>
-      <h2 style={{ marginTop: 0 }}>User Details</h2>
+    <PageTemplate title="User Details">
+      <div style={{ maxWidth: 700, margin: '0 auto' }}>
       <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
         <div style={{ marginBottom: 8 }}><strong>Username:</strong> {user.username}</div>
         <div style={{ marginBottom: 8 }}><strong>Name:</strong> {user.name}</div>
         <div style={{ marginBottom: 8 }}><strong>Email:</strong> {user.email}</div>
         <div style={{ marginBottom: 8 }}><strong>Status:</strong> {user.enabled ? 'Enabled' : 'Disabled'}</div>
       </div>
-    </div>
+      </div>
+    </PageTemplate>
   );
 };
 

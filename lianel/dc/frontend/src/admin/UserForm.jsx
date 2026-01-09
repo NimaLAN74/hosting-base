@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { adminApi } from './adminApi';
+import PageTemplate from '../PageTemplate';
 
 const empty = { username: '', email: '', firstName: '', lastName: '', password: '', enabled: true };
 
@@ -38,8 +39,8 @@ const UserForm = ({ mode = 'create' }) => {
   };
 
   return (
-    <div style={{ maxWidth: 700, margin: '24px auto' }}>
-      <h2 style={{ marginTop: 0 }}>{mode === 'create' ? 'Create User' : 'Edit User'}</h2>
+    <PageTemplate title={mode === 'create' ? 'Create User' : 'Edit User'}>
+      <div style={{ maxWidth: 700, margin: '0 auto' }}>
       {message && <div style={{ marginBottom: 12 }}>{message}</div>}
       <form onSubmit={onSubmit}>
         <div style={{ display: 'grid', gap: 12 }}>
@@ -73,7 +74,8 @@ const UserForm = ({ mode = 'create' }) => {
           <button type="submit" disabled={saving} style={{ padding: '8px 12px' }}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </form>
-    </div>
+      </div>
+    </PageTemplate>
   );
 };
 

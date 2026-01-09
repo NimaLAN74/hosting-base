@@ -10,6 +10,17 @@
   --shadow-hover: rgba(0, 0, 0, 0.18);
   --bg-start: #0f172a;
   --bg-end: #1f3b73;
+  
+  /* High contrast colors for better readability */
+  --text-primary: #ffffff;
+  --text-secondary: #e0e7ff;
+  --text-muted: #cbd5e1;
+  --bg-card: rgba(255, 255, 255, 0.95);
+  --bg-card-dark: rgba(15, 23, 42, 0.9);
+  --text-on-card: #1f2a44;
+  --text-on-card-light: #334155;
+  --border-color: rgba(255, 255, 255, 0.2);
+  --border-color-dark: rgba(0, 0, 0, 0.1);
 }
 
 * {
@@ -28,7 +39,7 @@ body {
     radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.06), transparent 22%),
     linear-gradient(135deg, var(--bg-start), var(--bg-end));
   min-height: 100vh;
-  color: var(--dark-blue);
+  color: var(--text-primary);
 }
 
 .App {
@@ -101,4 +112,74 @@ body {
 
 .footer p {
   margin: 0;
+}
+
+/* Page Template Styles */
+.page-header {
+  margin-bottom: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.page-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 2em;
+  font-weight: 700;
+}
+
+.page-content {
+  color: var(--text-primary);
+}
+
+.back-to-home-btn {
+  display: inline-block;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: 1px solid var(--border-color);
+  width: fit-content;
+}
+
+.back-to-home-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* High contrast for cards and panels */
+.card, .panel {
+  background: var(--bg-card);
+  color: var(--text-on-card);
+  border: 1px solid var(--border-color-dark);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.card h2, .card h3, .panel h2, .panel h3 {
+  color: var(--text-on-card);
+}
+
+.card p, .panel p {
+  color: var(--text-on-card-light);
+}
+
+/* Ensure text is readable on dark backgrounds */
+.dark-bg {
+  background: var(--bg-card-dark);
+  color: var(--text-primary);
+}
+
+.dark-bg h1, .dark-bg h2, .dark-bg h3 {
+  color: var(--text-primary);
+}
+
+.dark-bg p, .dark-bg span {
+  color: var(--text-secondary);
 }

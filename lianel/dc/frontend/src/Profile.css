@@ -5,12 +5,12 @@
 }
 
 .profile-card {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-card);
   backdrop-filter: blur(10px);
   border-radius: 16px;
   padding: 40px;
   box-shadow: 0 10px 30px var(--shadow);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-color-dark);
 }
 
 .profile-header {
@@ -35,7 +35,7 @@
 
 .profile-title {
   font-size: 2rem;
-  color: var(--dark-blue);
+  color: var(--text-on-card);
   margin: 0;
   font-weight: 600;
 }
