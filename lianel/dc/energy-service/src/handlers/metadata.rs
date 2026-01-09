@@ -8,7 +8,7 @@ use crate::models::*;
 
 #[utoipa::path(
     get,
-    path = "/api/energy/api/info",
+    path = "/api/energy/info",
     tag = "info",
     responses(
         (status = 200, description = "Service information", body = serde_json::Value),

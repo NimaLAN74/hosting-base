@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .route("/health", get(handlers::health::health_check))
-        .route("/api/info", get(handlers::metadata::get_service_info))
+        .route("/info", get(handlers::metadata::get_service_info))
         .route("/annual", get(handlers::energy::get_energy_annual))
         .route("/annual/by-country/:country_code", get(handlers::energy::get_energy_by_country))
         .route("/annual/by-year/:year", get(handlers::energy::get_energy_by_year))
