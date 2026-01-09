@@ -138,12 +138,21 @@
   background: rgba(74, 143, 231, 0.2);
 }
 
+.multi-select-option label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+  margin: 0;
+}
+
 .multi-select-option input[type="checkbox"] {
   margin-right: 10px;
   cursor: pointer;
   width: 18px;
   height: 18px;
   accent-color: var(--secondary-blue);
+  flex-shrink: 0;
 }
 
 .multi-select-option span {

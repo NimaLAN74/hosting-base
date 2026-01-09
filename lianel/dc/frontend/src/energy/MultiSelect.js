@@ -124,32 +124,33 @@ const MultiSelect = ({
                 const isSelected = selected.includes(value);
                 
                 return (
-                  <label
+                  <div
                     key={value}
                     className={`multi-select-option ${isSelected ? 'selected' : ''}`}
                     onClick={(e) => {
-                      // Only handle click if it's not on the checkbox itself
+                      e.stopPropagation();
+                      // Only toggle if click is not directly on checkbox (checkbox handles its own click)
                       if (e.target.type !== 'checkbox') {
-                        e.stopPropagation();
                         handleToggle(value);
                       }
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        // Don't call handleToggle here - let the label onClick handle it
-                        // This prevents double-toggling
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggle(value);
-                      }}
-                    />
-                    <span>{label}</span>
-                  </label>
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', width: '100%' }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleToggle(value);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                        style={{ marginRight: '10px', cursor: 'pointer' }}
+                      />
+                      <span style={{ flex: 1 }}>{label}</span>
+                    </label>
+                  </div>
                 );
               })
             )}
