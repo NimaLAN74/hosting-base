@@ -79,6 +79,64 @@ function Energy() {
     }).format(num);
   };
 
+  // Calculate summary metrics
+  const calculateMetrics = () => {
+    if (!energyData || !energyData.data) return null;
+    
+    const data = energyData.data;
+    const totalGWh = data.reduce((sum, record) => sum + (parseFloat(record.value_gwh) || 0), 0);
+    const avgGWh = data.length > 0 ? totalGWh / data.length : 0;
+    const countries = new Set(data.map(r => r.country_code)).size;
+    const years = new Set(data.map(r => r.year)).size;
+    
+    return {
+      totalGWh,
+      avgGWh,
+      countries,
+      years,
+      recordCount: data.length
+    };
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    if (!energyData || !energyData.data || energyData.data.length === 0) {
+      alert('No data to export');
+      return;
+    }
+
+    const headers = ['Country Code', 'Country Name', 'Year', 'Product Code', 'Product Name', 'Flow Code', 'Flow Name', 'Value (GWh)', 'Unit', 'Source Table'];
+    const rows = energyData.data.map(record => [
+      record.country_code || '',
+      record.country_name || '',
+      record.year || '',
+      record.product_code || '',
+      record.product_name || '',
+      record.flow_code || '',
+      record.flow_name || '',
+      record.value_gwh || '0',
+      record.unit || '',
+      record.source_table || ''
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `energy-data-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const metrics = calculateMetrics();
+
   if (loading && !energyData) {
     return (
       <PageTemplate title="EU Energy Data">
@@ -90,11 +148,48 @@ function Energy() {
   return (
     <PageTemplate title="EU Energy Data">
       <div className="energy-container">
+        {/* Summary Cards */}
         {serviceInfo && (
-          <div className="service-stats">
-            <span>📊 {serviceInfo.database.total_records.toLocaleString()} records</span>
-            <span>🌍 {serviceInfo.database.countries} countries</span>
-            <span>📅 {serviceInfo.database.years} years</span>
+          <div className="summary-cards">
+            <div className="summary-card">
+              <div className="card-icon">📊</div>
+              <div className="card-content">
+                <div className="card-label">Total Records</div>
+                <div className="card-value">{serviceInfo.database.total_records.toLocaleString()}</div>
+              </div>
+            </div>
+            <div className="summary-card">
+              <div className="card-icon">🌍</div>
+              <div className="card-content">
+                <div className="card-label">Countries</div>
+                <div className="card-value">{serviceInfo.database.countries}</div>
+              </div>
+            </div>
+            <div className="summary-card">
+              <div className="card-icon">📅</div>
+              <div className="card-content">
+                <div className="card-label">Years</div>
+                <div className="card-value">{serviceInfo.database.years}</div>
+              </div>
+            </div>
+            {metrics && (
+              <>
+                <div className="summary-card">
+                  <div className="card-icon">⚡</div>
+                  <div className="card-content">
+                    <div className="card-label">Total Energy (GWh)</div>
+                    <div className="card-value">{formatNumber(metrics.totalGWh)}</div>
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="card-icon">📈</div>
+                  <div className="card-content">
+                    <div className="card-label">Avg per Record</div>
+                    <div className="card-value">{formatNumber(metrics.avgGWh)}</div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -178,12 +273,17 @@ function Energy() {
       {/* Data Table */}
       {energyData && (
         <div className="data-panel">
-          <h3>
-            Energy Records
-            {energyData.total !== undefined && (
-              <span className="total-count"> ({energyData.total.toLocaleString()} total)</span>
-            )}
-          </h3>
+          <div className="data-panel-header">
+            <h3>
+              Energy Records
+              {energyData.total !== undefined && (
+                <span className="total-count"> ({energyData.total.toLocaleString()} total)</span>
+              )}
+            </h3>
+            <button onClick={exportToCSV} className="btn-export">
+              📥 Export to CSV
+            </button>
+          </div>
           <div className="table-container">
             <table className="energy-table">
               <thead>
