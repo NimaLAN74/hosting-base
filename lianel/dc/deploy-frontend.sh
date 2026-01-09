@@ -26,6 +26,12 @@ echo "Removing old local image tags to force fresh pull..."
 docker rmi "$LOCAL_TAG" 2>/dev/null || true
 docker rmi "$IMAGE_TAG" 2>/dev/null || true
 
+# Also remove any images with the same repository to clear cache
+# This helps when the same tag is reused (like :latest)
+REPO_NAME=$(echo "$IMAGE_TAG" | cut -d':' -f1)
+echo "Removing any cached images from repository: $REPO_NAME"
+docker images "$REPO_NAME" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+
 # Clear any stale Docker auth
 docker logout ghcr.io 2>/dev/null || true
 
@@ -57,10 +63,13 @@ docker stop lianel-$SERVICE_NAME 2>/dev/null || true
 docker rm lianel-$SERVICE_NAME 2>/dev/null || true
 
 # Try docker compose first, fallback to docker-compose
+# Use --pull always to force Docker Compose to pull the latest image
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f docker-compose.yaml up -d $SERVICE_NAME
+  docker compose -f docker-compose.yaml pull $SERVICE_NAME || true
+  docker compose -f docker-compose.yaml up -d --force-recreate $SERVICE_NAME
 elif command -v docker-compose >/dev/null 2>&1; then
-  docker-compose -f docker-compose.yaml up -d $SERVICE_NAME
+  docker-compose -f docker-compose.yaml pull $SERVICE_NAME || true
+  docker-compose -f docker-compose.yaml up -d --force-recreate $SERVICE_NAME
 else
   echo "❌ Error: Neither 'docker compose' nor 'docker-compose' found"
   exit 1
