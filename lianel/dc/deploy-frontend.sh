@@ -43,11 +43,27 @@ fi
 
 # Force pull the latest image (always pull, even if local copy exists)
 echo "Pulling latest image (forcing update)..."
-if docker pull "$IMAGE_TAG" 2>&1; then
-  echo "✅ Image pulled successfully"
-else
-  PULL_EXIT=$?
-  echo "❌ Error: Failed to pull image (exit code: $PULL_EXIT)"
+PULL_ATTEMPTS=3
+PULL_SUCCESS=false
+
+for attempt in $(seq 1 $PULL_ATTEMPTS); do
+  echo "Pull attempt $attempt of $PULL_ATTEMPTS..."
+  if docker pull "$IMAGE_TAG" 2>&1; then
+    echo "✅ Image pulled successfully on attempt $attempt"
+    PULL_SUCCESS=true
+    break
+  else
+    PULL_EXIT=$?
+    echo "⚠️  Pull attempt $attempt failed (exit code: $PULL_EXIT)"
+    if [ $attempt -lt $PULL_ATTEMPTS ]; then
+      echo "Waiting 2 seconds before retry..."
+      sleep 2
+    fi
+  fi
+done
+
+if [ "$PULL_SUCCESS" = false ]; then
+  echo "❌ Error: Failed to pull image after $PULL_ATTEMPTS attempts"
   echo "Image tag: $IMAGE_TAG"
   echo "Checking if package is public or authentication is needed..."
   exit 1
@@ -62,13 +78,43 @@ echo "Restarting container..."
 docker stop lianel-$SERVICE_NAME 2>/dev/null || true
 docker rm lianel-$SERVICE_NAME 2>/dev/null || true
 
+# Verify the image exists before trying to start
+echo "Verifying image exists..."
+if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^${LOCAL_TAG}$"; then
+  echo "❌ Error: Local image tag $LOCAL_TAG not found after pull and tag"
+  echo "Available images:"
+  docker images | grep -E "lianel-frontend|ghcr.io" | head -5
+  exit 1
+fi
+
 # Try docker compose first, fallback to docker-compose
 # We already pulled and tagged the image above, so just recreate the container
 # Use --no-deps to avoid recreating dependencies (keycloak, nginx, etc.)
+echo "Starting container with docker compose..."
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME
+  if docker compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
+    echo "✅ Container started successfully"
+  else
+    COMPOSE_EXIT=$?
+    echo "❌ Error: docker compose failed (exit code: $COMPOSE_EXIT)"
+    echo "Trying alternative approach..."
+    # Fallback: start container directly
+    docker run -d \
+      --name lianel-$SERVICE_NAME \
+      --network lianel-network \
+      --restart unless-stopped \
+      $LOCAL_TAG || {
+      echo "❌ Error: Direct container start also failed"
+      exit 1
+    }
+  fi
 elif command -v docker-compose >/dev/null 2>&1; then
-  docker-compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME
+  if docker-compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
+    echo "✅ Container started successfully"
+  else
+    echo "❌ Error: docker-compose failed"
+    exit 1
+  fi
 else
   echo "❌ Error: Neither 'docker compose' nor 'docker-compose' found"
   exit 1
