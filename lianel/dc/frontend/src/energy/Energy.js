@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
 import { energyApi } from './energyApi';
@@ -21,6 +21,12 @@ function Energy() {
   const [summary, setSummary] = useState(null);
   const [availableCountries, setAvailableCountries] = useState([]);
   const [availableYears, setAvailableYears] = useState([]);
+  
+  // Use ref to always have access to latest filters
+  const filtersRef = useRef(filters);
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
 
   // Extract unique countries and years from data
   const extractOptions = (data) => {
@@ -182,11 +188,10 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Use a ref-like pattern to get the latest filters
-    // Since we can't use refs easily here, we'll use the filters from the closure
-    // which should be up-to-date due to the dependency array in useCallback
-    console.log('Applying filters:', filters);
-    fetchData(filters);
+    // Use ref to get the absolute latest filters
+    const currentFilters = filtersRef.current;
+    console.log('Applying filters:', currentFilters);
+    fetchData(currentFilters);
   };
 
   const handleResetFilters = () => {
