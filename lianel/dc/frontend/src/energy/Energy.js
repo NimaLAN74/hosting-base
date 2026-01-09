@@ -56,7 +56,7 @@ function Energy() {
     setAvailableYears(yearOptions);
   };
 
-  const fetchData = async (currentFilters = null) => {
+  const fetchData = useCallback(async (currentFilters = null) => {
     try {
       setLoading(true);
       setError('');
@@ -167,11 +167,8 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Get the latest filters from state and pass to fetchData
-    setFilters(currentFilters => {
-      fetchData(currentFilters);
-      return currentFilters;
-    });
+    // Get current filters and fetch data
+    fetchData(filters);
   };
 
   const handleResetFilters = () => {
