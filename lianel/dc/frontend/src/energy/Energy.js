@@ -340,6 +340,11 @@ function Energy() {
     fetchData(resetFilters);
   };
 
+  // Initial data fetch on mount
+  useEffect(() => {
+    fetchData();
+  }, []); // Only run once on mount
+
   // Auto-fetch when offset changes (for pagination)
   useEffect(() => {
     // Only auto-fetch if filters are already applied (not on initial load)
