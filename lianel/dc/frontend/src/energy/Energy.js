@@ -133,7 +133,14 @@ function Energy() {
         
         const data = await energyApi.getEnergyAnnual(params);
         setEnergyData(data);
-        extractOptions(data);
+        
+        // Fetch a larger dataset to populate all available options (only on first load)
+        if (availableCountries.length === 0 && availableYears.length === 0) {
+          const optionsData = await energyApi.getEnergyAnnual({ limit: 1000, offset: 0 });
+          extractOptions(optionsData);
+        } else {
+          extractOptions(data);
+        }
       }
 
       // Fetch summary (use first selected country/year if multiple)
