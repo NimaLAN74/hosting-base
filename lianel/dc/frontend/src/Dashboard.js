@@ -26,14 +26,14 @@ function Dashboard() {
   // Debug logging (ALWAYS log for troubleshooting)
   if (keycloak?.authenticated) {
     console.log('=== DASHBOARD ADMIN ROLE DEBUG ===');
-    console.log('Dashboard - User roles:', roles);
+    console.log('Dashboard - Backend API isAdmin:', isAdmin);
+    console.log('Dashboard - Token roles:', roles);
     console.log('Dashboard - hasRole("admin"):', hasRoleResult);
     console.log('Dashboard - roles check (admin/realm-admin):', hasRoleInToken);
     console.log('Dashboard - keycloak.authenticated:', keycloak?.authenticated);
     console.log('Dashboard - realm_access:', keycloak?.tokenParsed?.realm_access);
-    console.log('Dashboard - isAdmin result:', hasRoleResult || hasRoleInToken);
-    console.log('Dashboard - Final isAdmin:', isAdmin);
-    console.log('Dashboard - adminServices will be:', isAdmin ? 'SHOWN' : 'HIDDEN');
+    console.log('Dashboard - Final isAdmin (API + fallback):', finalIsAdmin);
+    console.log('Dashboard - adminServices will be:', finalIsAdmin ? 'SHOWN' : 'HIDDEN');
     console.log('Dashboard - Full tokenParsed:', JSON.stringify(keycloak?.tokenParsed, null, 2));
     console.log('===================================');
   }
@@ -59,7 +59,7 @@ function Dashboard() {
   ];
 
   // Admin-only services
-  const adminServices = isAdmin ? [
+  const adminServices = finalIsAdmin ? [
     {
       name: 'Apache Airflow',
       description: 'Workflow orchestration and management',
@@ -117,7 +117,7 @@ function Dashboard() {
   const recentActivity = [
     { action: 'Energy data accessed', service: 'Energy Service', time: '2 hours ago', status: 'success' },
     { action: 'Profile viewed', service: 'Profile Service', time: '5 hours ago', status: 'info' },
-    ...(isAdmin ? [
+    ...(finalIsAdmin ? [
       { action: 'Workflow executed', service: 'Airflow', time: '1 day ago', status: 'success' }
     ] : [])
   ];
