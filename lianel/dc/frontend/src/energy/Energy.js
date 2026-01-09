@@ -288,10 +288,16 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Use ref to get the absolute latest filters
-    const currentFilters = filtersRef.current;
-    console.log('Applying filters:', currentFilters);
-    fetchData(currentFilters);
+    // Get the latest filters from state (React guarantees this is up-to-date)
+    // Use a callback to ensure we have the absolute latest
+    setFilters(prev => {
+      const latestFilters = { ...prev, offset: 0 }; // Reset offset when applying filters
+      filtersRef.current = latestFilters;
+      console.log('Applying filters:', latestFilters);
+      // Trigger fetch with latest filters
+      fetchData(latestFilters);
+      return latestFilters;
+    });
   };
 
   const handleResetFilters = () => {
