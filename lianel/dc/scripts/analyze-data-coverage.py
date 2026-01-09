@@ -43,7 +43,7 @@ def analyze_country_year_coverage(conn) -> Dict[str, Any]:
                 c.country_name,
                 e.year,
                 COUNT(*) as record_count,
-                SUM(e.energy_value_gwh) as total_energy_gwh
+                SUM(e.value_gwh) as total_energy_gwh
             FROM fact_energy_annual e
             JOIN dim_country c ON e.country_code = c.country_code
             GROUP BY c.country_code, c.country_name, e.year
@@ -121,7 +121,7 @@ def analyze_energy_product_coverage(conn) -> Dict[str, Any]:
                 COUNT(DISTINCT e.country_code) as countries_count,
                 COUNT(DISTINCT e.year) as years_count,
                 COUNT(*) as record_count,
-                SUM(e.energy_value_gwh) as total_energy_gwh
+                SUM(e.value_gwh) as total_energy_gwh
             FROM fact_energy_annual e
             JOIN dim_energy_product p ON e.product_code = p.product_code
             GROUP BY p.product_code, p.product_name
@@ -145,7 +145,7 @@ def analyze_energy_flow_coverage(conn) -> Dict[str, Any]:
                 COUNT(DISTINCT e.country_code) as countries_count,
                 COUNT(DISTINCT e.year) as years_count,
                 COUNT(*) as record_count,
-                SUM(e.energy_value_gwh) as total_energy_gwh
+                SUM(e.value_gwh) as total_energy_gwh
             FROM fact_energy_annual e
             JOIN dim_energy_flow f ON e.flow_code = f.flow_code
             GROUP BY f.flow_code, f.flow_name
@@ -174,12 +174,16 @@ def analyze_nuts_coverage(conn) -> Dict[str, Any]:
         """)
         nuts_levels = cur.fetchall()
         
+        # Format level_code for display (0 -> NUTS0, 1 -> NUTS1, 2 -> NUTS2)
+        for level in nuts_levels:
+            level['level_display'] = f"NUTS{level['level_code']}"
+        
         # Check if we can join energy data with regions
         cur.execute("""
             SELECT COUNT(DISTINCT e.country_code) as countries_with_regions
             FROM fact_energy_annual e
             JOIN dim_region r ON e.country_code = r.cntr_code
-            WHERE r.level_code = 'NUTS0'
+            WHERE r.level_code = 0
         """)
         join_result = cur.fetchone()
         
@@ -199,9 +203,9 @@ def analyze_ml_dataset_readiness(conn) -> Dict[str, Any]:
                 SELECT FROM information_schema.tables 
                 WHERE table_schema = 'public' 
                 AND table_name = 'ml_dataset_clustering_v1'
-            )
+            ) as exists
         """)
-        table_exists = cur.fetchone()[0]
+        table_exists = cur.fetchone()['exists']
         
         if not table_exists:
             return {
@@ -304,7 +308,8 @@ def generate_report(analysis_results: Dict[str, Any]) -> str:
     report.append("## NUTS REGIONAL COVERAGE")
     nuts = analysis_results['nuts_coverage']
     for level in nuts['nuts_levels']:
-        report.append(f"NUTS{level['level_code']}: {level['region_count']} regions, "
+        level_display = level.get('level_display', f"NUTS{level['level_code']}")
+        report.append(f"{level_display}: {level['region_count']} regions, "
                      f"{level['country_count']} countries")
     report.append(f"Can join energy data with regions: {nuts['can_join_energy_regions']}")
     report.append("")
@@ -376,7 +381,10 @@ def main():
         print("\n✅ Analysis complete!")
         
     except Exception as e:
+        import traceback
         print(f"❌ Error: {e}", file=sys.stderr)
+        print("Full traceback:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
