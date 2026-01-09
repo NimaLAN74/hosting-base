@@ -182,12 +182,11 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
-    // Get current filters using functional update to ensure we have latest state
-    setFilters(currentFilters => {
-      console.log('Applying filters:', currentFilters);
-      fetchData(currentFilters);
-      return currentFilters;
-    });
+    // Use a ref-like pattern to get the latest filters
+    // Since we can't use refs easily here, we'll use the filters from the closure
+    // which should be up-to-date due to the dependency array in useCallback
+    console.log('Applying filters:', filters);
+    fetchData(filters);
   };
 
   const handleResetFilters = () => {
