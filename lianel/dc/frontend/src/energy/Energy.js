@@ -97,10 +97,12 @@ function Energy() {
       
       if (activeFilters.country_codes.length > 0 || activeFilters.years.length > 0) {
         // If filters are selected, fetch for each combination
+        // Batch requests to avoid overwhelming the service
         const countryList = activeFilters.country_codes.length > 0 ? activeFilters.country_codes : [null];
         const yearList = activeFilters.years.length > 0 ? activeFilters.years : [null];
         
-        const promises = [];
+        // Create all request parameters
+        const requestParams = [];
         for (const country of countryList) {
           for (const year of yearList) {
             const params = {
@@ -109,20 +111,48 @@ function Energy() {
             };
             if (country) params.country_code = country;
             if (year) params.year = parseInt(year);
-            
-            promises.push(energyApi.getEnergyAnnual(params));
+            requestParams.push(params);
           }
         }
         
-        const results = await Promise.all(promises);
+        console.log(`Fetching ${requestParams.length} requests in batches...`);
+        
+        // Process requests in batches to avoid overwhelming the service
+        const BATCH_SIZE = 5; // Process 5 requests at a time
+        const results = [];
+        
+        for (let i = 0; i < requestParams.length; i += BATCH_SIZE) {
+          const batch = requestParams.slice(i, i + BATCH_SIZE);
+          console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(requestParams.length / BATCH_SIZE)} (${batch.length} requests)...`);
+          
+          try {
+            const batchPromises = batch.map(params => energyApi.getEnergyAnnual(params));
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults);
+            
+            // Small delay between batches to avoid rate limiting
+            if (i + BATCH_SIZE < requestParams.length) {
+              await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between batches
+            }
+          } catch (error) {
+            console.error(`Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, error);
+            // Continue with other batches even if one fails
+            // Add empty results for failed batch
+            batch.forEach(() => results.push(null));
+          }
+        }
         
         console.log('Received', results.length, 'API responses');
         
         // Combine and deduplicate results
         const dataMap = new Map();
+        let successCount = 0;
+        let failureCount = 0;
+        
         results.forEach((result, index) => {
           if (result && result.data && Array.isArray(result.data)) {
-            console.log(`Result ${index}: ${result.data.length} records`);
+            successCount++;
+            console.log(`Result ${index + 1}/${results.length}: ${result.data.length} records`);
             result.data.forEach(record => {
               if (record) {
                 const key = `${record.country_code}-${record.year}-${record.product_code}-${record.flow_code}`;
@@ -133,9 +163,18 @@ function Energy() {
             });
             totalCount = Math.max(totalCount, result.total || 0);
           } else {
-            console.warn(`Result ${index} is invalid:`, result);
+            failureCount++;
+            console.warn(`Result ${index + 1}/${results.length} is invalid or failed:`, result);
           }
         });
+        
+        if (failureCount > 0) {
+          console.warn(`${failureCount} out of ${results.length} requests failed`);
+        }
+        
+        if (successCount === 0) {
+          throw new Error('All API requests failed. Please try again with fewer filters.');
+        }
         
         allData = Array.from(dataMap.values());
         console.log('Combined data:', allData.length, 'unique records');
