@@ -182,7 +182,9 @@ function Energy() {
 
   // Auto-fetch when offset changes (for pagination)
   useEffect(() => {
+    // Only auto-fetch on offset change, use current filters
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.offset]);
 
   const formatNumber = (num) => {
