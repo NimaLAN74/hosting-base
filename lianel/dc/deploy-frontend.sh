@@ -30,7 +30,13 @@ docker rmi "$IMAGE_TAG" 2>/dev/null || true
 # This helps when the same tag is reused (like :latest)
 REPO_NAME=$(echo "$IMAGE_TAG" | cut -d':' -f1)
 echo "Removing any cached images from repository: $REPO_NAME"
-docker images "$REPO_NAME" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+# Use a safer approach that works on all systems (xargs -r is GNU-specific)
+IMAGE_IDS=$(docker images "$REPO_NAME" --format "{{.ID}}" 2>/dev/null || true)
+if [ -n "$IMAGE_IDS" ]; then
+  echo "$IMAGE_IDS" | while read -r img_id; do
+    [ -n "$img_id" ] && docker rmi -f "$img_id" 2>/dev/null || true
+  done
+fi
 
 # Clear any stale Docker auth
 docker logout ghcr.io 2>/dev/null || true
