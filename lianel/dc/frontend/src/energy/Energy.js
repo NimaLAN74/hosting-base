@@ -300,21 +300,26 @@ function Energy() {
   };
 
   const handleApplyFilters = () => {
+    console.log('=== Apply Filters Clicked ===');
     // Get the latest filters from state and reset offset
-    // Update both state and ref, then fetch data
+    // Use functional update to ensure we have the absolute latest state
     setFilters(prev => {
       const latestFilters = { ...prev, offset: 0 }; // Reset offset when applying filters
       filtersRef.current = latestFilters;
-      console.log('Applying filters:', latestFilters);
+      console.log('Updated filters state:', latestFilters);
+      console.log('Countries:', latestFilters.country_codes);
+      console.log('Years:', latestFilters.years);
+      
+      // Fetch data immediately with the latest filters
+      // This ensures we use the most up-to-date filter values
+      fetchData(latestFilters).then(() => {
+        console.log('✅ Data fetch completed, charts should update');
+      }).catch(err => {
+        console.error('❌ Data fetch failed:', err);
+      });
+      
       return latestFilters;
     });
-    
-    // Fetch data after state update completes
-    // Use the filters from state (will be updated by the setFilters above)
-    // We need to wait for the state update, so use the ref which we just updated
-    const filtersToUse = filtersRef.current;
-    console.log('Fetching data with filters:', filtersToUse);
-    fetchData(filtersToUse);
   };
 
   const handleResetFilters = () => {
