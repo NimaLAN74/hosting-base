@@ -43,10 +43,12 @@ const MultiSelect = ({
   };
 
   const handleSelectAll = () => {
-    if (selected.length === filteredOptions.length) {
+    // Use all options, not just filtered ones, for select all
+    const allOptions = options;
+    if (selected.length === allOptions.length) {
       onChange([]);
     } else {
-      onChange(filteredOptions.map(opt => opt.value || opt));
+      onChange(allOptions.map(opt => opt.value || opt));
     }
   };
 
@@ -98,7 +100,7 @@ const MultiSelect = ({
                 handleSelectAll();
               }}
             >
-              {selected.length === filteredOptions.length ? 'Deselect All' : 'Select All'}
+              {selected.length === options.length ? 'Deselect All' : 'Select All'}
             </button>
             {selected.length > 0 && (
               <button 

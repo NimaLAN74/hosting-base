@@ -154,10 +154,30 @@ function Energy() {
         const data = await energyApi.getEnergyAnnual(params);
         setEnergyData(data);
         
-        // Fetch a larger dataset to populate all available options (only on first load)
+        // Fetch a much larger dataset to populate all available options (only on first load)
+        // This ensures we get all countries and years, not just those in the first page
         if (availableCountries.length === 0 && availableYears.length === 0) {
-          const optionsData = await energyApi.getEnergyAnnual({ limit: 1000, offset: 0 });
-          extractOptions(optionsData);
+          console.log('Fetching large dataset to populate all options...');
+          // Fetch multiple pages to get all countries/years
+          const allOptionsData = [];
+          let offset = 0;
+          const pageSize = 1000;
+          let hasMore = true;
+          
+          // Fetch up to 10 pages (10,000 records) to get all options
+          while (hasMore && offset < 10000) {
+            const pageData = await energyApi.getEnergyAnnual({ limit: pageSize, offset });
+            if (pageData.data && pageData.data.length > 0) {
+              allOptionsData.push(...pageData.data);
+              offset += pageSize;
+              hasMore = pageData.data.length === pageSize;
+            } else {
+              hasMore = false;
+            }
+          }
+          
+          console.log(`Fetched ${allOptionsData.length} records for options`);
+          extractOptions({ data: allOptionsData });
         } else {
           extractOptions(data);
         }
