@@ -423,10 +423,13 @@
           "id": "organize",
           "options": {
             "excludeByName": {},
-            "indexByName": {},
+            "indexByName": {
+              "cntr_code": 0,
+              "value": 1
+            },
             "renameByName": {
-              "cntr_code": "Country",
-              "value": "Energy (GWh)"
+              "cntr_code": "name",
+              "value": "value"
             }
           }
         }
