@@ -121,14 +121,7 @@
             ],
             "limit": 50
           },
-          "timeColumn": "time",
-          "where": [
-            {
-              "name": "$__timeFilter",
-              "params": ["year"],
-              "type": "macro"
-            }
-          ]
+          "timeColumn": "time"
         }
       ],
       "title": "Total Energy Consumption by Country Over Time",
