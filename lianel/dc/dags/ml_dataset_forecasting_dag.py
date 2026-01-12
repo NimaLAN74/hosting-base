@@ -428,8 +428,8 @@ def load_forecasting_dataset(**context):
         e.rolling_5y_mean_renewable_gwh,
         e.trend_3y_slope,
         e.trend_5y_slope,
-        CASE WHEN e.trend_3y_slope > 0 THEN TRUE ELSE FALSE END,
-        CASE WHEN e.trend_3y_slope < 0 THEN TRUE ELSE FALSE END,
+        CASE WHEN e.trend_3y_slope > 0 THEN TRUE WHEN e.trend_3y_slope < 0 THEN FALSE ELSE NULL END,
+        CASE WHEN e.trend_3y_slope < 0 THEN TRUE WHEN e.trend_3y_slope > 0 THEN FALSE ELSE NULL END,
         CASE WHEN e.total_energy_gwh > 0 THEN (e.renewable_energy_gwh / e.total_energy_gwh * 100) ELSE 0 END,
         CASE WHEN e.total_energy_gwh > 0 THEN (e.fossil_energy_gwh / e.total_energy_gwh * 100) ELSE 0 END,
         s.area_km2,
@@ -526,7 +526,13 @@ def validate_forecasting_dataset(**context):
         'trend_validation': """
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN is_increasing_trend = is_decreasing_trend THEN 1 ELSE 0 END) as invalid_trend_flags
+                SUM(CASE 
+                    WHEN is_increasing_trend IS NOT NULL 
+                     AND is_decreasing_trend IS NOT NULL 
+                     AND is_increasing_trend = is_decreasing_trend 
+                    THEN 1 
+                    ELSE 0 
+                END) as invalid_trend_flags
             FROM ml_dataset_forecasting_v1
         """,
         'feature_completeness': """
