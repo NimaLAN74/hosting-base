@@ -5,12 +5,30 @@ datasources:
     type: loki
     access: proxy
     url: http://loki:3100
-    isDefault: true
+    isDefault: false
     editable: true
 
   - name: Prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
+    isDefault: false
+    editable: true
+
+  - name: PostgreSQL Energy
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: lianel_energy
+    user: airflow
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 100
+      maxIdleConns: 100
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
     isDefault: false
     editable: true
