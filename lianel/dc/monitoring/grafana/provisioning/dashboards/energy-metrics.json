@@ -380,20 +380,16 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "cntr_code"
+              "options": "metric"
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "list"
+                "id": "displayName",
+                "value": "Country"
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "value"
-            },
+          }
+        ]
             "properties": [
               {
                 "id": "unit",
@@ -412,14 +408,20 @@
       "id": 5,
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "right",
-          "showLegend": true
+          "showLegend": true,
+          "values": ["value", "percent"]
         },
         "pieType": "pie",
         "tooltip": {
           "mode": "single",
           "sort": "none"
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [],
+          "fields": ""
         }
       },
       "targets": [
@@ -431,7 +433,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  cntr_code,\n  SUM(total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY value DESC",
+          "rawSql": "SELECT\n  cntr_code as metric,\n  SUM(total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY value DESC",
           "refId": "A"
         }
       ],

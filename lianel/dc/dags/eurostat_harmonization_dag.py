@@ -108,11 +108,11 @@ def convert_units_to_gwh(**context):
         UPDATE fact_energy_annual
         SET 
             value_gwh = CASE 
-                WHEN UPPER(unit) = 'KTOE' THEN value_gwh * 11.63
-                WHEN UPPER(unit) = 'TJ' THEN value_gwh * 0.2778
-                WHEN UPPER(unit) = 'GWH' THEN value_gwh
-                WHEN UPPER(unit) = 'MWH' THEN value_gwh * 0.001
-                WHEN UPPER(unit) = 'TWH' THEN value_gwh * 1000.0
+                WHEN UPPER(TRIM(unit)) = 'KTOE' THEN value_gwh * 11.63
+                WHEN UPPER(TRIM(unit)) = 'TJ' THEN value_gwh * 0.2778
+                WHEN UPPER(TRIM(unit)) = 'GWH' THEN value_gwh
+                WHEN UPPER(TRIM(unit)) = 'MWH' THEN value_gwh * 0.001
+                WHEN UPPER(TRIM(unit)) = 'TWH' THEN value_gwh * 1000.0
                 ELSE value_gwh  -- Unknown unit, keep as is
             END,
             unit = 'GWh',
