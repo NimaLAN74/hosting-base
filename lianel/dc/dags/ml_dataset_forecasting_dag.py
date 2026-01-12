@@ -628,9 +628,10 @@ def log_dataset_creation(**context):
     }
     
     import json
+    status = 'success' if validation_results['is_valid'] else 'partial'
     db_hook.run(log_sql, parameters=(
         load_stats['total_records'],
-        'success' if validation_results['is_valid'] else 'warning',
+        status,
         json.dumps(metadata)
     ))
     
