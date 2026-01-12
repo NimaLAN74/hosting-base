@@ -373,17 +373,35 @@
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            }
-          },
           "mappings": [],
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cntr_code"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "list"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -413,7 +431,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  cntr_code AS metric,\n  SUM(total_energy_gwh) as total_energy\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY total_energy DESC",
+          "rawSql": "SELECT\n  cntr_code,\n  SUM(total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY value DESC",
           "refId": "A"
         }
       ],
