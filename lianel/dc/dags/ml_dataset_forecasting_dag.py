@@ -15,7 +15,7 @@ Table: ml_dataset_forecasting_v1
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
 import logging
 
 # Default arguments
@@ -33,10 +33,11 @@ dag = DAG(
     'ml_dataset_forecasting',
     default_args=default_args,
     description='Create ML forecasting dataset with time-based features',
-    schedule_interval='0 5 * * 0',  # Every Sunday at 05:00 UTC (after harmonization)
+    schedule='0 5 * * 0',  # Every Sunday at 05:00 UTC (after harmonization)
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=['ml', 'dataset', 'forecasting', 'lianel'],
+    max_active_runs=1,
 )
 
 
