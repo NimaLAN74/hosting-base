@@ -390,14 +390,6 @@
             ]
           }
         ]
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          }
-        ]
       },
       "gridPos": {
         "h": 8,
