@@ -418,6 +418,19 @@
         }
       ],
       "title": "Energy Consumption Distribution by Country (Latest Year)",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "cntr_code": "Country",
+              "value": "Energy (GWh)"
+            }
+          }
+        }
+      ],
       "type": "piechart"
     },
     {
