@@ -18,7 +18,7 @@ datasources:
   - name: PostgreSQL Energy
     type: postgres
     access: proxy
-    url: postgres:5432
+    url: 172.18.0.1:5432
     database: lianel_energy
     user: airflow
     secureJsonData:
