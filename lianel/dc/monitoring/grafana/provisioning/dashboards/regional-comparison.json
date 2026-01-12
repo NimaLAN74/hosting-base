@@ -85,7 +85,7 @@
         }
       ],
       "title": "Total Energy Consumption by Country (Latest Year)",
-      "type": "bargauge"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -153,7 +153,7 @@
         }
       ],
       "title": "Energy Density Comparison (Latest Year)",
-      "type": "bargauge"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -310,7 +310,7 @@
         }
       ],
       "title": "Renewable to Fossil Ratio (Latest Year)",
-      "type": "bargauge"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -479,7 +479,7 @@
         }
       ],
       "title": "Energy by Regional Characteristics",
-      "type": "bargauge"
+      "type": "barchart"
     }
   ],
   "refresh": "30s",

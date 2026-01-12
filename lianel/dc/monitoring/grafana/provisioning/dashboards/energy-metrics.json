@@ -204,7 +204,7 @@
         }
       ],
       "title": "Average Renewable Energy Percentage (Last 3 Years)",
-      "type": "bargauge"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -361,7 +361,7 @@
         }
       ],
       "title": "Energy Density by Country (Latest Year)",
-      "type": "bargauge"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -494,7 +494,7 @@
         }
       ],
       "title": "Average Year-over-Year Change (Last 3 Years)",
-      "type": "bargauge"
+      "type": "barchart"
     }
   ],
   "refresh": "30s",
