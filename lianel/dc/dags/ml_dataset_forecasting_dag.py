@@ -76,8 +76,8 @@ def create_forecasting_dataset_table(**context):
         lag_2_year_renewable_gwh NUMERIC(15,3),
         
         -- Year-over-year changes
-        yoy_change_total_energy_pct NUMERIC(10,3),
-        yoy_change_renewable_pct NUMERIC(10,3),
+        yoy_change_total_energy_pct NUMERIC(15,3),  -- Increased precision for large values
+        yoy_change_renewable_pct NUMERIC(15,3),  -- Increased precision for large values
         yoy_change_absolute_gwh NUMERIC(15,3),
         
         -- Rolling statistics (moving averages)
@@ -87,8 +87,8 @@ def create_forecasting_dataset_table(**context):
         rolling_5y_mean_renewable_gwh NUMERIC(15,3),
         
         -- Trend indicators
-        trend_3y_slope NUMERIC(10,3),  -- Linear trend over 3 years
-        trend_5y_slope NUMERIC(10,3),  -- Linear trend over 5 years
+        trend_3y_slope NUMERIC(15,3),  -- Linear trend over 3 years (increased precision)
+        trend_5y_slope NUMERIC(15,3),  -- Linear trend over 5 years (increased precision)
         is_increasing_trend BOOLEAN,
         is_decreasing_trend BOOLEAN,
         
