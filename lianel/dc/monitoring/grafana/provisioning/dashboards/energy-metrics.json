@@ -413,7 +413,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  cntr_code,\n  SUM(total_energy_gwh) as total_energy\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY total_energy DESC",
+          "rawSql": "SELECT\n  cntr_code AS metric,\n  SUM(total_energy_gwh) as total_energy\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY total_energy DESC",
           "refId": "A"
         }
       ],
