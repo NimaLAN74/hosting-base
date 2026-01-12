@@ -277,7 +277,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM to_timestamp($__timeFrom() / 1000))\n  AND year <= EXTRACT(YEAR FROM to_timestamp($__timeTo() / 1000))\n  AND yoy_change_total_energy_pct IS NOT NULL\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM to_timestamp(CAST($__timeFrom() AS bigint) / 1000))\n  AND year <= EXTRACT(YEAR FROM to_timestamp(CAST($__timeTo() AS bigint) / 1000))\n  AND yoy_change_total_energy_pct IS NOT NULL\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],
