@@ -598,17 +598,17 @@ def log_dataset_creation(**context):
     
     log_sql = """
     INSERT INTO meta_ingestion_log (
+        source_system,
         table_name,
-        ingestion_date,
-        records_processed,
+        ingestion_timestamp,
         records_inserted,
         records_updated,
         status,
         metadata
     ) VALUES (
+        'ml_pipeline',
         'ml_dataset_forecasting_v1',
         NOW(),
-        %s,
         %s,
         0,
         %s,
@@ -629,7 +629,6 @@ def log_dataset_creation(**context):
     
     import json
     db_hook.run(log_sql, parameters=(
-        load_stats['total_records'],
         load_stats['total_records'],
         'success' if validation_results['is_valid'] else 'warning',
         json.dumps(metadata)
