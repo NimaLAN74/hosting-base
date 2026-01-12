@@ -102,7 +102,7 @@
           "format": "time_series",
           "group": [],
           "rawQuery": true,
-          "rawSql": "SELECT\n  year AS \"time\",\n  cntr_code,\n  total_energy_gwh\nFROM ml_dataset_forecasting_v1\nWHERE $__timeFilter(year)\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  total_energy_gwh\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM TO_TIMESTAMP($__timeFrom()::bigint / 1000))\n  AND year <= EXTRACT(YEAR FROM TO_TIMESTAMP($__timeTo()::bigint / 1000))\nORDER BY year, cntr_code",
           "refId": "A",
           "sql": {
             "columns": [
@@ -284,7 +284,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  year AS \"time\",\n  cntr_code,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE $__timeFilter(year)\n  AND yoy_change_total_energy_pct IS NOT NULL\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM TO_TIMESTAMP($__timeFrom()::bigint / 1000))\n  AND year <= EXTRACT(YEAR FROM TO_TIMESTAMP($__timeTo()::bigint / 1000))\n  AND yoy_change_total_energy_pct IS NOT NULL\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],
