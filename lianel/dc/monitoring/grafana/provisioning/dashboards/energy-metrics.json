@@ -140,7 +140,36 @@
           },
           "unit": "percent"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cntr_code"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_renewable_pct"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": false
+              },
+              {
+                "id": "displayName",
+                "value": ""
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -154,7 +183,11 @@
         "minVizHeight": 10,
         "minVizWidth": 0,
         "orientation": "horizontal",
-        "showUnfilled": true
+        "showUnfilled": true,
+        "valueOptions": {
+          "unit": "percent",
+          "decimals": 2
+        }
       },
       "pluginVersion": "8.0.0",
       "targets": [
