@@ -413,7 +413,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  COALESCE(c.country_name, e.cntr_code) as name,\n  SUM(e.total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1 e\nLEFT JOIN dim_country c ON e.cntr_code = c.cntr_code\nWHERE e.year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY c.country_name, e.cntr_code\nORDER BY value DESC",
+          "rawSql": "SELECT\n  COALESCE(c.country_name, e.cntr_code) as name,\n  SUM(e.total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1 e\nLEFT JOIN dim_country c ON e.cntr_code = c.country_code\nWHERE e.year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY c.country_name, e.cntr_code\nORDER BY value DESC",
           "refId": "A"
         }
       ],
