@@ -290,6 +290,36 @@ def load_forecasting_dataset(**context):
     
     logging.info("Loading forecasting features into ml_dataset_forecasting_v1...")
     
+    # Update column types to handle large values (fix numeric overflow)
+    # This is safe to run multiple times - ALTER TABLE IF EXISTS doesn't error if already correct
+    alter_sql = """
+        DO $$
+        BEGIN
+            -- Check and alter columns if needed (only if precision is less than 15)
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'ml_dataset_forecasting_v1' 
+                AND column_name = 'yoy_change_total_energy_pct'
+                AND numeric_precision < 15
+            ) THEN
+                ALTER TABLE ml_dataset_forecasting_v1 
+                ALTER COLUMN yoy_change_total_energy_pct TYPE NUMERIC(15,3),
+                ALTER COLUMN yoy_change_renewable_pct TYPE NUMERIC(15,3),
+                ALTER COLUMN trend_3y_slope TYPE NUMERIC(15,3),
+                ALTER COLUMN trend_5y_slope TYPE NUMERIC(15,3);
+            END IF;
+        EXCEPTION WHEN insufficient_privilege THEN
+            -- If we don't have permission, log and continue (table owner will need to fix manually)
+            RAISE NOTICE 'Cannot alter table schema - insufficient privileges. Table owner must update schema manually.';
+        END $$;
+    """
+    try:
+        db_hook.run(alter_sql)
+        logging.info("Updated column types to NUMERIC(15,3) for overflow-prone columns")
+    except Exception as e:
+        logging.warning(f"Could not update table schema (may need table owner): {e}")
+        # Continue anyway - the CREATE TABLE in create_forecasting_dataset_table will handle new tables
+    
     # Load features with spatial data
     insert_sql = """
     WITH energy_by_region_year AS (
