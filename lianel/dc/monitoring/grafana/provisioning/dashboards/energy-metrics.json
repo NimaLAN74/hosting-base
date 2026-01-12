@@ -420,16 +420,10 @@
       "title": "Energy Consumption Distribution by Country (Latest Year)",
       "transformations": [
         {
-          "id": "organize",
+          "id": "rowsToFields",
           "options": {
-            "excludeByName": {},
-            "indexByName": {
-              "name": 0,
-              "value": 1
-            },
-            "renameByName": {
-              "value": "value"
-            }
+            "fieldName": "name",
+            "valueFieldName": "value"
           }
         }
       ],
