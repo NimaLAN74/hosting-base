@@ -29,17 +29,28 @@ use db::create_pool;
         handlers::energy::get_energy_by_year,
         handlers::energy::get_energy_summary,
         handlers::metadata::get_service_info,
+        handlers::ml_datasets::get_forecasting_dataset,
+        handlers::ml_datasets::get_clustering_dataset,
+        handlers::ml_datasets::get_geo_enrichment_dataset,
     ),
     components(schemas(
         models::EnergyRecord,
         models::EnergyResponse,
         models::EnergySummary,
         models::EnergySummaryResponse,
+        models::ForecastingRecord,
+        models::ClusteringRecord,
+        models::GeoEnrichmentRecord,
+        models::MLDatasetQueryParams,
+        models::ForecastingResponse,
+        models::ClusteringResponse,
+        models::GeoEnrichmentResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
         (name = "energy", description = "Energy data endpoints"),
         (name = "info", description = "Service information endpoints"),
+        (name = "ml-datasets", description = "ML dataset endpoints"),
     ),
     servers(
         (url = "https://www.lianel.se", description = "Production server")
@@ -81,6 +92,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/annual/by-country/:country_code", get(handlers::energy::get_energy_by_country))
         .route("/annual/by-year/:year", get(handlers::energy::get_energy_by_year))
         .route("/annual/summary", get(handlers::energy::get_energy_summary))
+        // ML Dataset endpoints
+        .route("/v1/datasets/forecasting", get(handlers::ml_datasets::get_forecasting_dataset))
+        .route("/v1/datasets/clustering", get(handlers::ml_datasets::get_clustering_dataset))
+        .route("/v1/datasets/geo-enrichment", get(handlers::ml_datasets::get_geo_enrichment_dataset))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())

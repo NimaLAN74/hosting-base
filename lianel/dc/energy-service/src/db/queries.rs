@@ -248,3 +248,296 @@ pub async fn get_database_stats(pool: &PgPool) -> Result<(i64, i64, i64, i64), s
     ))
 }
 
+// ML Dataset Queries
+
+pub async fn get_forecasting_records(
+    pool: &PgPool,
+    cntr_code: Option<&str>,
+    year: Option<i32>,
+    limit: u32,
+    offset: u32,
+) -> Result<(Vec<ForecastingRecord>, i64), sqlx::Error> {
+    let mut conditions = vec![];
+    let mut bind_count = 0;
+
+    if cntr_code.is_some() {
+        bind_count += 1;
+        conditions.push(format!("cntr_code = ${}", bind_count));
+    }
+    if year.is_some() {
+        bind_count += 1;
+        conditions.push(format!("year = ${}", bind_count));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Count query
+    let count_query = format!("SELECT COUNT(*) FROM ml_dataset_forecasting_v1 {}", where_clause);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
+    if let Some(cc) = cntr_code {
+        count_q = count_q.bind(cc);
+    }
+    if let Some(y) = year {
+        count_q = count_q.bind(y);
+    }
+    let total = count_q.fetch_one(pool).await?;
+
+    // Main query
+    bind_count += 1;
+    let limit_param = bind_count;
+    bind_count += 1;
+    let offset_param = bind_count;
+
+    let query_str = format!(
+        r#"
+        SELECT 
+            cntr_code,
+            year,
+            total_energy_gwh,
+            renewable_energy_gwh,
+            fossil_energy_gwh,
+            pct_renewable,
+            pct_fossil,
+            yoy_change_total_energy_pct,
+            yoy_change_renewable_pct,
+            energy_density_gwh_per_km2,
+            area_km2,
+            year_index,
+            lag_1_year_total_energy_gwh,
+            lag_2_year_total_energy_gwh,
+            rolling_3y_mean_total_energy_gwh,
+            rolling_5y_mean_total_energy_gwh,
+            trend_3y_slope,
+            trend_5y_slope
+        FROM ml_dataset_forecasting_v1
+        {}
+        ORDER BY year DESC, cntr_code
+        LIMIT ${} OFFSET ${}
+        "#,
+        where_clause, limit_param, offset_param
+    );
+
+    let mut query = sqlx::query(&query_str);
+    if let Some(cc) = cntr_code {
+        query = query.bind(cc);
+    }
+    if let Some(y) = year {
+        query = query.bind(y);
+    }
+    query = query.bind(limit as i64);
+    query = query.bind(offset as i64);
+
+    let rows = query.fetch_all(pool).await?;
+
+    let records: Vec<ForecastingRecord> = rows
+        .iter()
+        .map(|row| ForecastingRecord {
+            cntr_code: row.get(0),
+            year: row.get(1),
+            total_energy_gwh: row.get::<Option<BigDecimal>, _>(2).and_then(|v| v.to_f64()),
+            renewable_energy_gwh: row.get::<Option<BigDecimal>, _>(3).and_then(|v| v.to_f64()),
+            fossil_energy_gwh: row.get::<Option<BigDecimal>, _>(4).and_then(|v| v.to_f64()),
+            pct_renewable: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
+            pct_fossil: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
+            yoy_change_total_energy_pct: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
+            yoy_change_renewable_pct: row.get::<Option<BigDecimal>, _>(8).and_then(|v| v.to_f64()),
+            energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(9).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<BigDecimal>, _>(10).and_then(|v| v.to_f64()),
+            year_index: row.get(11),
+            lag_1_year_total_energy_gwh: row.get::<Option<BigDecimal>, _>(12).and_then(|v| v.to_f64()),
+            lag_2_year_total_energy_gwh: row.get::<Option<BigDecimal>, _>(13).and_then(|v| v.to_f64()),
+            rolling_3y_mean_total_energy_gwh: row.get::<Option<BigDecimal>, _>(14).and_then(|v| v.to_f64()),
+            rolling_5y_mean_total_energy_gwh: row.get::<Option<BigDecimal>, _>(15).and_then(|v| v.to_f64()),
+            trend_3y_slope: row.get::<Option<BigDecimal>, _>(16).and_then(|v| v.to_f64()),
+            trend_5y_slope: row.get::<Option<BigDecimal>, _>(17).and_then(|v| v.to_f64()),
+        })
+        .collect();
+
+    Ok((records, total))
+}
+
+pub async fn get_clustering_records(
+    pool: &PgPool,
+    cntr_code: Option<&str>,
+    year: Option<i32>,
+    limit: u32,
+    offset: u32,
+) -> Result<(Vec<ClusteringRecord>, i64), sqlx::Error> {
+    let mut conditions = vec![];
+    let mut bind_count = 0;
+
+    if cntr_code.is_some() {
+        bind_count += 1;
+        conditions.push(format!("cntr_code = ${}", bind_count));
+    }
+    if year.is_some() {
+        bind_count += 1;
+        conditions.push(format!("year = ${}", bind_count));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Count query
+    let count_query = format!("SELECT COUNT(*) FROM ml_dataset_clustering_v1 {}", where_clause);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
+    if let Some(cc) = cntr_code {
+        count_q = count_q.bind(cc);
+    }
+    if let Some(y) = year {
+        count_q = count_q.bind(y);
+    }
+    let total = count_q.fetch_one(pool).await?;
+
+    // Main query
+    bind_count += 1;
+    let limit_param = bind_count;
+    bind_count += 1;
+    let offset_param = bind_count;
+
+    let query_str = format!(
+        r#"
+        SELECT 
+            cntr_code,
+            year,
+            total_energy_gwh,
+            renewable_energy_gwh,
+            fossil_energy_gwh,
+            pct_renewable,
+            pct_fossil,
+            energy_density_gwh_per_km2,
+            area_km2
+        FROM ml_dataset_clustering_v1
+        {}
+        ORDER BY year DESC, cntr_code
+        LIMIT ${} OFFSET ${}
+        "#,
+        where_clause, limit_param, offset_param
+    );
+
+    let mut query = sqlx::query(&query_str);
+    if let Some(cc) = cntr_code {
+        query = query.bind(cc);
+    }
+    if let Some(y) = year {
+        query = query.bind(y);
+    }
+    query = query.bind(limit as i64);
+    query = query.bind(offset as i64);
+
+    let rows = query.fetch_all(pool).await?;
+
+    let records: Vec<ClusteringRecord> = rows
+        .iter()
+        .map(|row| ClusteringRecord {
+            cntr_code: row.get(0),
+            year: row.get(1),
+            total_energy_gwh: row.get::<Option<BigDecimal>, _>(2).and_then(|v| v.to_f64()),
+            renewable_energy_gwh: row.get::<Option<BigDecimal>, _>(3).and_then(|v| v.to_f64()),
+            fossil_energy_gwh: row.get::<Option<BigDecimal>, _>(4).and_then(|v| v.to_f64()),
+            pct_renewable: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
+            pct_fossil: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
+            energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<BigDecimal>, _>(8).and_then(|v| v.to_f64()),
+        })
+        .collect();
+
+    Ok((records, total))
+}
+
+pub async fn get_geo_enrichment_records(
+    pool: &PgPool,
+    cntr_code: Option<&str>,
+    year: Option<i32>,
+    limit: u32,
+    offset: u32,
+) -> Result<(Vec<GeoEnrichmentRecord>, i64), sqlx::Error> {
+    let mut conditions = vec![];
+    let mut bind_count = 0;
+
+    if cntr_code.is_some() {
+        bind_count += 1;
+        conditions.push(format!("cntr_code = ${}", bind_count));
+    }
+    if year.is_some() {
+        bind_count += 1;
+        conditions.push(format!("year = ${}", bind_count));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Count query
+    let count_query = format!("SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1 {}", where_clause);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
+    if let Some(cc) = cntr_code {
+        count_q = count_q.bind(cc);
+    }
+    if let Some(y) = year {
+        count_q = count_q.bind(y);
+    }
+    let total = count_q.fetch_one(pool).await?;
+
+    // Main query
+    bind_count += 1;
+    let limit_param = bind_count;
+    bind_count += 1;
+    let offset_param = bind_count;
+
+    let query_str = format!(
+        r#"
+        SELECT 
+            cntr_code,
+            year,
+            total_energy_gwh,
+            renewable_energy_gwh,
+            fossil_energy_gwh,
+            pct_renewable,
+            energy_density_gwh_per_km2,
+            area_km2
+        FROM ml_dataset_geo_enrichment_v1
+        {}
+        ORDER BY year DESC, cntr_code
+        LIMIT ${} OFFSET ${}
+        "#,
+        where_clause, limit_param, offset_param
+    );
+
+    let mut query = sqlx::query(&query_str);
+    if let Some(cc) = cntr_code {
+        query = query.bind(cc);
+    }
+    if let Some(y) = year {
+        query = query.bind(y);
+    }
+    query = query.bind(limit as i64);
+    query = query.bind(offset as i64);
+
+    let rows = query.fetch_all(pool).await?;
+
+    let records: Vec<GeoEnrichmentRecord> = rows
+        .iter()
+        .map(|row| GeoEnrichmentRecord {
+            cntr_code: row.get(0),
+            year: row.get(1),
+            total_energy_gwh: row.get::<Option<BigDecimal>, _>(2).and_then(|v| v.to_f64()),
+            renewable_energy_gwh: row.get::<Option<BigDecimal>, _>(3).and_then(|v| v.to_f64()),
+            fossil_energy_gwh: row.get::<Option<BigDecimal>, _>(4).and_then(|v| v.to_f64()),
+            pct_renewable: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
+            energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
+        })
+        .collect();
+
+    Ok((records, total))
+}
