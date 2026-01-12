@@ -250,6 +250,22 @@ def fetch_and_load_country_batch(country_code: str, **context):
                 
                 for record in records:
                     try:
+                        # Check if product_code exists in dim_energy_product before inserting
+                        check_product_sql = "SELECT 1 FROM dim_energy_product WHERE product_code = %s LIMIT 1"
+                        product_exists = db_hook.get_first(check_product_sql, parameters=(record['product_code'],))
+                        
+                        if not product_exists:
+                            # Skip records with unknown product codes
+                            continue
+                        
+                        # Check if flow_code exists in dim_energy_flow before inserting
+                        check_flow_sql = "SELECT 1 FROM dim_energy_flow WHERE flow_code = %s LIMIT 1"
+                        flow_exists = db_hook.get_first(check_flow_sql, parameters=(record['flow_code'],))
+                        
+                        if not flow_exists:
+                            # Skip records with unknown flow codes
+                            continue
+                        
                         db_hook.run(insert_sql, parameters=(
                             record['country_code'],
                             record['year'],
