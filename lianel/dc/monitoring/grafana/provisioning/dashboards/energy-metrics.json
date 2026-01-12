@@ -398,7 +398,7 @@
           "sort": "none"
         },
         "reduceOptions": {
-          "values": false,
+          "values": true,
           "calcs": [],
           "fields": ""
         },
