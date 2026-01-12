@@ -238,7 +238,8 @@ def fetch_and_load_country_batch(country_code: str, **context):
                     DO UPDATE SET
                         value_gwh = EXCLUDED.value_gwh,
                         unit = COALESCE(EXCLUDED.unit, fact_energy_annual.unit),
-                        ingestion_timestamp = EXCLUDED.ingestion_timestamp
+                        ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+                        harmonisation_version = NULL  -- Reset harmonization version to allow re-harmonization
                 """
                 
                 for record in records:
