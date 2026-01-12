@@ -93,18 +93,20 @@ def check_ingestion_checkpoint(**context):
     """Check what data has already been ingested and create ingestion plan"""
     db_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
-    # Get already-ingested country/year combinations
+    # Get already-ingested country/year combinations with harmonization version check
+    # Only skip if data was harmonized recently (within last 7 days) to allow re-ingestion of missing products
     sql = """
         SELECT DISTINCT country_code, year
         FROM fact_energy_annual
         WHERE source_system = 'eurostat'
           AND source_table = %s
-          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '1 day'
+          AND harmonisation_version IS NOT NULL
+          AND ingestion_timestamp >= CURRENT_DATE - INTERVAL '7 days'
     """
     ingested = db_hook.get_records(sql, parameters=(TABLE_CODE,))
     ingested_set = {(row[0], row[1]) for row in ingested} if ingested else set()
     
-    # Create ingestion plan: only process what's not already ingested
+    # Create ingestion plan: only process what's not already ingested and harmonized
     ingestion_plan = []
     for country_code in EU27_COUNTRIES:
         for year in TABLE_YEARS:
