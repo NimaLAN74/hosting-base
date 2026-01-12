@@ -150,7 +150,9 @@ def extract_forecasting_features(**context):
         FROM fact_energy_annual e
         INNER JOIN dim_region r ON e.country_code = r.cntr_code AND r.level_code = 0
         LEFT JOIN dim_energy_product p ON e.product_code = p.product_code
-        WHERE e.value_gwh IS NOT NULL AND e.value_gwh > 0
+        WHERE e.value_gwh IS NOT NULL 
+          AND e.value_gwh > 0
+          AND e.harmonisation_version IS NOT NULL  -- Only use harmonized data
         GROUP BY r.region_id, r.level_code, r.cntr_code, r.name_latn, e.year
     ),
     with_lags AS (
@@ -304,7 +306,9 @@ def load_forecasting_dataset(**context):
         FROM fact_energy_annual e
         INNER JOIN dim_region r ON e.country_code = r.cntr_code AND r.level_code = 0
         LEFT JOIN dim_energy_product p ON e.product_code = p.product_code
-        WHERE e.value_gwh IS NOT NULL AND e.value_gwh > 0
+        WHERE e.value_gwh IS NOT NULL 
+          AND e.value_gwh > 0
+          AND e.harmonisation_version IS NOT NULL  -- Only use harmonized data
         GROUP BY r.region_id, r.level_code, r.cntr_code, r.name_latn, e.year
     ),
     with_lags AS (
