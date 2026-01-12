@@ -221,7 +221,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  pct_renewable\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM to_timestamp(CAST($__timeFrom() AS bigint) / 1000))\n  AND year <= EXTRACT(YEAR FROM to_timestamp(CAST($__timeTo() AS bigint) / 1000))\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  pct_renewable\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],
@@ -370,7 +370,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code,\n  rolling_3y_mean_total_energy_gwh\nFROM ml_dataset_forecasting_v1\nWHERE year >= EXTRACT(YEAR FROM to_timestamp(CAST($__timeFrom() AS bigint) / 1000))\n  AND year <= EXTRACT(YEAR FROM to_timestamp(CAST($__timeTo() AS bigint) / 1000))\n  AND rolling_3y_mean_total_energy_gwh IS NOT NULL\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  rolling_3y_mean_total_energy_gwh\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\n  AND rolling_3y_mean_total_energy_gwh IS NOT NULL\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],
