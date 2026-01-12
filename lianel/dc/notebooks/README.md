@@ -2,6 +2,23 @@
 
 This directory contains Jupyter notebooks for data analysis and quality verification.
 
+## ⚠️ IMPORTANT: Workflow & Data Quality
+
+**CRITICAL**: Always verify data quality before performing analysis. Follow this workflow:
+
+1. **01-data-quality-analysis.ipynb** - Run FIRST to identify data quality issues
+2. **02-exploratory-data-analysis.ipynb** - Explore data patterns and anomalies
+3. **03-bias-detection.ipynb** - Detect systematic biases and missing patterns
+4. **04-ml-feature-analysis.ipynb** - Analyze ML features (filters to `year >= 2018` by default)
+5. **05-trend-analysis.ipynb** - Trend analysis (includes data quality checks)
+
+**Data Quality Requirements**:
+- Verify fossil energy data completeness (2016-2017 had issues)
+- Check for suspicious renewable percentages (not all 100%)
+- Identify extreme YoY changes that indicate data errors
+- Filter incomplete years before analysis
+- Document any data quality issues found
+
 ## Notebooks
 
 ### 01-data-quality-analysis.ipynb
@@ -81,6 +98,15 @@ This directory contains Jupyter notebooks for data analysis and quality verifica
 **Purpose**: Analyze time series trends, forecasting patterns, and seasonal analysis
 
 **Contents**:
+- **Data Quality Verification** (CRITICAL - runs first)
+  - Missing value checks
+  - Fossil energy data completeness by year
+  - Renewable percentage validation
+  - Extreme YoY change detection
+  - Country coverage verification
+- **Data Filtering & Preparation**
+  - Filter incomplete years (<90% fossil data completeness)
+  - Remove extreme outliers (>200% YoY changes)
 - Load time series data
 - Overall trend analysis (total, renewable, fossil energy)
 - Country-level trend analysis
@@ -91,6 +117,8 @@ This directory contains Jupyter notebooks for data analysis and quality verifica
 - Renewable energy transition patterns
 - Growth rates by country
 - Trend strength indicators
+
+**Note**: This notebook now includes comprehensive data quality checks before analysis to ensure reliable results.
 
 ## Setup
 
@@ -140,8 +168,17 @@ Open the `.ipynb` files directly in VS Code (Jupyter extension required)
 3. **Re-ingest 2016-2017**: Re-run ingestion DAGs to capture fossil products
 4. **Dashboard Warnings**: Add warnings in Grafana for incomplete data periods
 
+## Best Practices
+
+1. **Always run data quality checks first** - Don't skip notebook 01
+2. **Review quality warnings** - Address issues before proceeding
+3. **Filter incomplete data** - Exclude years with <90% fossil data completeness
+4. **Document findings** - Note any data quality issues in your analysis
+5. **Re-run after data fixes** - If you fix data issues, re-run quality checks
+
 ## Notes
 
 - Update database password in notebooks before running
 - Notebooks assume database is accessible from the execution environment
 - Some queries may take time depending on data volume
+- Notebook 05 now includes built-in data quality verification and filtering
