@@ -154,11 +154,6 @@
         "minVizHeight": 10,
         "minVizWidth": 0,
         "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
         "showUnfilled": true
       },
       "pluginVersion": "8.0.0",
@@ -303,11 +298,6 @@
         "minVizHeight": 10,
         "minVizWidth": 0,
         "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
         "showUnfilled": true
       },
       "pluginVersion": "8.0.0",
@@ -428,11 +418,6 @@
         "minVizHeight": 10,
         "minVizWidth": 0,
         "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
         "showUnfilled": true
       },
       "pluginVersion": "8.0.0",
