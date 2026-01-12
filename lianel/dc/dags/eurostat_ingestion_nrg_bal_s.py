@@ -62,6 +62,21 @@ EU27_COUNTRIES = [
 
 BASE_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data'
 
+# Product code mapping: Eurostat returns aggregated codes, map to individual codes
+# This handles cases where Eurostat returns codes like "C0350-0370" which should map to "C0350"
+PRODUCT_CODE_MAP = {
+    'C0350-0370': 'C0350',  # Natural gas aggregated → Natural gas
+    'C0000X0350-0370': 'C0350',  # Alternative format
+    # Add more mappings as needed
+}
+
+
+def map_product_code(product_code: str) -> str:
+    """Map aggregated Eurostat product codes to individual codes"""
+    if product_code in PRODUCT_CODE_MAP:
+        return PRODUCT_CODE_MAP[product_code]
+    return product_code
+
 
 def decode_eurostat_dimension(dimensions: Dict, dim_name: str, position: int, dim_order: List[str], dim_sizes: List[int]) -> Optional[str]:
     """Decode Eurostat dimension index to actual value."""
@@ -210,7 +225,9 @@ def fetch_and_load_country_batch(country_code: str, **context):
                 unit_code = None
                 
                 if 'siec' in dim_order:
-                    product_code = decode_eurostat_dimension(dimensions, 'siec', position, dim_order, dim_sizes)
+                    product_code_raw = decode_eurostat_dimension(dimensions, 'siec', position, dim_order, dim_sizes)
+                    # Map aggregated product codes to individual codes
+                    product_code = map_product_code(product_code_raw) if product_code_raw else None
                 if 'nrg_bal' in dim_order:
                     flow_code = decode_eurostat_dimension(dimensions, 'nrg_bal', position, dim_order, dim_sizes)
                 if 'unit' in dim_order:
