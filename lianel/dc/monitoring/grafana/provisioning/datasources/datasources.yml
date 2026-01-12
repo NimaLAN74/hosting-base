@@ -21,6 +21,7 @@ datasources:
     url: 172.18.0.1:5432
     database: lianel_energy
     user: airflow
+    uid: postgres-energy
     secureJsonData:
       password: ${POSTGRES_PASSWORD}
     jsonData:
