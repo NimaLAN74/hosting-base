@@ -104,23 +104,6 @@
           "rawQuery": true,
           "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  total_energy_gwh\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\nORDER BY year, cntr_code",
           "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ],
-            "limit": 50
-          },
           "timeColumn": "time"
         }
       ],
