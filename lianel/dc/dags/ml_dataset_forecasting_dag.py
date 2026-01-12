@@ -44,10 +44,32 @@ dag = DAG(
 def create_forecasting_dataset_table(**context):
     """
     Create ml_dataset_forecasting_v1 table if it doesn't exist.
+    Also checks and recreates table if schema has incorrect precision (NUMERIC(10,3) instead of NUMERIC(15,3)).
     """
     db_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     logging.info("Creating ml_dataset_forecasting_v1 table if it doesn't exist...")
+    
+    # Check if table exists and has incorrect schema
+    check_schema_sql = """
+        SELECT COUNT(*) as incorrect_columns
+        FROM information_schema.columns
+        WHERE table_name = 'ml_dataset_forecasting_v1'
+        AND column_name IN ('yoy_change_total_energy_pct', 'yoy_change_renewable_pct', 'trend_3y_slope', 'trend_5y_slope')
+        AND numeric_precision < 15
+    """
+    
+    try:
+        result = db_hook.get_first(check_schema_sql)
+        if result and result[0] > 0:
+            logging.warning(f"Table ml_dataset_forecasting_v1 has incorrect schema ({result[0]} columns with precision < 15). Dropping and recreating...")
+            # Drop table to recreate with correct schema
+            drop_sql = "DROP TABLE IF EXISTS ml_dataset_forecasting_v1 CASCADE;"
+            db_hook.run(drop_sql)
+            logging.info("Dropped ml_dataset_forecasting_v1 table for schema update")
+    except Exception as e:
+        # Table might not exist yet, which is fine
+        logging.info(f"Schema check result: {e} (table may not exist yet)")
     
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS ml_dataset_forecasting_v1 (
