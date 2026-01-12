@@ -376,20 +376,7 @@
           "mappings": [],
           "unit": "short"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "metric"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Country"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -414,7 +401,8 @@
           "values": false,
           "calcs": [],
           "fields": ""
-        }
+        },
+        "displayLabels": ["name", "value", "percent"]
       },
       "targets": [
         {
@@ -425,7 +413,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  cntr_code as metric,\n  SUM(total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY value DESC",
+          "rawSql": "SELECT\n  cntr_code,\n  SUM(total_energy_gwh) as value\nFROM ml_dataset_forecasting_v1\nWHERE year = (SELECT MAX(year) FROM ml_dataset_forecasting_v1)\nGROUP BY cntr_code\nORDER BY value DESC",
           "refId": "A"
         }
       ],
