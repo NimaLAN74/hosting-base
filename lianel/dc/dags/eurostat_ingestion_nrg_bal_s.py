@@ -216,17 +216,23 @@ def fetch_and_load_country_batch(country_code: str, **context):
                 if 'unit' in dim_order:
                     unit_code = decode_eurostat_dimension(dimensions, 'unit', position, dim_order, dim_sizes)
                 
-                if product_code or flow_code:
-                    records.append({
-                        'country_code': country_code,
-                        'year': year,
-                        'product_code': product_code,
-                        'flow_code': flow_code,
-                        'value_raw': float(value) if value else None,
-                        'unit': unit_code,
-                        'source_table': TABLE_CODE,
-                        'source_system': 'eurostat',
-                    })
+                # Only include records with valid product_code, flow_code, and non-null value
+                if product_code and flow_code and value is not None:
+                    try:
+                        value_float = float(value)
+                        if value_float > 0:  # Only include positive values
+                            records.append({
+                                'country_code': country_code,
+                                'year': year,
+                                'product_code': product_code,
+                                'flow_code': flow_code,
+                                'value_raw': value_float,
+                                'unit': unit_code,
+                                'source_table': TABLE_CODE,
+                                'source_system': 'eurostat',
+                            })
+                    except (ValueError, TypeError):
+                        continue  # Skip invalid values
             
             # Bulk insert
             if records:
