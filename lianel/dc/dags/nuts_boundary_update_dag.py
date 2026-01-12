@@ -146,10 +146,18 @@ def process_nuts_data(level: int, **context) -> dict:
     
     # Store processed data in XCom (as GeoDataFrame serialization)
     # We'll save to a temporary file and pass the path
+    # Note: to_file() only supports one geometry column, so we need to drop geometry_wgs84
+    # and save it separately or convert to WKT
     temp_dir = Path(tempfile.gettempdir()) / "nuts_processed"
     temp_dir.mkdir(exist_ok=True)
     processed_file = temp_dir / f"nuts_level_{level}_processed.geojson"
-    gdf_final.to_file(processed_file, driver='GeoJSON')
+    
+    # Create a copy with only the main geometry column for saving
+    gdf_to_save = gdf_final.drop(columns=['geometry_wgs84']).copy()
+    gdf_to_save.to_file(processed_file, driver='GeoJSON')
+    
+    # Convert geometry_wgs84 to WKT and add it back as a regular column
+    gdf_final['geometry_wgs84_wkt'] = gdf_final['geometry_wgs84'].apply(lambda x: x.wkt if x else None)
     
     stats = {
         'level': level,
@@ -193,7 +201,16 @@ def load_nuts_to_database(level: int, **context) -> dict:
     # Prepare data for insertion
     # Convert geometry columns to WKT for PostGIS
     gdf['geometry_wkt_3035'] = gdf['geometry'].apply(lambda x: x.wkt if x else None)
-    gdf['geometry_wkt_4326'] = gdf['geometry_wgs84'].apply(lambda x: x.wkt if x else None)
+    
+    # If geometry_wgs84_wkt exists (from processing), use it; otherwise convert geometry_wgs84
+    if 'geometry_wgs84_wkt' in gdf.columns:
+        gdf['geometry_wkt_4326'] = gdf['geometry_wgs84_wkt']
+    elif 'geometry_wgs84' in gdf.columns:
+        gdf['geometry_wkt_4326'] = gdf['geometry_wgs84'].apply(lambda x: x.wkt if x else None)
+    else:
+        # Fallback: use main geometry transformed to WGS84
+        gdf_wgs84 = gdf.to_crs("EPSG:4326")
+        gdf['geometry_wkt_4326'] = gdf_wgs84['geometry'].apply(lambda x: x.wkt if x else None)
     
     # Select columns for database
     db_columns = [

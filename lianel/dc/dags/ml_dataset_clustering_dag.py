@@ -424,12 +424,31 @@ def validate_clustering_dataset(**context) -> dict:
     }
     
     validation_results = {}
-    for check_name, query in validation_queries.items():
-        result = db_hook.get_first(query)
-        validation_results[check_name] = {
-            'total': result[0],
-            **{f'check_{i}': result[i] for i in range(1, len(result))}
-        }
+    
+    # Null checks
+    null_result = db_hook.get_first(validation_queries['null_checks'])
+    validation_results['null_checks'] = {
+        'total': null_result[0],
+        'null_energy': null_result[1],
+        'null_area': null_result[2],
+        'null_pct_renewable': null_result[3]
+    }
+    
+    # Percentage ranges
+    pct_result = db_hook.get_first(validation_queries['percentage_ranges'])
+    validation_results['percentage_ranges'] = {
+        'total': pct_result[0],
+        'invalid_pct_renewable': pct_result[1],
+        'invalid_pct_fossil': pct_result[2]
+    }
+    
+    # Feature completeness
+    completeness_result = db_hook.get_first(validation_queries['feature_completeness'])
+    validation_results['feature_completeness'] = {
+        'total': completeness_result[0],
+        'pct_with_energy': float(completeness_result[1]) if completeness_result[1] else 0,
+        'pct_with_area': float(completeness_result[2]) if completeness_result[2] else 0
+    }
     
     # Check for any validation issues
     issues = []
