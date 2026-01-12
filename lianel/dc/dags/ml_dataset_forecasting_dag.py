@@ -51,25 +51,45 @@ def create_forecasting_dataset_table(**context):
     logging.info("Creating ml_dataset_forecasting_v1 table if it doesn't exist...")
     
     # Check if table exists and has incorrect schema
+    # Always check and drop if schema is wrong (CREATE TABLE IF NOT EXISTS won't modify existing tables)
     check_schema_sql = """
         SELECT COUNT(*) as incorrect_columns
         FROM information_schema.columns
         WHERE table_name = 'ml_dataset_forecasting_v1'
         AND column_name IN ('yoy_change_total_energy_pct', 'yoy_change_renewable_pct', 'trend_3y_slope', 'trend_5y_slope')
-        AND numeric_precision < 15
+        AND (numeric_precision IS NULL OR numeric_precision < 15)
     """
     
+    table_needs_recreation = False
     try:
         result = db_hook.get_first(check_schema_sql)
         if result and result[0] > 0:
+            table_needs_recreation = True
             logging.warning(f"Table ml_dataset_forecasting_v1 has incorrect schema ({result[0]} columns with precision < 15). Dropping and recreating...")
-            # Drop table to recreate with correct schema
+        else:
+            # Also check if table exists at all - if it does and check passed, we're good
+            table_exists_sql = """
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = 'ml_dataset_forecasting_v1'
+            """
+            exists_result = db_hook.get_first(table_exists_sql)
+            if exists_result and exists_result[0] > 0:
+                logging.info("Table ml_dataset_forecasting_v1 exists with correct schema")
+            else:
+                table_needs_recreation = False  # Table doesn't exist, will be created
+    except Exception as e:
+        # Table might not exist yet, which is fine - we'll create it
+        logging.info(f"Schema check result: {e} (table may not exist yet, will create)")
+        table_needs_recreation = False
+    
+    # Drop table if schema is incorrect (must drop before CREATE TABLE IF NOT EXISTS)
+    if table_needs_recreation:
+        try:
             drop_sql = "DROP TABLE IF EXISTS ml_dataset_forecasting_v1 CASCADE;"
             db_hook.run(drop_sql)
-            logging.info("Dropped ml_dataset_forecasting_v1 table for schema update")
-    except Exception as e:
-        # Table might not exist yet, which is fine
-        logging.info(f"Schema check result: {e} (table may not exist yet)")
+            logging.info("✅ Dropped ml_dataset_forecasting_v1 table for schema update")
+        except Exception as e:
+            logging.error(f"Failed to drop table: {e}. Attempting to continue...")
     
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS ml_dataset_forecasting_v1 (
