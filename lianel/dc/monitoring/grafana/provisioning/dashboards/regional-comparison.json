@@ -237,7 +237,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  pct_renewable\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  pct_renewable\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\n  AND year != 2017\n  AND fossil_energy_gwh > 0\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],

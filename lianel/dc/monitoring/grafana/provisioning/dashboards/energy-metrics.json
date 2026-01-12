@@ -288,7 +288,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\n  AND yoy_change_total_energy_pct IS NOT NULL\nORDER BY year, cntr_code",
+          "rawSql": "SELECT\n  TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') AS \"time\",\n  cntr_code AS metric,\n  yoy_change_total_energy_pct\nFROM ml_dataset_forecasting_v1\nWHERE TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') >= $__timeFrom()\n  AND TO_TIMESTAMP(year::text || '-01-01', 'YYYY-MM-DD') <= $__timeTo()\n  AND yoy_change_total_energy_pct IS NOT NULL\n  AND year != 2018\nORDER BY year, cntr_code",
           "refId": "A"
         }
       ],
@@ -485,7 +485,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  cntr_code,\n  AVG(yoy_change_total_energy_pct) as avg_yoy_change\nFROM ml_dataset_forecasting_v1\nWHERE year >= (SELECT MAX(year) - 2 FROM ml_dataset_forecasting_v1)\n  AND yoy_change_total_energy_pct IS NOT NULL\nGROUP BY cntr_code\nORDER BY avg_yoy_change DESC",
+          "rawSql": "SELECT\n  cntr_code,\n  AVG(yoy_change_total_energy_pct) as avg_yoy_change\nFROM ml_dataset_forecasting_v1\nWHERE year >= (SELECT MAX(year) - 2 FROM ml_dataset_forecasting_v1)\n  AND yoy_change_total_energy_pct IS NOT NULL\n  AND year != 2018\nGROUP BY cntr_code\nORDER BY avg_yoy_change DESC",
           "refId": "A"
         }
       ],
