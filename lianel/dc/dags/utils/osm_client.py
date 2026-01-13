@@ -1,0 +1,234 @@
+"""
+OpenStreetMap (OSM) Feature Extraction Client
+
+This module provides utilities for extracting OSM features using Overpass API
+and aggregating them to NUTS2 regions.
+
+Features extracted:
+- Energy infrastructure (power plants, generators, substations)
+- Industrial areas
+- Residential buildings
+- Commercial buildings
+- Transport infrastructure
+"""
+
+import requests
+import json
+import time
+import logging
+from typing import Dict, List, Optional, Any, Tuple
+from shapely.geometry import Point, Polygon, shape
+from shapely.ops import transform
+import pyproj
+from functools import partial
+
+logger = logging.getLogger(__name__)
+
+# Overpass API endpoint
+OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_TIMEOUT = 180  # seconds
+
+# OSM feature queries
+OSM_FEATURE_QUERIES = {
+    'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}}););out geom;',
+    'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}}););out geom;',
+    'power_substation': '[out:json][timeout:25];(way["power"="substation"]({{bbox}}););out geom;',
+    'industrial_area': '[out:json][timeout:25];(way["landuse"="industrial"]({{bbox}}););out geom;',
+    'residential_building': '[out:json][timeout:25];(way["building"~"^(house|apartments|residential)$"]({{bbox}}););out geom;',
+    'commercial_building': '[out:json][timeout:25];(way["building"~"^(commercial|retail|office)$"]({{bbox}}););out geom;',
+    'railway_station': '[out:json][timeout:25];(way["railway"="station"]({{bbox}}););out geom;',
+    'airport': '[out:json][timeout:25];(way["aeroway"="aerodrome"]({{bbox}}););out geom;',
+}
+
+
+class OSMClient:
+    """
+    Client for extracting OSM features via Overpass API.
+    
+    Usage:
+        client = OSMClient()
+        features = client.extract_features(bbox=(min_lon, min_lat, max_lon, max_lat))
+    """
+    
+    def __init__(self, api_url: str = OVERPASS_API_URL, timeout: int = OVERPASS_TIMEOUT):
+        """
+        Initialize OSM client.
+        
+        Args:
+            api_url: Overpass API endpoint URL
+            timeout: Request timeout in seconds
+        """
+        self.api_url = api_url
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({'User-Agent': 'Lianel-Energy-Platform/1.0'})
+    
+    def _make_request(self, query: str, retries: int = 3) -> Optional[Dict]:
+        """
+        Make request to Overpass API.
+        
+        Args:
+            query: Overpass QL query string
+            retries: Number of retry attempts
+            
+        Returns:
+            Parsed JSON response, or None if request failed
+        """
+        for attempt in range(retries):
+            try:
+                response = self.session.post(
+                    self.api_url,
+                    data={'data': query},
+                    timeout=self.timeout
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                # Check for errors
+                if 'remark' in data and 'error' in data['remark'].lower():
+                    logger.warning(f"Overpass API error: {data.get('remark')}")
+                    return None
+                
+                return data
+                
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Overpass API request failed (attempt {attempt + 1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    logger.error(f"Overpass API request failed after {retries} attempts")
+                    return None
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse Overpass JSON response: {e}")
+                return None
+        
+        return None
+    
+    def extract_features(
+        self,
+        bbox: Tuple[float, float, float, float],
+        feature_types: Optional[List[str]] = None
+    ) -> Dict[str, List[Dict]]:
+        """
+        Extract OSM features within a bounding box.
+        
+        Args:
+            bbox: Bounding box as (min_lon, min_lat, max_lon, max_lat)
+            feature_types: List of feature types to extract (if None, extracts all)
+            
+        Returns:
+            Dictionary mapping feature types to lists of features
+        """
+        min_lon, min_lat, max_lon, max_lat = bbox
+        
+        if feature_types is None:
+            feature_types = list(OSM_FEATURE_QUERIES.keys())
+        
+        results = {}
+        
+        for feature_type in feature_types:
+            if feature_type not in OSM_FEATURE_QUERIES:
+                logger.warning(f"Unknown feature type: {feature_type}")
+                continue
+            
+            query_template = OSM_FEATURE_QUERIES[feature_type]
+            query = query_template.replace('{{bbox}}', f'{min_lat},{min_lon},{max_lat},{max_lon}')
+            
+            logger.info(f"Extracting {feature_type} features from OSM...")
+            data = self._make_request(query)
+            
+            if data is None:
+                results[feature_type] = []
+                continue
+            
+            # Parse features from response
+            features = []
+            if 'elements' in data:
+                for element in data['elements']:
+                    if element['type'] == 'way' and 'geometry' in element:
+                        features.append({
+                            'id': element.get('id'),
+                            'type': feature_type,
+                            'geometry': element['geometry'],
+                            'tags': element.get('tags', {}),
+                        })
+            
+            results[feature_type] = features
+            logger.info(f"Extracted {len(features)} {feature_type} features")
+            
+            # Rate limiting: wait between requests
+            time.sleep(1)
+        
+        return results
+    
+    def calculate_feature_metrics(
+        self,
+        features: List[Dict],
+        region_area_km2: float
+    ) -> Dict[str, float]:
+        """
+        Calculate feature metrics (counts, areas, densities).
+        
+        Args:
+            features: List of feature dictionaries with geometry
+            region_area_km2: Area of the region in km²
+            
+        Returns:
+            Dictionary with metrics (count, area_km2, density_per_km2)
+        """
+        count = len(features)
+        
+        # Calculate total area (for polygon features)
+        total_area_m2 = 0.0
+        for feature in features:
+            if 'geometry' in feature:
+                geom = feature['geometry']
+                if geom and len(geom) > 0:
+                    # Simple area calculation for polygons
+                    # In production, use proper geometry library
+                    try:
+                        # Convert to Shapely geometry and calculate area
+                        coords = []
+                        for point in geom:
+                            if 'lat' in point and 'lon' in point:
+                                coords.append((point['lon'], point['lat']))
+                        
+                        if len(coords) >= 3:
+                            # Create polygon and calculate area
+                            polygon = Polygon(coords)
+                            # Project to appropriate CRS for area calculation
+                            # Using WGS84 for now (approximate)
+                            total_area_m2 += polygon.area * 111000 * 111000  # Rough conversion
+                    except Exception as e:
+                        logger.debug(f"Error calculating area: {e}")
+                        pass
+        
+        area_km2 = total_area_m2 / 1_000_000
+        density_per_km2 = count / region_area_km2 if region_area_km2 > 0 else 0
+        
+        return {
+            'count': count,
+            'area_km2': area_km2,
+            'density_per_km2': density_per_km2
+        }
+
+
+def get_region_bbox(region_geometry: Any) -> Tuple[float, float, float, float]:
+    """
+    Get bounding box from region geometry.
+    
+    Args:
+        region_geometry: Region geometry (GeoJSON or Shapely geometry)
+        
+    Returns:
+        Bounding box as (min_lon, min_lat, max_lon, max_lat)
+    """
+    if isinstance(region_geometry, dict):
+        # GeoJSON format
+        geom = shape(region_geometry)
+    else:
+        geom = region_geometry
+    
+    bounds = geom.bounds  # (min_x, min_y, max_x, max_y)
+    return (bounds[0], bounds[1], bounds[2], bounds[3])
