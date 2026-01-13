@@ -4,6 +4,8 @@ import Profile from './Profile';
 import LandingPage from './LandingPage';
 import Dashboard from './Dashboard';
 import Energy from './energy/Energy';
+import ElectricityTimeseries from './electricity/ElectricityTimeseries';
+import GeoFeatures from './geo/GeoFeatures';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -31,6 +33,8 @@ function App() {
           <Routes>
             <Route path="/profile" element={<Profile />} />
             <Route path="/energy" element={<Energy />} />
+            <Route path="/electricity" element={<ElectricityTimeseries />} />
+            <Route path="/geo" element={<GeoFeatures />} />
             <Route
               path="/admin/users"
               element={

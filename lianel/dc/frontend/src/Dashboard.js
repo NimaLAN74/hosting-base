@@ -91,6 +91,22 @@ function Dashboard() {
       url: '/energy',
       status: 'active',
       gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
+    },
+    {
+      name: 'Electricity Timeseries',
+      description: 'High-frequency electricity load and generation data (ENTSO-E)',
+      icon: '🔌',
+      url: '/electricity',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+    },
+    {
+      name: 'Geospatial Features',
+      description: 'OpenStreetMap features aggregated to NUTS regions',
+      icon: '🗺️',
+      url: '/geo',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
     }
   ];
 
