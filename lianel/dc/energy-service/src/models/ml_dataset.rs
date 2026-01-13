@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MLDatasetQueryParams {
     pub cntr_code: Option<String>,
     pub year: Option<i32>,
@@ -8,7 +9,7 @@ pub struct MLDatasetQueryParams {
     pub offset: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ForecastingRecord {
     pub cntr_code: String,
     pub year: i32,
@@ -30,7 +31,7 @@ pub struct ForecastingRecord {
     pub trend_5y_slope: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClusteringRecord {
     pub cntr_code: String,
     pub year: i32,
@@ -43,7 +44,7 @@ pub struct ClusteringRecord {
     pub area_km2: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GeoEnrichmentRecord {
     pub cntr_code: String,
     pub year: i32,
@@ -64,7 +65,7 @@ pub struct MLDatasetResponse<T> {
 }
 
 // Specific response types for OpenAPI
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ForecastingResponse {
     pub data: Vec<ForecastingRecord>,
     pub total: i64,
@@ -72,7 +73,7 @@ pub struct ForecastingResponse {
     pub offset: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClusteringResponse {
     pub data: Vec<ClusteringRecord>,
     pub total: i64,
@@ -80,7 +81,7 @@ pub struct ClusteringResponse {
     pub offset: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GeoEnrichmentResponse {
     pub data: Vec<GeoEnrichmentRecord>,
     pub total: i64,

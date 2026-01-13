@@ -32,6 +32,8 @@ use db::create_pool;
         handlers::ml_datasets::get_forecasting_dataset,
         handlers::ml_datasets::get_clustering_dataset,
         handlers::ml_datasets::get_geo_enrichment_dataset,
+        handlers::entsoe_osm::get_electricity_timeseries,
+        handlers::entsoe_osm::get_geo_features,
     ),
     components(schemas(
         models::EnergyRecord,
@@ -45,12 +47,18 @@ use db::create_pool;
         models::ForecastingResponse,
         models::ClusteringResponse,
         models::GeoEnrichmentResponse,
+        models::ElectricityTimeseriesRecord,
+        models::ElectricityTimeseriesResponse,
+        models::GeoFeatureRecord,
+        models::GeoFeatureResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
         (name = "energy", description = "Energy data endpoints"),
         (name = "info", description = "Service information endpoints"),
         (name = "ml-datasets", description = "ML dataset endpoints"),
+        (name = "electricity", description = "Electricity timeseries endpoints"),
+        (name = "geo", description = "Geospatial feature endpoints"),
     ),
     servers(
         (url = "https://www.lianel.se", description = "Production server")
@@ -96,6 +104,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/datasets/forecasting", get(handlers::ml_datasets::get_forecasting_dataset))
         .route("/v1/datasets/clustering", get(handlers::ml_datasets::get_clustering_dataset))
         .route("/v1/datasets/geo-enrichment", get(handlers::ml_datasets::get_geo_enrichment_dataset))
+        // ENTSO-E and OSM endpoints
+        .route("/v1/electricity/timeseries", get(handlers::entsoe_osm::get_electricity_timeseries))
+        .route("/v1/geo/features", get(handlers::entsoe_osm::get_geo_features))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
