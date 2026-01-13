@@ -19,7 +19,3 @@ chrono = { version = "0.4.38", features = ["serde", "utc"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
-
-# Force all dependencies to use the same chrono version
-[patch.crates-io]
-chrono = { version = "=0.4.38", features = ["serde", "utc"] }
