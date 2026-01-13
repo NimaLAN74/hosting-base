@@ -31,7 +31,7 @@ pub async fn get_electricity_timeseries(
     let limit = params.limit.unwrap_or(1000).min(10000);
     let offset = params.offset.unwrap_or(0);
 
-    match queries_entsoe_osm::get_electricity_timeseries_records(
+    match get_electricity_timeseries_records(
         &pool,
         params.country_code.as_deref(),
         params.start_date.as_deref(),
@@ -79,7 +79,7 @@ pub async fn get_geo_features(
     let limit = params.limit.unwrap_or(1000).min(10000);
     let offset = params.offset.unwrap_or(0);
 
-    match queries_entsoe_osm::get_geo_feature_records(
+    match get_geo_feature_records(
         &pool,
         params.region_id.as_deref(),
         params.feature_name.as_deref(),
