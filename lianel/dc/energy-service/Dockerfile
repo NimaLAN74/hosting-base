@@ -10,7 +10,7 @@ RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 RUN rustup target add x86_64-unknown-linux-musl
 
 # Copy Cargo files
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml ./
 
 # Create a dummy source file to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
