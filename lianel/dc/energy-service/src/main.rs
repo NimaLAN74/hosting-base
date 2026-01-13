@@ -48,8 +48,10 @@ use db::create_pool;
         models::ClusteringResponse,
         models::GeoEnrichmentResponse,
         models::ElectricityTimeseriesRecord,
+        models::ElectricityTimeseriesQueryParams,
         models::ElectricityTimeseriesResponse,
         models::GeoFeatureRecord,
+        models::GeoFeatureQueryParams,
         models::GeoFeatureResponse,
     )),
     tags(
