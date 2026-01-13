@@ -161,8 +161,8 @@ pub async fn get_geo_feature_records(
     if let Some(rid) = region_id {
         count_q = count_q.bind(rid);
     }
-    if let Some(fn) = feature_name {
-        count_q = count_q.bind(fn);
+    if let Some(feature_name_val) = feature_name {
+        count_q = count_q.bind(feature_name_val);
     }
     if let Some(sy) = snapshot_year {
         count_q = count_q.bind(sy);
@@ -191,8 +191,8 @@ pub async fn get_geo_feature_records(
     if let Some(rid) = region_id {
         query = query.bind(rid);
     }
-    if let Some(fn) = feature_name {
-        query = query.bind(fn);
+    if let Some(feature_name_val) = feature_name {
+        query = query.bind(feature_name_val);
     }
     if let Some(sy) = snapshot_year {
         query = query.bind(sy);
