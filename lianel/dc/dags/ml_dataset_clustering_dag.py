@@ -86,16 +86,16 @@ def create_clustering_dataset_table(**context) -> None:
         energy_density_gwh_per_km2 DOUBLE PRECISION,  -- Total energy / area
         
         -- OSM geospatial features (from fact_geo_region_features)
-        power_plant_count INTEGER,
-        power_generator_count INTEGER,
-        power_substation_count INTEGER,
-        industrial_area_km2 DOUBLE PRECISION,
-        residential_building_count INTEGER,
-        commercial_building_count INTEGER,
-        railway_station_count INTEGER,
-        airport_count INTEGER,
-        power_plant_density_per_km2 DOUBLE PRECISION,
-        industrial_density_per_km2 DOUBLE PRECISION,
+        power_plant_count INTEGER DEFAULT 0,
+        power_generator_count INTEGER DEFAULT 0,
+        power_substation_count INTEGER DEFAULT 0,
+        industrial_area_km2 DOUBLE PRECISION DEFAULT 0,
+        residential_building_count INTEGER DEFAULT 0,
+        commercial_building_count INTEGER DEFAULT 0,
+        railway_station_count INTEGER DEFAULT 0,
+        airport_count INTEGER DEFAULT 0,
+        power_plant_density_per_km2 DOUBLE PRECISION DEFAULT 0,
+        industrial_density_per_km2 DOUBLE PRECISION DEFAULT 0,
         
         -- Metadata
         feature_count INTEGER,  -- Number of energy records aggregated
@@ -305,6 +305,22 @@ def load_clustering_dataset(**context) -> dict:
             r.coast_type
         FROM dim_region r
         WHERE r.level_code = 0
+    ),
+    osm_features AS (
+        -- Aggregate OSM features by region and latest snapshot year
+        SELECT 
+            region_id,
+            MAX(CASE WHEN feature_name = 'power_plant_count' THEN feature_value::INTEGER ELSE 0 END) as power_plant_count,
+            MAX(CASE WHEN feature_name = 'power_generator_count' THEN feature_value::INTEGER ELSE 0 END) as power_generator_count,
+            MAX(CASE WHEN feature_name = 'power_substation_count' THEN feature_value::INTEGER ELSE 0 END) as power_substation_count,
+            MAX(CASE WHEN feature_name = 'industrial_area_km2' THEN feature_value ELSE 0 END) as industrial_area_km2,
+            MAX(CASE WHEN feature_name = 'residential_building_count' THEN feature_value::INTEGER ELSE 0 END) as residential_building_count,
+            MAX(CASE WHEN feature_name = 'commercial_building_count' THEN feature_value::INTEGER ELSE 0 END) as commercial_building_count,
+            MAX(CASE WHEN feature_name = 'railway_station_count' THEN feature_value::INTEGER ELSE 0 END) as railway_station_count,
+            MAX(CASE WHEN feature_name = 'airport_count' THEN feature_value::INTEGER ELSE 0 END) as airport_count
+        FROM fact_geo_region_features
+        WHERE snapshot_year = (SELECT MAX(snapshot_year) FROM fact_geo_region_features)
+        GROUP BY region_id
     )
     INSERT INTO ml_dataset_clustering_v1 (
         region_id, level_code, cntr_code, region_name, year,
