@@ -5,7 +5,7 @@ use axum::{
 };
 use sqlx::PgPool;
 use crate::models::*;
-use crate::db::queries_entsoe_osm;
+use crate::db::*;
 
 #[utoipa::path(
     get,
