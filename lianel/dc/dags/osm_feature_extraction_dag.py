@@ -67,7 +67,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     Args:
         region_id: NUTS2 region code
     """
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     osm_client = OSMClient()
     
     # Get region geometry and area
@@ -229,7 +229,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
 
 def get_nuts2_regions(**context) -> List[str]:
     """Get list of NUTS2 regions to process."""
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     sql = """
         SELECT region_id
@@ -272,7 +272,7 @@ with TaskGroup('extract_region_features', dag=dag) as extract_group:
 # Summary task
 def summarize_extraction(**context):
     """Summarize OSM extraction results."""
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     sql = """
         SELECT 

@@ -96,7 +96,7 @@ def ingest_entsoe_data(
         end_date: End date in format 'YYYY-MM-DD'
         api_token: Optional ENTSO-E API token
     """
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     # Initialize ENTSO-E client
     client = ENTSOEClient(api_token=api_token)
@@ -227,7 +227,7 @@ def ingest_entsoe_data(
 
 def ingest_country_data(country_code: str, **context) -> Dict[str, Any]:
     """Ingest ENTSO-E data for a single country."""
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     # Get last ingestion date
     last_date = get_last_ingestion_date(postgres_hook, country_code)
@@ -253,7 +253,10 @@ def ingest_country_data(country_code: str, **context) -> Dict[str, Any]:
     
     # Get API token from Airflow Variable (if set)
     from airflow.models import Variable
-    api_token = Variable.get("ENTSOE_API_TOKEN", default_var=None)
+    try:
+        api_token = Variable.get("ENTSOE_API_TOKEN")
+    except KeyError:
+        api_token = None
     
     # Process in 7-day chunks to avoid large requests
     start_dt = datetime.fromisoformat(start_date)
@@ -298,7 +301,7 @@ with TaskGroup('ingest_countries', dag=dag) as ingest_group:
 # Summary task
 def summarize_ingestion(**context):
     """Summarize ingestion results."""
-    postgres_hook = PostgresHook(postgres_conn_id='postgres_default')
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
     sql = """
         SELECT 
