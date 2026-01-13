@@ -57,7 +57,7 @@ x-airflow-common:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@172.18.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@172.18.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}?pool_size=5&max_overflow=10&pool_pre_ping=True&pool_recycle=3600
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@172.18.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     AIRFLOW__WEBSERVER__BASE_URL: https://airflow.lianel.se
