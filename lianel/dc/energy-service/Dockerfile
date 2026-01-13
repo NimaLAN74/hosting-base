@@ -1,5 +1,5 @@
 # Build stage
-FROM rustlang/rust:nightly-alpine AS builder
+FROM rust:1.75-alpine AS builder
 
 WORKDIR /app
 
