@@ -9,6 +9,11 @@ Features include:
 - Transport infrastructure
 
 Features are aggregated per region and stored in fact_geo_region_features.
+
+Subtasks:
+- Region lookup: Get region geometry
+- Feature extraction: Extract features from OSM
+- Metric storage: Calculate and store metrics
 """
 
 from datetime import datetime, timedelta
@@ -60,17 +65,27 @@ FEATURE_TYPES = [
 ]
 
 
-def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
-    """
-    Extract OSM features for a single NUTS2 region.
-    
-    Args:
-        region_id: NUTS2 region code
-    """
+def get_nuts2_regions(**context) -> List[str]:
+    """Get list of NUTS2 regions to process."""
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
-    osm_client = OSMClient()
     
-    # Get region geometry and area
+    sql = """
+        SELECT region_id
+        FROM dim_region
+        WHERE nuts_level = 2
+        ORDER BY region_id
+    """
+    
+    results = postgres_hook.get_records(sql)
+    regions = [row[0] for row in results]
+    
+    return regions
+
+
+def lookup_region(region_id: str, **context) -> Dict[str, Any]:
+    """Get region geometry and metadata."""
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
+    
     sql = """
         SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
         FROM dim_region
@@ -83,7 +98,6 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
             print(f"Region {region_id} not found or not NUTS2 level")
             return {
                 'region_id': region_id,
-                'features_extracted': 0,
                 'status': 'region_not_found'
             }
         
@@ -93,12 +107,56 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
             print(f"No geometry available for region {region_id}")
             return {
                 'region_id': region_id,
-                'features_extracted': 0,
                 'status': 'no_geometry'
             }
         
+        return {
+            'region_id': region_id,
+            'area_km2': float(area_km2) if area_km2 else 0.0,
+            'status': 'success'
+        }
+        
+    except Exception as e:
+        print(f"Error looking up region {region_id}: {e}")
+        context['ti'].xcom_push(key=f'region_data_{region_id}', value=None)
+        raise AirflowException(f"Failed to lookup region {region_id}: {e}")
+
+
+def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
+    """Extract OSM features for a region."""
+    ti = context['ti']
+    task_ids = [f'region_{region_id.lower()}.lookup_{region_id.lower()}']
+    lookup_result = ti.xcom_pull(task_ids=task_ids)
+    
+    if not lookup_result or not isinstance(lookup_result, dict):
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'region_not_found'
+        }
+    
+    # Get region data from lookup task
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
+    sql = """
+        SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
+        FROM dim_region
+        WHERE region_id = %s AND nuts_level = 2
+    """
+    result = postgres_hook.get_first(sql, parameters=(region_id,))
+    
+    if not result or not result[2]:
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'no_geometry'
+        }
+    
+    osm_client = OSMClient()
+    
+    try:
         # Parse geometry
-        geometry = json.loads(geometry_json)
+        geometry = json.loads(result[2])
+        area_km2 = float(result[1]) if result[1] else 0.0
         
         # Get bounding box
         bbox = get_region_bbox(geometry)
@@ -108,10 +166,52 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         # Extract features
         all_features = osm_client.extract_features(bbox, FEATURE_TYPES)
         
-        # Calculate metrics and store
-        snapshot_year = datetime.now().year
-        features_stored = 0
+        feature_count = sum(len(features) for features in all_features.values())
         
+        return {
+            'region_id': region_id,
+            'features': all_features,
+            'area_km2': area_km2,
+            'feature_count': feature_count,
+            'feature_types': list(all_features.keys()),
+            'status': 'success'
+        }
+        
+    except Exception as e:
+        print(f"Error extracting OSM features for region {region_id}: {e}")
+        raise AirflowException(f"Failed to extract OSM features for region {region_id}: {e}")
+
+
+def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
+    """Calculate and store metrics for extracted features."""
+    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
+    ti = context['ti']
+    
+    task_ids = [f'region_{region_id.lower()}.extract_{region_id.lower()}']
+    extract_result = ti.xcom_pull(task_ids=task_ids)
+    
+    if not extract_result or not isinstance(extract_result, dict):
+        return {
+            'region_id': region_id,
+            'features_stored': 0,
+            'status': 'no_features'
+        }
+    
+    all_features = extract_result.get('features', {})
+    area_km2 = extract_result.get('area_km2', 0.0)
+    
+    if not all_features:
+        return {
+            'region_id': region_id,
+            'features_stored': 0,
+            'status': 'no_features'
+        }
+    
+    osm_client = OSMClient()
+    snapshot_year = datetime.now().year
+    features_stored = 0
+    
+    try:
         for feature_type, features in all_features.items():
             if not features:
                 continue
@@ -191,16 +291,16 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
             )
         )
         
-        print(f"Successfully extracted {features_stored} feature metrics for region {region_id}")
+        print(f"Successfully stored {features_stored} feature metrics for region {region_id}")
         
         return {
             'region_id': region_id,
-            'features_extracted': features_stored,
+            'features_stored': features_stored,
             'status': 'success'
         }
         
     except Exception as e:
-        print(f"Error extracting OSM features for region {region_id}: {e}")
+        print(f"Error storing metrics for region {region_id}: {e}")
         
         # Log failure
         try:
@@ -224,22 +324,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         except Exception as log_error:
             print(f"Error logging failure: {log_error}")
         
-        raise AirflowException(f"Failed to extract OSM features for region {region_id}: {e}")
-
-
-def get_nuts2_regions(**context) -> List[str]:
-    """Get list of NUTS2 regions to process."""
-    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
-    
-    sql = """
-        SELECT region_id
-        FROM dim_region
-        WHERE nuts_level = 2
-        ORDER BY region_id
-    """
-    
-    results = postgres_hook.get_records(sql)
-    return [row[0] for row in results]
+        raise AirflowException(f"Failed to store metrics for region {region_id}: {e}")
 
 
 # Get regions task
@@ -249,25 +334,49 @@ get_regions_task = PythonOperator(
     dag=dag,
 )
 
-# Create task group for region processing
-with TaskGroup('extract_region_features', dag=dag) as extract_group:
-    # We'll dynamically create tasks for each region
-    # For now, we'll process a sample of regions (can be expanded)
-    sample_regions = [
-        'SE11', 'SE12', 'SE21', 'SE22', 'SE23',  # Sweden
-        'DE11', 'DE12', 'DE21', 'DE22', 'DE30',  # Germany
-        'FR10', 'FR21', 'FR22', 'FR30', 'FR41',  # France
-    ]
+# Sample regions (can be expanded to all NUTS2 regions)
+sample_regions = [
+    'SE11', 'SE12', 'SE21', 'SE22', 'SE23',  # Sweden
+    'DE11', 'DE12', 'DE21', 'DE22', 'DE30',  # Germany
+    'FR10', 'FR21', 'FR22', 'FR30', 'FR41',  # France
+]
+
+# Create task groups for each region
+region_groups = []
+
+for region_id in sample_regions:
+    region_lower = region_id.lower()
     
-    region_tasks = []
-    for region_id in sample_regions:
-        task = PythonOperator(
-            task_id=f'extract_{region_id.lower()}',
+    with TaskGroup(f'region_{region_lower}', dag=dag) as region_group:
+        # Lookup task
+        lookup_task = PythonOperator(
+            task_id=f'lookup_{region_lower}',
+            python_callable=lookup_region,
+            op_kwargs={'region_id': region_id},
+            dag=dag,
+        )
+        
+        # Extraction task
+        extract_task = PythonOperator(
+            task_id=f'extract_{region_lower}',
             python_callable=extract_region_features,
             op_kwargs={'region_id': region_id},
             dag=dag,
         )
-        region_tasks.append(task)
+        
+        # Storage task
+        store_task = PythonOperator(
+            task_id=f'store_{region_lower}',
+            python_callable=store_region_metrics,
+            op_kwargs={'region_id': region_id},
+            dag=dag,
+        )
+        
+        # Set dependencies within region group
+        lookup_task >> extract_task >> store_task
+    
+    region_groups.append(region_group)
+
 
 # Summary task
 def summarize_extraction(**context):
@@ -294,11 +403,13 @@ def summarize_extraction(**context):
         print(f"{row[0]}: {row[1]} features, total value: {row[2]:.2f}")
     print("=====================================\n")
 
+
 summarize_task = PythonOperator(
     task_id='summarize_extraction',
     python_callable=summarize_extraction,
     dag=dag,
 )
 
-# Set dependencies
-get_regions_task >> extract_group >> summarize_task
+# Set dependencies: get regions, then all region groups run in parallel, then summary
+for region_group in region_groups:
+    get_regions_task >> region_group >> summarize_task
