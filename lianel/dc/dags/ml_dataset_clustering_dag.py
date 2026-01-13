@@ -85,6 +85,18 @@ def create_clustering_dataset_table(**context) -> None:
         -- Derived features
         energy_density_gwh_per_km2 DOUBLE PRECISION,  -- Total energy / area
         
+        -- OSM geospatial features (from fact_geo_region_features)
+        power_plant_count INTEGER,
+        power_generator_count INTEGER,
+        power_substation_count INTEGER,
+        industrial_area_km2 DOUBLE PRECISION,
+        residential_building_count INTEGER,
+        commercial_building_count INTEGER,
+        railway_station_count INTEGER,
+        airport_count INTEGER,
+        power_plant_density_per_km2 DOUBLE PRECISION,
+        industrial_density_per_km2 DOUBLE PRECISION,
+        
         -- Metadata
         feature_count INTEGER,  -- Number of energy records aggregated
         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
@@ -300,7 +312,12 @@ def load_clustering_dataset(**context) -> dict:
         pct_renewable, pct_fossil, pct_nuclear, pct_hydro, pct_wind, pct_solar, pct_biomass,
         pct_production, pct_imports, pct_exports, pct_final_consumption, pct_transformation,
         area_km2, mount_type, urbn_type, coast_type,
-        energy_density_gwh_per_km2, feature_count, updated_at
+        energy_density_gwh_per_km2,
+        power_plant_count, power_generator_count, power_substation_count,
+        industrial_area_km2, residential_building_count, commercial_building_count,
+        railway_station_count, airport_count,
+        power_plant_density_per_km2, industrial_density_per_km2,
+        feature_count, updated_at
     )
     SELECT 
         r.region_id,
@@ -326,10 +343,21 @@ def load_clustering_dataset(**context) -> dict:
         r.urbn_type,
         r.coast_type,
         CASE WHEN r.area_km2 > 0 THEN (e.total_energy_gwh / r.area_km2) ELSE NULL END,
+        COALESCE(osm.power_plant_count, 0),
+        COALESCE(osm.power_generator_count, 0),
+        COALESCE(osm.power_substation_count, 0),
+        COALESCE(osm.industrial_area_km2, 0),
+        COALESCE(osm.residential_building_count, 0),
+        COALESCE(osm.commercial_building_count, 0),
+        COALESCE(osm.railway_station_count, 0),
+        COALESCE(osm.airport_count, 0),
+        CASE WHEN r.area_km2 > 0 AND osm.power_plant_count > 0 THEN (osm.power_plant_count::DOUBLE PRECISION / r.area_km2) ELSE 0 END,
+        CASE WHEN r.area_km2 > 0 AND osm.industrial_area_km2 > 0 THEN (osm.industrial_area_km2 / r.area_km2) ELSE 0 END,
         e.feature_count,
         NOW()
     FROM energy_aggregated e
     INNER JOIN region_features r ON e.country_code = r.cntr_code
+    LEFT JOIN osm_features osm ON r.region_id = osm.region_id
     ON CONFLICT (region_id, year) 
     DO UPDATE SET
         total_energy_gwh = EXCLUDED.total_energy_gwh,
@@ -350,6 +378,16 @@ def load_clustering_dataset(**context) -> dict:
         urbn_type = EXCLUDED.urbn_type,
         coast_type = EXCLUDED.coast_type,
         energy_density_gwh_per_km2 = EXCLUDED.energy_density_gwh_per_km2,
+        power_plant_count = EXCLUDED.power_plant_count,
+        power_generator_count = EXCLUDED.power_generator_count,
+        power_substation_count = EXCLUDED.power_substation_count,
+        industrial_area_km2 = EXCLUDED.industrial_area_km2,
+        residential_building_count = EXCLUDED.residential_building_count,
+        commercial_building_count = EXCLUDED.commercial_building_count,
+        railway_station_count = EXCLUDED.railway_station_count,
+        airport_count = EXCLUDED.airport_count,
+        power_plant_density_per_km2 = EXCLUDED.power_plant_density_per_km2,
+        industrial_density_per_km2 = EXCLUDED.industrial_density_per_km2,
         feature_count = EXCLUDED.feature_count,
         updated_at = NOW()
     """

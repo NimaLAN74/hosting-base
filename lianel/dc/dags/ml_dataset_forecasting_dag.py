@@ -142,6 +142,15 @@ def create_forecasting_dataset_table(**context):
         area_km2 DOUBLE PRECISION,
         energy_density_gwh_per_km2 NUMERIC(15,3),
         
+        -- ENTSO-E electricity features (aggregated from fact_electricity_timeseries)
+        avg_hourly_load_mw NUMERIC(12,2),
+        peak_load_mw NUMERIC(12,2),
+        load_variability_mw NUMERIC(12,2),  -- Standard deviation
+        avg_renewable_generation_mw NUMERIC(12,2),
+        avg_fossil_generation_mw NUMERIC(12,2),
+        renewable_generation_pct NUMERIC(5,2),
+        fossil_generation_pct NUMERIC(5,2),
+        
         -- Metadata
         feature_count INTEGER,
         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
@@ -462,6 +471,30 @@ def load_forecasting_dataset(**context):
             r.area_km2
         FROM dim_region r
         WHERE r.level_code = 0
+    ),
+    entsoe_features AS (
+        -- Aggregate ENTSO-E electricity data by country and year
+        SELECT 
+            country_code,
+            EXTRACT(YEAR FROM timestamp_utc)::INTEGER as year,
+            AVG(load_mw) as avg_hourly_load_mw,
+            MAX(load_mw) as peak_load_mw,
+            STDDEV(load_mw) as load_variability_mw,
+            AVG(CASE WHEN production_type IN ('B16', 'B18', 'B19', 'B11', 'B12', 'B13', 'B15', 'B01', 'B09') THEN generation_mw ELSE NULL END) as avg_renewable_generation_mw,
+            AVG(CASE WHEN production_type IN ('B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08') THEN generation_mw ELSE NULL END) as avg_fossil_generation_mw,
+            AVG(CASE 
+                WHEN generation_mw > 0 
+                THEN (CASE WHEN production_type IN ('B16', 'B18', 'B19', 'B11', 'B12', 'B13', 'B15', 'B01', 'B09') THEN generation_mw ELSE 0 END) / generation_mw * 100
+                ELSE NULL 
+            END) as renewable_generation_pct,
+            AVG(CASE 
+                WHEN generation_mw > 0 
+                THEN (CASE WHEN production_type IN ('B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08') THEN generation_mw ELSE 0 END) / generation_mw * 100
+                ELSE NULL 
+            END) as fossil_generation_pct
+        FROM fact_electricity_timeseries
+        WHERE load_mw IS NOT NULL OR generation_mw IS NOT NULL
+        GROUP BY country_code, EXTRACT(YEAR FROM timestamp_utc)::INTEGER
     )
     INSERT INTO ml_dataset_forecasting_v1 (
         region_id, level_code, cntr_code, region_name, year,
@@ -476,6 +509,9 @@ def load_forecasting_dataset(**context):
         is_increasing_trend, is_decreasing_trend,
         pct_renewable, pct_fossil,
         area_km2, energy_density_gwh_per_km2,
+        avg_hourly_load_mw, peak_load_mw, load_variability_mw,
+        avg_renewable_generation_mw, avg_fossil_generation_mw,
+        renewable_generation_pct, fossil_generation_pct,
         feature_count, updated_at
     )
     SELECT 
@@ -510,10 +546,18 @@ def load_forecasting_dataset(**context):
         CASE WHEN e.total_energy_gwh > 0 THEN (e.fossil_energy_gwh / e.total_energy_gwh * 100) ELSE 0 END,
         s.area_km2,
         CASE WHEN s.area_km2 > 0 THEN (e.total_energy_gwh / s.area_km2) ELSE NULL END,
+        ef.avg_hourly_load_mw,
+        ef.peak_load_mw,
+        ef.load_variability_mw,
+        ef.avg_renewable_generation_mw,
+        ef.avg_fossil_generation_mw,
+        ef.renewable_generation_pct,
+        ef.fossil_generation_pct,
         e.feature_count,
         NOW()
     FROM with_trends e
     INNER JOIN region_spatial s ON e.region_id = s.region_id
+    LEFT JOIN entsoe_features ef ON e.cntr_code = ef.country_code AND e.year = ef.year
     ON CONFLICT (region_id, year) 
     DO UPDATE SET
         total_energy_gwh = EXCLUDED.total_energy_gwh,
@@ -542,6 +586,13 @@ def load_forecasting_dataset(**context):
         pct_fossil = EXCLUDED.pct_fossil,
         area_km2 = EXCLUDED.area_km2,
         energy_density_gwh_per_km2 = EXCLUDED.energy_density_gwh_per_km2,
+        avg_hourly_load_mw = EXCLUDED.avg_hourly_load_mw,
+        peak_load_mw = EXCLUDED.peak_load_mw,
+        load_variability_mw = EXCLUDED.load_variability_mw,
+        avg_renewable_generation_mw = EXCLUDED.avg_renewable_generation_mw,
+        avg_fossil_generation_mw = EXCLUDED.avg_fossil_generation_mw,
+        renewable_generation_pct = EXCLUDED.renewable_generation_pct,
+        fossil_generation_pct = EXCLUDED.fossil_generation_pct,
         feature_count = EXCLUDED.feature_count,
         updated_at = NOW()
     """
