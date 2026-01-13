@@ -2,6 +2,7 @@ use sqlx::{PgPool, Row};
 use sqlx::types::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::{DateTime, Utc};
+use std::result::Result;
 use crate::models::*;
 
 pub async fn get_electricity_timeseries_records(
