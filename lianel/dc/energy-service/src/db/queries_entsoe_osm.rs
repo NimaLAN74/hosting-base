@@ -46,24 +46,21 @@ pub async fn get_electricity_timeseries_records(
         where_clause
     );
 
-    let mut count_query_builder = sqlx::query(&count_query);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
     if let Some(cc) = country_code {
-        count_query_builder = count_query_builder.bind(cc);
+        count_q = count_q.bind(cc);
     }
     if let Some(sd) = start_date {
-        count_query_builder = count_query_builder.bind(sd);
+        count_q = count_q.bind(sd);
     }
     if let Some(ed) = end_date {
-        count_query_builder = count_query_builder.bind(ed);
+        count_q = count_q.bind(ed);
     }
     if let Some(pt) = production_type {
-        count_query_builder = count_query_builder.bind(pt);
+        count_q = count_q.bind(pt);
     }
 
-    let total: i64 = count_query_builder
-        .fetch_one(pool)
-        .await?
-        .get(0);
+    let total = count_q.fetch_one(pool).await?;
 
     // Get records
     let query_str = format!(
@@ -159,21 +156,18 @@ pub async fn get_geo_feature_records(
         where_clause
     );
 
-    let mut count_query_builder = sqlx::query(&count_query);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
     if let Some(rid) = region_id {
-        count_query_builder = count_query_builder.bind(rid);
+        count_q = count_q.bind(rid);
     }
     if let Some(fn) = feature_name {
-        count_query_builder = count_query_builder.bind(fn);
+        count_q = count_q.bind(fn);
     }
     if let Some(sy) = snapshot_year {
-        count_query_builder = count_query_builder.bind(sy);
+        count_q = count_q.bind(sy);
     }
 
-    let total: i64 = count_query_builder
-        .fetch_one(pool)
-        .await?
-        .get(0);
+    let total = count_q.fetch_one(pool).await?;
 
     // Get records
     let query_str = format!(
