@@ -104,15 +104,15 @@ pub async fn get_electricity_timeseries_records(
     let records: Vec<ElectricityTimeseriesRecord> = rows
         .iter()
         .map(|row| ElectricityTimeseriesRecord {
-            id: row.get(0),
+            id: row.get::<i64, _>(0),
             timestamp_utc: row.get::<DateTime<Utc>, _>(1),
-            country_code: row.get(2),
-            bidding_zone: row.get(3),
-            production_type: row.get(4),
+            country_code: row.get::<String, _>(2),
+            bidding_zone: row.get::<Option<String>, _>(3),
+            production_type: row.get::<Option<String>, _>(4),
             load_mw: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
             generation_mw: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
-            resolution: row.get(7),
-            quality_flag: row.get(8),
+            resolution: row.get::<String, _>(7),
+            quality_flag: row.get::<Option<String>, _>(8),
         })
         .collect();
 
@@ -204,11 +204,11 @@ pub async fn get_geo_feature_records(
     let records: Vec<GeoFeatureRecord> = rows
         .iter()
         .map(|row| GeoFeatureRecord {
-            id: row.get(0),
-            region_id: row.get(1),
-            feature_name: row.get(2),
+            id: row.get::<i64, _>(0),
+            region_id: row.get::<String, _>(1),
+            feature_name: row.get::<String, _>(2),
             feature_value: row.get::<BigDecimal, _>(3).to_f64().unwrap_or(0.0),
-            snapshot_year: row.get(4),
+            snapshot_year: row.get::<i32, _>(4),
         })
         .collect();
 
