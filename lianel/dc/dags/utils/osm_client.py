@@ -221,19 +221,59 @@ class OSMClient:
 
 def get_region_bbox(region_geometry: Any) -> Tuple[float, float, float, float]:
     """
-    Get bounding box from region geometry.
+    Get bounding box from region geometry in WGS84 (lat/lon).
     
     Args:
         region_geometry: Region geometry (GeoJSON or Shapely geometry)
         
     Returns:
-        Bounding box as (min_lon, min_lat, max_lon, max_lat)
+        Bounding box as (min_lon, min_lat, max_lon, max_lat) in WGS84
     """
     if isinstance(region_geometry, dict):
-        # GeoJSON format
-        geom = shape(region_geometry)
+        # GeoJSON format - check if it has a CRS
+        if 'crs' in region_geometry:
+            crs_info = region_geometry['crs']
+            # If it's not WGS84, we need to transform
+            if 'properties' in crs_info and 'name' in crs_info['properties']:
+                crs_name = crs_info['properties']['name']
+                if 'EPSG:4326' not in crs_name and 'CRS84' not in crs_name:
+                    # Need to transform from source CRS to WGS84
+                    source_crs = pyproj.CRS.from_string(crs_name)
+                    target_crs = pyproj.CRS.from_epsg(4326)
+                    project = pyproj.Transformer.from_crs(source_crs, target_crs, always_xy=True).transform
+                    geom = transform(project, shape(region_geometry))
+                else:
+                    geom = shape(region_geometry)
+            else:
+                geom = shape(region_geometry)
+        else:
+            # Assume WGS84 if no CRS specified
+            geom = shape(region_geometry)
     else:
         geom = region_geometry
     
+    # Get bounds and ensure they're in WGS84 (lat/lon)
     bounds = geom.bounds  # (min_x, min_y, max_x, max_y)
+    
+    # Check if coordinates look like lat/lon (should be -180 to 180 for lon, -90 to 90 for lat)
+    # If they're outside these ranges, they're likely in a projected CRS
+    min_x, min_y, max_x, max_y = bounds
+    
+    if abs(min_x) > 180 or abs(max_x) > 180 or abs(min_y) > 90 or abs(max_y) > 90:
+        # Coordinates are in a projected CRS, need to transform
+        # Try to detect the CRS - common European projections
+        # For now, assume EPSG:3857 (Web Mercator) or EPSG:3035 (ETRS89 / LAEA Europe)
+        # We'll transform the geometry center to get approximate CRS
+        try:
+            # Try EPSG:3035 (ETRS89 / LAEA Europe) - common for EU NUTS regions
+            source_crs = pyproj.CRS.from_epsg(3035)
+            target_crs = pyproj.CRS.from_epsg(4326)
+            project = pyproj.Transformer.from_crs(source_crs, target_crs, always_xy=True).transform
+            geom_wgs84 = transform(project, geom)
+            bounds = geom_wgs84.bounds
+            logger.info(f"Transformed bbox from projected CRS to WGS84: {bounds}")
+        except Exception as e:
+            logger.warning(f"Could not transform bbox, using as-is: {e}")
+    
+    # Return as (min_lon, min_lat, max_lon, max_lat)
     return (bounds[0], bounds[1], bounds[2], bounds[3])
