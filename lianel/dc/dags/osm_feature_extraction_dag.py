@@ -50,6 +50,7 @@ dag = DAG(
     catchup=False,
     tags=['data-ingestion', 'osm', 'geospatial', 'features'],
     max_active_runs=1,
+    max_active_tasks=3,  # Limit concurrent region processing to avoid Overpass API rate limits
 )
 
 # Feature types to extract

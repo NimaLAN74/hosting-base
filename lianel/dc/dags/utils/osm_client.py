@@ -65,9 +65,9 @@ class OSMClient:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': 'Lianel-Energy-Platform/1.0'})
     
-    def _make_request(self, query: str, retries: int = 3) -> Optional[Dict]:
+    def _make_request(self, query: str, retries: int = 5) -> Optional[Dict]:
         """
-        Make request to Overpass API.
+        Make request to Overpass API with rate limiting and retry logic.
         
         Args:
             query: Overpass QL query string
@@ -83,11 +83,34 @@ class OSMClient:
                     data={'data': query},
                     timeout=self.timeout
                 )
+                
+                # Handle rate limiting (429) with longer backoff
+                if response.status_code == 429:
+                    wait_time = min(60, 5 * (2 ** attempt))  # Max 60 seconds
+                    logger.warning(f"Rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{retries}")
+                    if attempt < retries - 1:
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error("Rate limited after all retries. Consider using a different Overpass endpoint or reducing request frequency.")
+                        return None
+                
+                # Handle gateway timeout (504) with longer backoff
+                if response.status_code == 504:
+                    wait_time = min(30, 3 * (2 ** attempt))
+                    logger.warning(f"Gateway timeout (504). Waiting {wait_time}s before retry {attempt + 1}/{retries}")
+                    if attempt < retries - 1:
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error("Gateway timeout after all retries. Query may be too large or server overloaded.")
+                        return None
+                
                 response.raise_for_status()
                 
                 data = response.json()
                 
-                # Check for errors
+                # Check for errors in response
                 if 'remark' in data and 'error' in data['remark'].lower():
                     logger.warning(f"Overpass API error: {data.get('remark')}")
                     return None
@@ -97,15 +120,24 @@ class OSMClient:
             except requests.exceptions.RequestException as e:
                 # Try to get response body for better error messages
                 error_detail = str(e)
+                status_code = None
                 if hasattr(e, 'response') and e.response is not None:
+                    status_code = e.response.status_code
                     try:
                         error_body = e.response.text[:500]  # First 500 chars
                         error_detail = f"{e} - Response: {error_body}"
                     except:
                         pass
+                
+                # Don't retry on client errors (4xx) except 429 and 504
+                if status_code and 400 <= status_code < 500 and status_code not in (429, 504):
+                    logger.error(f"Client error {status_code}: {error_detail}")
+                    return None
+                
                 logger.warning(f"Overpass API request failed (attempt {attempt + 1}/{retries}): {error_detail}")
                 if attempt < retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    wait_time = min(30, 5 * (2 ** attempt))  # Exponential backoff, max 30s
+                    time.sleep(wait_time)
                 else:
                     logger.error(f"Overpass API request failed after {retries} attempts. Last error: {error_detail}")
                     return None
@@ -175,8 +207,12 @@ class OSMClient:
             results[feature_type] = features
             logger.info(f"Extracted {len(features)} {feature_type} features")
             
-            # Rate limiting: wait between requests
-            time.sleep(1)
+            # Rate limiting: wait between feature type requests to avoid hitting rate limits
+            # Longer delay if request failed (may have been rate limited)
+            if data is None:
+                time.sleep(10)  # Longer wait after failed request
+            else:
+                time.sleep(3)  # Standard delay between successful requests
         
         return results
     
