@@ -135,9 +135,12 @@ class OSMClient:
             
             query_template = OSM_FEATURE_QUERIES[feature_type]
             # Overpass QL bbox format: (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
-            query = query_template.replace('{{bbox}}', f'{min_lat},{min_lon},{max_lat},{max_lon}')
+            # Format: (bbox:south,west,north,east)
+            bbox_str = f'{min_lat},{min_lon},{max_lat},{max_lon}'
+            query = query_template.replace('{{bbox}}', bbox_str)
             
-            logger.info(f"Extracting {feature_type} features from OSM...")
+            logger.info(f"Extracting {feature_type} features from OSM (bbox: {bbox_str})...")
+            logger.debug(f"Overpass query: {query[:200]}...")  # Log first 200 chars
             data = self._make_request(query)
             
             if data is None:
