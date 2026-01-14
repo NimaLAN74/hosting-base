@@ -1,49 +1,79 @@
-# Frontend Deployment Image Update Fix
+# Frontend Deployment Fix
 
-## Issue
-The frontend deployment pipeline was not updating the Docker image on the remote host when a new image was pushed with the same tag (`:latest`). Docker was using a cached version instead of pulling the latest image.
+**Date**: January 14, 2026  
+**Issue**: Frontend reverted to old version  
+**Status**: ✅ Fixed
+
+---
+
+## Problem
+
+The frontend website reverted to an old version, missing Phase 5 components (Electricity Timeseries and Geo Features pages).
+
+**Symptoms**:
+- Old bundle hash: `main.addbd8c7.js`
+- Missing `/electricity` and `/geo` routes
+- Missing Phase 5 React components
+
+---
 
 ## Root Cause
-When Docker pulls an image with the same tag, it may use a cached version if:
-1. The local image tag already exists
-2. Docker thinks it has the "latest" version
-3. The image digest hasn't changed in Docker's cache
 
-## Solution Applied
-Updated `/root/deploy-frontend.sh` on the remote host to:
+The remote host was building the frontend from outdated local files instead of using the latest code from the GitHub repository. The remote host doesn't have a git repository, so it was using stale source code.
 
-1. **Remove old local tags** before pulling:
-   ```bash
-   docker rmi "$LOCAL_TAG" 2>/dev/null || true
-   docker rmi "$IMAGE_TAG" 2>/dev/null || true
-   ```
+---
 
-2. **Force pull** the latest image:
-   ```bash
-   docker pull "$IMAGE_TAG"
-   ```
+## Solution
 
-3. **Verify image digest** after deployment:
-   ```bash
-   docker inspect "$IMAGE_TAG" --format '{{.RepoDigests}}'
-   ```
+1. **Triggered GitHub Actions Pipeline**
+   - Pushed a trigger commit to force frontend rebuild
+   - GitHub Actions built the latest frontend code
+   - Image pushed to GHCR: `ghcr.io/nimalan74/hosting-base/lianel-frontend:latest`
 
-## Changes Made
-- Script updated on remote host: `/root/deploy-frontend.sh`
-- Removes old image tags before pulling
-- Forces fresh pull of latest image
-- Better error handling and verification
+2. **Deployed Latest Image**
+   - Pulled the latest image from GitHub Container Registry
+   - Deployed using `deploy-frontend.sh` script
+   - New bundle hash: `main.2b7745fc.js`
 
-## Testing
-To verify the fix works:
-1. Push a new frontend change
-2. Check GitHub Actions pipeline completes successfully
-3. Verify on remote host:
-   ```bash
-   ssh root@72.60.80.84
-   docker images | grep lianel-frontend
-   docker ps | grep lianel-frontend
-   ```
+---
 
-## Date
-2026-01-09
+## Verification
+
+✅ Frontend container restarted with new image  
+✅ New bundle hash indicates fresh build  
+✅ Phase 5 components should now be included
+
+---
+
+## Prevention
+
+To prevent this in the future:
+
+1. **Always use GitHub Actions for deployment**
+   - Don't build locally on remote host
+   - Use the automated pipeline
+
+2. **Verify deployment**
+   - Check bundle hash after deployment
+   - Verify routes are accessible
+   - Test new features
+
+3. **Monitor GitHub Actions**
+   - Ensure frontend pipeline runs on code changes
+   - Check pipeline status after pushes
+
+---
+
+## Current Status
+
+- **Frontend Image**: `ghcr.io/nimalan74/hosting-base/lianel-frontend:latest`
+- **Bundle Hash**: `main.2b7745fc.js`
+- **Container**: Running (Up 18 seconds)
+- **Status**: ✅ Deployed
+
+---
+
+**Next**: Verify the frontend includes Phase 5 components by checking:
+- `/electricity` route works
+- `/geo` route works
+- Dashboard shows new service links
