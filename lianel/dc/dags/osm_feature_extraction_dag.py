@@ -72,7 +72,7 @@ def get_nuts2_regions(**context) -> List[str]:
     sql = """
         SELECT region_id
         FROM dim_region
-        WHERE nuts_level = 2
+        WHERE level_code = 2
         ORDER BY region_id
     """
     
@@ -89,7 +89,7 @@ def lookup_region(region_id: str, **context) -> Dict[str, Any]:
     sql = """
         SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
         FROM dim_region
-        WHERE region_id = %s AND nuts_level = 2
+        WHERE region_id = %s AND level_code = 2
     """
     
     try:
@@ -140,7 +140,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     sql = """
         SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
         FROM dim_region
-        WHERE region_id = %s AND nuts_level = 2
+        WHERE region_id = %s AND level_code = 2
     """
     result = postgres_hook.get_first(sql, parameters=(region_id,))
     
