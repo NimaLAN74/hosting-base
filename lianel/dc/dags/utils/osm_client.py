@@ -29,7 +29,8 @@ OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_TIMEOUT = 180  # seconds
 
 # OSM feature queries
-# Note: Overpass QL bbox format is (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
+# Overpass QL bbox format: (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
+# Format: way["key"="value"](south,west,north,east)
 OSM_FEATURE_QUERIES = {
     'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}});relation["power"="plant"]({{bbox}}););out geom;',
     'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}});relation["power"="generator"]({{bbox}}););out geom;',
@@ -94,11 +95,19 @@ class OSMClient:
                 return data
                 
             except requests.exceptions.RequestException as e:
-                logger.warning(f"Overpass API request failed (attempt {attempt + 1}/{retries}): {e}")
+                # Try to get response body for better error messages
+                error_detail = str(e)
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        error_body = e.response.text[:500]  # First 500 chars
+                        error_detail = f"{e} - Response: {error_body}"
+                    except:
+                        pass
+                logger.warning(f"Overpass API request failed (attempt {attempt + 1}/{retries}): {error_detail}")
                 if attempt < retries - 1:
                     time.sleep(2 ** attempt)  # Exponential backoff
                 else:
-                    logger.error(f"Overpass API request failed after {retries} attempts")
+                    logger.error(f"Overpass API request failed after {retries} attempts. Last error: {error_detail}")
                     return None
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Overpass JSON response: {e}")
@@ -135,13 +144,17 @@ class OSMClient:
             
             query_template = OSM_FEATURE_QUERIES[feature_type]
             # Overpass QL bbox format: (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
-            # Format: (bbox:south,west,north,east)
+            # The bbox goes directly in parentheses: way["key"="value"](south,west,north,east)
             bbox_str = f'{min_lat},{min_lon},{max_lat},{max_lon}'
             query = query_template.replace('{{bbox}}', bbox_str)
             
             logger.info(f"Extracting {feature_type} features from OSM (bbox: {bbox_str})...")
-            logger.debug(f"Overpass query: {query[:200]}...")  # Log first 200 chars
+            logger.debug(f"Overpass query (first 300 chars): {query[:300]}")
             data = self._make_request(query)
+            
+            # If request failed, log the full query for debugging
+            if data is None:
+                logger.error(f"Failed query for {feature_type}: {query[:500]}")
             
             if data is None:
                 results[feature_type] = []
