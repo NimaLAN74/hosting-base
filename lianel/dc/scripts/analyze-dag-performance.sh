@@ -11,8 +11,14 @@ echo ""
 if command -v airflow &> /dev/null; then
     AIRFLOW_CMD="airflow"
 else
-    echo "Note: Running via docker exec (assuming dc-airflow-webserver-1)"
-    AIRFLOW_CMD="docker exec dc-airflow-webserver-1 airflow"
+    # Try to find Airflow container
+    AIRFLOW_CONTAINER=$(docker ps --filter 'name=airflow' --format '{{.Names}}' | grep -E 'scheduler|webserver' | head -1)
+    if [ -z "$AIRFLOW_CONTAINER" ]; then
+        echo "Error: Airflow container not found"
+        exit 1
+    fi
+    echo "Note: Running via docker exec ($AIRFLOW_CONTAINER)"
+    AIRFLOW_CMD="docker exec $AIRFLOW_CONTAINER airflow"
 fi
 
 echo "=== DAG List ==="
