@@ -125,26 +125,48 @@ def lookup_region(region_id: str, **context) -> Dict[str, Any]:
 def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     """Extract OSM features for a region."""
     ti = context['ti']
-    task_ids = [f'region_{region_id.lower()}.lookup_{region_id.lower()}']
-    lookup_result = ti.xcom_pull(task_ids=task_ids)
     
-    if not lookup_result or not isinstance(lookup_result, dict):
-        return {
-            'region_id': region_id,
-            'features_extracted': 0,
-            'status': 'region_not_found'
-        }
+    # Try to get lookup result from XCom, but don't fail if not available
+    # We'll re-query the database anyway
+    lookup_task_id = f'region_{region_id.lower()}.lookup_{region_id.lower()}'
+    lookup_result = ti.xcom_pull(task_ids=[lookup_task_id])
     
-    # Get region data from lookup task
+    if lookup_result and isinstance(lookup_result, dict):
+        print(f"Retrieved lookup result from XCom for region {region_id}: {lookup_result.get('status')}")
+    else:
+        print(f"XCom lookup result not available for region {region_id}, querying database directly")
+    
+    # Get region data from database (always query to ensure we have geometry)
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     sql = """
         SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
         FROM dim_region
         WHERE region_id = %s AND level_code = 2
     """
-    result = postgres_hook.get_first(sql, parameters=(region_id,))
     
-    if not result or not result[2]:
+    try:
+        result = postgres_hook.get_first(sql, parameters=(region_id,))
+    except Exception as e:
+        print(f"Error querying region {region_id}: {e}")
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'database_error',
+            'error': str(e)
+        }
+    
+    if not result:
+        print(f"Region {region_id} not found in database")
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'region_not_found'
+        }
+    
+    region_id_db, area_km2, geometry_json = result
+    
+    if not geometry_json:
+        print(f"No geometry available for region {region_id}")
         return {
             'region_id': region_id,
             'features_extracted': 0,
@@ -155,18 +177,20 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     
     try:
         # Parse geometry
-        geometry = json.loads(result[2])
-        area_km2 = float(result[1]) if result[1] else 0.0
+        geometry = json.loads(geometry_json)
+        area_km2 = float(area_km2) if area_km2 else 0.0
         
         # Get bounding box
         bbox = get_region_bbox(geometry)
         
-        print(f"Extracting OSM features for region {region_id} (area: {area_km2} km²)")
+        print(f"Extracting OSM features for region {region_id} (area: {area_km2} km², bbox: {bbox})")
         
         # Extract features
         all_features = osm_client.extract_features(bbox, FEATURE_TYPES)
         
         feature_count = sum(len(features) for features in all_features.values())
+        
+        print(f"Extracted {feature_count} total features for region {region_id}: {list(all_features.keys())}")
         
         return {
             'region_id': region_id,
@@ -177,9 +201,24 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
             'status': 'success'
         }
         
+    except json.JSONDecodeError as e:
+        print(f"Error parsing geometry JSON for region {region_id}: {e}")
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'geometry_parse_error',
+            'error': str(e)
+        }
     except Exception as e:
         print(f"Error extracting OSM features for region {region_id}: {e}")
-        raise AirflowException(f"Failed to extract OSM features for region {region_id}: {e}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return {
+            'region_id': region_id,
+            'features_extracted': 0,
+            'status': 'extraction_error',
+            'error': str(e)
+        }
 
 
 def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
@@ -187,20 +226,37 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     ti = context['ti']
     
-    task_ids = [f'region_{region_id.lower()}.extract_{region_id.lower()}']
-    extract_result = ti.xcom_pull(task_ids=task_ids)
+    extract_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
+    extract_result = ti.xcom_pull(task_ids=[extract_task_id])
     
     if not extract_result or not isinstance(extract_result, dict):
+        print(f"No extract result found in XCom for region {region_id}")
         return {
             'region_id': region_id,
             'features_stored': 0,
-            'status': 'no_features'
+            'status': 'no_extract_result'
+        }
+    
+    # Check if extraction had errors
+    extract_status = extract_result.get('status', 'unknown')
+    if extract_status != 'success':
+        print(f"Extraction failed for region {region_id} with status: {extract_status}")
+        error_msg = extract_result.get('error', 'Unknown error')
+        print(f"Error details: {error_msg}")
+        return {
+            'region_id': region_id,
+            'features_stored': 0,
+            'status': f'extraction_failed_{extract_status}',
+            'error': error_msg
         }
     
     all_features = extract_result.get('features', {})
     area_km2 = extract_result.get('area_km2', 0.0)
     
+    print(f"Storing metrics for region {region_id}: {len(all_features)} feature types, area: {area_km2} km²")
+    
     if not all_features:
+        print(f"No features to store for region {region_id}")
         return {
             'region_id': region_id,
             'features_stored': 0,
@@ -271,7 +327,7 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
             )
             features_stored += 1
         
-        # Log extraction
+        # Log extraction (always log, even if no features)
         log_sql = """
             INSERT INTO meta_osm_extraction_log (
                 extraction_date, region_id, feature_types, features_extracted, status
@@ -279,17 +335,22 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
         """
         
         feature_types_array = list(all_features.keys())
+        log_status = 'success' if features_stored > 0 else 'no_features'
         
-        postgres_hook.run(
-            log_sql,
-            parameters=(
-                datetime.now().date(),
-                region_id,
-                feature_types_array,
-                features_stored,
-                'success' if features_stored > 0 else 'no_features'
+        try:
+            postgres_hook.run(
+                log_sql,
+                parameters=(
+                    datetime.now().date(),
+                    region_id,
+                    feature_types_array,
+                    features_stored,
+                    log_status
+                )
             )
-        )
+            print(f"Logged extraction for region {region_id}: {features_stored} features stored, status: {log_status}")
+        except Exception as log_error:
+            print(f"Warning: Failed to log extraction for region {region_id}: {log_error}")
         
         print(f"Successfully stored {features_stored} feature metrics for region {region_id}")
         
@@ -301,6 +362,8 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
         
     except Exception as e:
         print(f"Error storing metrics for region {region_id}: {e}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         
         # Log failure
         try:
