@@ -252,28 +252,30 @@ def get_region_bbox(region_geometry: Any) -> Tuple[float, float, float, float]:
     else:
         geom = region_geometry
     
-    # Get bounds and ensure they're in WGS84 (lat/lon)
-    bounds = geom.bounds  # (min_x, min_y, max_x, max_y)
+    # Get bounds - need to check SRID from PostGIS
+    # PostGIS geometries from dim_region are likely in EPSG:3035 (ETRS89/LAEA Europe)
+    # We need to transform to WGS84 (EPSG:4326) for Overpass API
     
     # Check if coordinates look like lat/lon (should be -180 to 180 for lon, -90 to 90 for lat)
-    # If they're outside these ranges, they're likely in a projected CRS
+    bounds = geom.bounds  # (min_x, min_y, max_x, max_y)
     min_x, min_y, max_x, max_y = bounds
     
+    # If coordinates are outside lat/lon ranges, transform from projected CRS
     if abs(min_x) > 180 or abs(max_x) > 180 or abs(min_y) > 90 or abs(max_y) > 90:
-        # Coordinates are in a projected CRS, need to transform
-        # Try to detect the CRS - common European projections
-        # For now, assume EPSG:3857 (Web Mercator) or EPSG:3035 (ETRS89 / LAEA Europe)
-        # We'll transform the geometry center to get approximate CRS
         try:
-            # Try EPSG:3035 (ETRS89 / LAEA Europe) - common for EU NUTS regions
+            # Common CRS for EU NUTS regions: EPSG:3035 (ETRS89/LAEA Europe)
+            # Transform to WGS84 (EPSG:4326)
             source_crs = pyproj.CRS.from_epsg(3035)
             target_crs = pyproj.CRS.from_epsg(4326)
+            # always_xy=True means input/output is (x, y) = (lon, lat)
             project = pyproj.Transformer.from_crs(source_crs, target_crs, always_xy=True).transform
             geom_wgs84 = transform(project, geom)
             bounds = geom_wgs84.bounds
-            logger.info(f"Transformed bbox from projected CRS to WGS84: {bounds}")
+            logger.info(f"Transformed bbox from EPSG:3035 to WGS84: ({bounds[0]:.6f}, {bounds[1]:.6f}, {bounds[2]:.6f}, {bounds[3]:.6f})")
         except Exception as e:
-            logger.warning(f"Could not transform bbox, using as-is: {e}")
+            logger.error(f"Could not transform bbox from projected CRS: {e}")
+            # If transformation fails, try to use bounds as-is (might work for some cases)
+            logger.warning(f"Using bounds as-is (may cause Overpass API errors): {bounds}")
     
-    # Return as (min_lon, min_lat, max_lon, max_lat)
+    # Return as (min_lon, min_lat, max_lon, max_lat) for Overpass API
     return (bounds[0], bounds[1], bounds[2], bounds[3])
