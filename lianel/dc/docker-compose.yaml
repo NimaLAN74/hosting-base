@@ -35,6 +35,14 @@ services:
     expose:
       - "80"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
     networks:
       - lianel-network
 
@@ -56,6 +64,14 @@ services:
     depends_on:
       - keycloak
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     networks:
       - lianel-network
 

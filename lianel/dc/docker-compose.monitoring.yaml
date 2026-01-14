@@ -9,6 +9,14 @@ services:
     expose:
       - "3100"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     networks:
       - lianel-network
 
@@ -30,7 +38,8 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=2GB'
       - '--web.external-url=https://www.lianel.se/prometheus'
       - '--web.route-prefix=/'
     volumes:
@@ -39,6 +48,14 @@ services:
     expose:
       - "9090"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     networks:
       - lianel-network
 
@@ -60,6 +77,14 @@ services:
     expose:
       - "3000"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     networks:
       - lianel-network
 

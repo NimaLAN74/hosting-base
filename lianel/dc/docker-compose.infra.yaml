@@ -17,12 +17,22 @@ services:
       KC_HTTP_RELATIVE_PATH: "/"
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      # Memory optimization - reduce heap size
+      JAVA_OPTS_APPEND: "-Xmx512m -Xms256m"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: start
     expose:
       - "8080"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     networks:
       - lianel-network
 

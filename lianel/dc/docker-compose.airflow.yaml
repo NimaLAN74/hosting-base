@@ -64,6 +64,11 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: 3600
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@172.18.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-airflow}
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    # Performance optimizations - reduce resource usage
+    AIRFLOW__CORE__PARALLELISM: 8
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: 4
+    AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: 1
+    AIRFLOW__CELERY__MAX_MEM_PER_CHILD: 200000
     AIRFLOW__WEBSERVER__BASE_URL: https://airflow.lianel.se
     AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
@@ -101,7 +106,7 @@ services:
     # Redis is limited to 7.2-bookworm due to licencing change
     # https://redis.io/blog/redis-adopts-dual-source-available-licensing/
     image: redis:7.2-bookworm
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
     expose:
       - 6379
     healthcheck:
@@ -113,6 +118,14 @@ services:
     restart: always
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
   airflow-apiserver:
     <<: *airflow-common
@@ -129,6 +142,14 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -144,6 +165,14 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -159,6 +188,14 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -182,6 +219,14 @@ services:
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-apiserver:
@@ -199,6 +244,14 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
