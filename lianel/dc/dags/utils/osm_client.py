@@ -29,15 +29,16 @@ OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_TIMEOUT = 180  # seconds
 
 # OSM feature queries
+# Note: Overpass QL bbox format is (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
 OSM_FEATURE_QUERIES = {
-    'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}}););out geom;',
-    'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}}););out geom;',
-    'power_substation': '[out:json][timeout:25];(way["power"="substation"]({{bbox}}););out geom;',
-    'industrial_area': '[out:json][timeout:25];(way["landuse"="industrial"]({{bbox}}););out geom;',
-    'residential_building': '[out:json][timeout:25];(way["building"~"^(house|apartments|residential)$"]({{bbox}}););out geom;',
-    'commercial_building': '[out:json][timeout:25];(way["building"~"^(commercial|retail|office)$"]({{bbox}}););out geom;',
-    'railway_station': '[out:json][timeout:25];(way["railway"="station"]({{bbox}}););out geom;',
-    'airport': '[out:json][timeout:25];(way["aeroway"="aerodrome"]({{bbox}}););out geom;',
+    'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}});relation["power"="plant"]({{bbox}}););out geom;',
+    'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}});relation["power"="generator"]({{bbox}}););out geom;',
+    'power_substation': '[out:json][timeout:25];(way["power"="substation"]({{bbox}});relation["power"="substation"]({{bbox}}););out geom;',
+    'industrial_area': '[out:json][timeout:25];(way["landuse"="industrial"]({{bbox}});relation["landuse"="industrial"]({{bbox}}););out geom;',
+    'residential_building': '[out:json][timeout:25];(way["building"~"^(house|apartments|residential)$"]({{bbox}});relation["building"~"^(house|apartments|residential)$"]({{bbox}}););out geom;',
+    'commercial_building': '[out:json][timeout:25];(way["building"~"^(commercial|retail|office)$"]({{bbox}});relation["building"~"^(commercial|retail|office)$"]({{bbox}}););out geom;',
+    'railway_station': '[out:json][timeout:25];(way["railway"="station"]({{bbox}});relation["railway"="station"]({{bbox}}););out geom;',
+    'airport': '[out:json][timeout:25];(way["aeroway"="aerodrome"]({{bbox}});relation["aeroway"="aerodrome"]({{bbox}}););out geom;',
 }
 
 
@@ -133,6 +134,7 @@ class OSMClient:
                 continue
             
             query_template = OSM_FEATURE_QUERIES[feature_type]
+            # Overpass QL bbox format: (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
             query = query_template.replace('{{bbox}}', f'{min_lat},{min_lon},{max_lat},{max_lon}')
             
             logger.info(f"Extracting {feature_type} features from OSM...")

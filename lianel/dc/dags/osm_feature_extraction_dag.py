@@ -226,8 +226,13 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     ti = context['ti']
     
+    # Try multiple XCom key formats to handle TaskGroup structure
     extract_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
     extract_result = ti.xcom_pull(task_ids=[extract_task_id])
+    
+    # If not found, try without TaskGroup prefix (fallback)
+    if not extract_result:
+        extract_result = ti.xcom_pull(key=None, task_ids=[extract_task_id], include_prior_dates=True)
     
     if not extract_result or not isinstance(extract_result, dict):
         print(f"No extract result found in XCom for region {region_id}")
