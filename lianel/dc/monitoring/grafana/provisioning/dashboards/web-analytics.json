@@ -165,7 +165,7 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "count(sum by (client_ip) (count_over_time({container=\"nginx-proxy\"} | json | client_ip!=\"\" | __error__=\"\" [1h])))",
+          "expr": "count(sum by (remote_addr) (count_over_time({container=\"nginx-proxy\"} | json | remote_addr!=\"\" | __error__=\"\" [1h])))",
           "refId": "A",
           "instant": true
         }
@@ -312,9 +312,9 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "sum by (hostname) (count_over_time({container=\"nginx-proxy\"} | json | hostname!=\"\" | __error__=\"\" [1h]))",
+          "expr": "sum by (host) (count_over_time({container=\"nginx-proxy\"} | json | host!=\"\" | __error__=\"\" [1h]))",
           "refId": "A",
-          "legendFormat": "{{hostname}}"
+          "legendFormat": "{{host}}"
         }
       ],
       "title": "Requests by Host",
