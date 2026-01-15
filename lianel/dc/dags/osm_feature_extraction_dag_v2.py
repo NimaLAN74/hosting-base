@@ -190,26 +190,149 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         bbox = get_region_bbox(region_geometry)
         print(f"Extracting features for region {region_id}, bbox: {bbox}")
         
-        # Extract features (one type at a time to reduce memory)
+        # Extract and store features one type at a time to reduce memory usage
+        # Process immediately instead of storing all in memory
         all_features = {}
         feature_count = 0
+        postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
+        snapshot_year = datetime.now().year
         
         for feature_type in FEATURE_TYPES:
             try:
                 print(f"Extracting {feature_type} for region {region_id}...")
-                features = osm_client.extract_features(bbox, feature_types=[feature_type])
+                features_result = osm_client.extract_features(bbox, feature_types=[feature_type])
                 
-                if features and feature_type in features:
-                    all_features[feature_type] = features[feature_type]
-                    feature_count += len(features[feature_type])
-                    print(f"Found {len(features[feature_type])} {feature_type} features")
+                if features_result and feature_type in features_result:
+                    features = features_result[feature_type]
+                    current_feature_count = len(features)
+                    feature_count += current_feature_count
+                    print(f"Found {current_feature_count} {feature_type} features")
+                    
+                    # Process features in chunks if there are many
+                    CHUNK_SIZE = 500
+                    if current_feature_count > CHUNK_SIZE:
+                        print(f"Processing {feature_type} in chunks of {CHUNK_SIZE}...")
+                        total_count = 0
+                        total_area = 0.0
+                        for i in range(0, current_feature_count, CHUNK_SIZE):
+                            chunk = features[i:i + CHUNK_SIZE]
+                            if chunk:
+                                metrics = osm_client.calculate_feature_metrics(chunk, area_km2)
+                                total_count += metrics['count']
+                                total_area += metrics['area_km2']
+                                # Store metrics for this chunk
+                                count_feature_name = f"{feature_type}_count"
+                                count_sql = """
+                                    INSERT INTO fact_geo_region_features (
+                                        region_id, feature_name, feature_value, snapshot_year
+                                    ) VALUES (%s, %s, %s, %s)
+                                    ON CONFLICT (region_id, feature_name, snapshot_year)
+                                    DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                                  updated_at = CURRENT_TIMESTAMP
+                                """
+                                postgres_hook.run(
+                                    count_sql,
+                                    parameters=(region_id, count_feature_name, metrics['count'], snapshot_year)
+                                )
+                                if metrics['area_km2'] > 0:
+                                    area_feature_name = f"{feature_type}_area_km2"
+                                    area_sql = """
+                                        INSERT INTO fact_geo_region_features (
+                                            region_id, feature_name, feature_value, snapshot_year
+                                        ) VALUES (%s, %s, %s, %s)
+                                        ON CONFLICT (region_id, feature_name, snapshot_year)
+                                        DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                                      updated_at = CURRENT_TIMESTAMP
+                                    """
+                                    postgres_hook.run(
+                                        area_sql,
+                                        parameters=(region_id, area_feature_name, metrics['area_km2'], snapshot_year)
+                                    )
+                                print(f"Stored metrics for {feature_type} chunk {i//CHUNK_SIZE + 1}: count={metrics['count']}")
+                            del chunk
+                            import gc
+                            gc.collect()
+                        
+                        # Use aggregated metrics
+                        metrics = {
+                            'count': total_count,
+                            'area_km2': total_area,
+                            'density_per_km2': total_count / area_km2 if area_km2 > 0 else 0.0
+                        }
+                    else:
+                        # Calculate and store metrics immediately to free memory
+                        if features:
+                            metrics = osm_client.calculate_feature_metrics(features, area_km2)
+                            # Store count
+                            count_feature_name = f"{feature_type}_count"
+                            count_sql = """
+                                INSERT INTO fact_geo_region_features (
+                                    region_id, feature_name, feature_value, snapshot_year
+                                ) VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (region_id, feature_name, snapshot_year)
+                                DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                              updated_at = CURRENT_TIMESTAMP
+                            """
+                            postgres_hook.run(
+                                count_sql,
+                                parameters=(region_id, count_feature_name, metrics['count'], snapshot_year)
+                            )
+                            
+                            # Store area if applicable
+                            if metrics['area_km2'] > 0:
+                                area_feature_name = f"{feature_type}_area_km2"
+                                area_sql = """
+                                    INSERT INTO fact_geo_region_features (
+                                        region_id, feature_name, feature_value, snapshot_year
+                                    ) VALUES (%s, %s, %s, %s)
+                                    ON CONFLICT (region_id, feature_name, snapshot_year)
+                                    DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                                  updated_at = CURRENT_TIMESTAMP
+                                """
+                                postgres_hook.run(
+                                    area_sql,
+                                    parameters=(region_id, area_feature_name, metrics['area_km2'], snapshot_year)
+                                )
+                            
+                            # Store density
+                            density_feature_name = f"{feature_type}_density_per_km2"
+                            density_sql = """
+                                INSERT INTO fact_geo_region_features (
+                                    region_id, feature_name, feature_value, snapshot_year
+                                ) VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (region_id, feature_name, snapshot_year)
+                                DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                              updated_at = CURRENT_TIMESTAMP
+                            """
+                            postgres_hook.run(
+                                density_sql,
+                                parameters=(region_id, density_feature_name, metrics['density_per_km2'], snapshot_year)
+                            )
+                            
+                            print(f"Stored metrics for {feature_type}: count={metrics['count']}, area={metrics['area_km2']:.2f} km²")
+                    
+                    # Store minimal info for summary (just type name, not full features)
+                    all_features[feature_type] = current_feature_count  # Store count only, not full features
+                else:
+                    all_features[feature_type] = 0
                 
-                # Small delay between feature types
+                # Clear features from memory explicitly
+                if 'features_result' in locals():
+                    del features_result
+                if 'features' in locals():
+                    del features
+                import gc
+                gc.collect()
+                
+                # Delay between feature types to reduce memory pressure
                 import time
-                time.sleep(1)
+                time.sleep(3)  # Increased delay
                 
             except Exception as e:
                 print(f"Error extracting {feature_type} for region {region_id}: {e}")
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+                all_features[feature_type] = 0
                 # Continue with other feature types
                 continue
         
