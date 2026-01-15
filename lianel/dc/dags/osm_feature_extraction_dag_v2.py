@@ -227,8 +227,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                                         region_id, feature_name, feature_value, snapshot_year
                                     ) VALUES (%s, %s, %s, %s)
                                     ON CONFLICT (region_id, feature_name, snapshot_year)
-                                    DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                                                  updated_at = CURRENT_TIMESTAMP
+                                    DO UPDATE SET feature_value = EXCLUDED.feature_value
                                 """
                                 postgres_hook.run(
                                     count_sql,
@@ -241,8 +240,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                                             region_id, feature_name, feature_value, snapshot_year
                                         ) VALUES (%s, %s, %s, %s)
                                         ON CONFLICT (region_id, feature_name, snapshot_year)
-                                        DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                                                      updated_at = CURRENT_TIMESTAMP
+                                        DO UPDATE SET feature_value = EXCLUDED.feature_value
                                     """
                                     postgres_hook.run(
                                         area_sql,
@@ -270,8 +268,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                                     region_id, feature_name, feature_value, snapshot_year
                                 ) VALUES (%s, %s, %s, %s)
                                 ON CONFLICT (region_id, feature_name, snapshot_year)
-                                DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                                              updated_at = CURRENT_TIMESTAMP
+                                DO UPDATE SET feature_value = EXCLUDED.feature_value
                             """
                             postgres_hook.run(
                                 count_sql,
