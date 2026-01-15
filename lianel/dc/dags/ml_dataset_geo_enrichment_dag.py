@@ -174,7 +174,22 @@ def extract_geo_enrichment_features(**context):
             r.urbn_type,
             r.coast_type
         FROM dim_region r
-        WHERE r.level_code = 0
+        WHERE r.level_code IN (0, 2)  -- Support both NUTS0 and NUTS2
+    ),
+    osm_features AS (
+        SELECT 
+            region_id,
+            snapshot_year as year,
+            MAX(CASE WHEN feature_name = 'power_plant_count' THEN feature_value ELSE 0 END)::INTEGER as power_plant_count,
+            MAX(CASE WHEN feature_name = 'power_generator_count' THEN feature_value ELSE 0 END)::INTEGER as power_generator_count,
+            MAX(CASE WHEN feature_name = 'power_substation_count' THEN feature_value ELSE 0 END)::INTEGER as power_substation_count,
+            MAX(CASE WHEN feature_name = 'industrial_area_area_km2' THEN feature_value ELSE 0 END) as industrial_area_km2,
+            MAX(CASE WHEN feature_name = 'railway_station_count' THEN feature_value ELSE 0 END)::INTEGER as railway_station_count,
+            MAX(CASE WHEN feature_name = 'airport_count' THEN feature_value ELSE 0 END)::INTEGER as airport_count,
+            COUNT(*) as osm_feature_count
+        FROM fact_geo_region_features
+        WHERE snapshot_year = EXTRACT(YEAR FROM CURRENT_DATE)
+        GROUP BY region_id, snapshot_year
     )
     SELECT 
         r.region_id,
