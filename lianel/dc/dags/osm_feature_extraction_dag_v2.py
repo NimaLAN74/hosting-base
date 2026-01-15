@@ -1,27 +1,14 @@
 """
-OSM Feature Extraction DAG - Batch Processing Version
+OSM Feature Extraction DAG - Optimized Version
 
 This DAG extracts OpenStreetMap features and aggregates them to NUTS2 regions.
-Optimized to process regions in small batches sequentially to avoid memory and rate limiting issues.
+Optimized to process regions in small batches to avoid memory and rate limiting issues.
 
 Strategy:
 - Process regions in batches of 3
-- Each batch runs sequentially (one batch after another)
-- Within each batch, process regions sequentially (one at a time)
+- Each batch runs sequentially
+- Within each batch, process 1 region at a time (max_active_tasks=1)
 - This prevents OOM kills and Overpass API rate limiting
-
-Features include:
-- Energy infrastructure (power plants, generators, substations)
-- Industrial areas
-- Residential and commercial buildings
-- Transport infrastructure
-
-Features are aggregated per region and stored in fact_geo_region_features.
-
-Subtasks:
-- Region lookup: Get region geometry
-- Feature extraction: Extract features from OSM
-- Metric storage: Calculate and store metrics
 """
 
 from datetime import datetime, timedelta
@@ -47,18 +34,18 @@ default_args = {
     'email_on_retry': False,
     'retries': 2,
     'retry_delay': timedelta(minutes=5),
-    'execution_timeout': timedelta(hours=2),  # Reduced to prevent long-running tasks
+    'execution_timeout': timedelta(hours=2),  # Reduced from 6 hours
 }
 
 dag = DAG(
-    'osm_feature_extraction',
+    'osm_feature_extraction_v2',
     default_args=default_args,
-    description='Extract OSM features and aggregate to NUTS2 regions (batch processing)',
+    description='Extract OSM features and aggregate to NUTS2 regions (optimized)',
     schedule='0 4 * * 0',  # Weekly on Sunday at 04:00 UTC
     catchup=False,
-    tags=['data-ingestion', 'osm', 'geospatial', 'features'],
+    tags=['data-ingestion', 'osm', 'geospatial', 'features', 'optimized'],
     max_active_runs=1,
-    max_active_tasks=1,  # Process one region at a time to avoid memory issues and OOM kills
+    max_active_tasks=1,  # Process one region at a time to avoid memory issues
 )
 
 # Feature types to extract
@@ -73,22 +60,15 @@ FEATURE_TYPES = [
     'airport',
 ]
 
-
-def get_nuts2_regions(**context) -> List[str]:
-    """Get list of NUTS2 regions to process."""
-    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
-    
-    sql = """
-        SELECT region_id
-        FROM dim_region
-        WHERE level_code = 2
-        ORDER BY region_id
-    """
-    
-    results = postgres_hook.get_records(sql)
-    regions = [row[0] for row in results]
-    
-    return regions
+# Process regions in batches to avoid overwhelming the system
+BATCH_SIZE = 3  # Process 3 regions per batch
+REGION_BATCHES = [
+    ['SE11', 'SE12', 'SE21'],  # Batch 1: Sweden
+    ['SE22', 'SE23', 'DE11'],  # Batch 2: Sweden + Germany
+    ['DE12', 'DE21', 'DE22'],  # Batch 3: Germany
+    ['DE30', 'FR10', 'FR21'],  # Batch 4: Germany + France
+    ['FR22', 'FR30', 'FR41'],  # Batch 5: France
+]
 
 
 def lookup_region(region_id: str, **context) -> Dict[str, Any]:
@@ -104,7 +84,7 @@ def lookup_region(region_id: str, **context) -> Dict[str, Any]:
     try:
         result = postgres_hook.get_first(sql, parameters=(region_id,))
         if not result:
-            print(f"Region {region_id} not found or not NUTS2 level")
+            print(f"Region {region_id} not found in database")
             return {
                 'region_id': region_id,
                 'area_km2': 0.0,
@@ -118,7 +98,7 @@ def lookup_region(region_id: str, **context) -> Dict[str, Any]:
             print(f"No geometry available for region {region_id}")
             return {
                 'region_id': region_id,
-                'area_km2': float(area_km2) if area_km2 else 0.0,
+                'area_km2': area_km2 or 0.0,
                 'geometry_json': None,
                 'status': 'no_geometry'
             }
@@ -131,7 +111,7 @@ def lookup_region(region_id: str, **context) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        print(f"Error looking up region {region_id}: {e}")
+        print(f"Error querying region {region_id}: {e}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
         return {
@@ -147,48 +127,22 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     """Extract OSM features for a region."""
     ti = context['ti']
     
-    # Get region data from lookup task XCom
-    lookup_task_id = f'region_{region_id.lower()}.lookup_{region_id.lower()}'
+    # Get region data from lookup task
+    lookup_task_id = f'batch_{context["params"]["batch_num"]}.region_{region_id.lower()}.lookup_{region_id.lower()}'
     region_data = ti.xcom_pull(task_ids=[lookup_task_id])
     
     # Handle XCom return format (list or dict)
     if isinstance(region_data, list) and region_data:
         region_data = region_data[0]
     elif not isinstance(region_data, dict):
-        print(f"No region data found in XCom for region {region_id}, querying database directly")
-        # Fallback: query database directly
-        postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
-        sql = """
-            SELECT region_id, area_km2, ST_AsGeoJSON(geometry) as geometry_json
-            FROM dim_region
-            WHERE region_id = %s AND level_code = 2
-        """
-        try:
-            result = postgres_hook.get_first(sql, parameters=(region_id,))
-            if result:
-                region_id_db, area_km2, geometry_json = result
-                region_data = {
-                    'region_id': region_id_db,
-                    'area_km2': float(area_km2) if area_km2 else 0.0,
-                    'geometry_json': geometry_json,
-                    'status': 'success'
-                }
-            else:
-                return {
-                    'region_id': region_id,
-                    'features_extracted': 0,
-                    'status': 'region_not_found'
-                }
-        except Exception as e:
-            return {
-                'region_id': region_id,
-                'features_extracted': 0,
-                'status': 'database_error',
-                'error': str(e)
-            }
+        # Try alternative task ID format
+        alt_task_id = f'region_{region_id.lower()}.lookup_{region_id.lower()}'
+        region_data = ti.xcom_pull(task_ids=[alt_task_id])
+        if isinstance(region_data, list) and region_data:
+            region_data = region_data[0]
     
     if not region_data or not isinstance(region_data, dict):
-        print(f"No region data available for region {region_id}")
+        print(f"No region data found in XCom for region {region_id}")
         return {
             'region_id': region_id,
             'features_extracted': 0,
@@ -225,9 +179,9 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         
         # Get bounding box
         bbox = get_region_bbox(region_geometry)
-        print(f"Extracting features for region {region_id}, bbox: {bbox}, area: {area_km2} km²")
+        print(f"Extracting features for region {region_id}, bbox: {bbox}")
         
-        # Extract features one type at a time to reduce memory usage
+        # Extract features (one type at a time to reduce memory)
         all_features = {}
         feature_count = 0
         
@@ -241,7 +195,7 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                     feature_count += len(features[feature_type])
                     print(f"Found {len(features[feature_type])} {feature_type} features")
                 
-                # Small delay between feature types to reduce memory pressure
+                # Small delay between feature types
                 import time
                 time.sleep(1)
                 
@@ -286,13 +240,20 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     ti = context['ti']
     
-    # Try multiple XCom key formats to handle TaskGroup structure
-    extract_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
+    # Get extract result from XCom
+    batch_num = context["params"]["batch_num"]
+    extract_task_id = f'batch_{batch_num}.region_{region_id.lower()}.extract_{region_id.lower()}'
     extract_result = ti.xcom_pull(task_ids=[extract_task_id])
     
-    # If not found, try without TaskGroup prefix (fallback)
-    if not extract_result:
-        extract_result = ti.xcom_pull(key=None, task_ids=[extract_task_id], include_prior_dates=True)
+    # Handle XCom return format
+    if isinstance(extract_result, list) and extract_result:
+        extract_result = extract_result[0]
+    elif not isinstance(extract_result, dict):
+        # Try alternative format
+        alt_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
+        extract_result = ti.xcom_pull(task_ids=[alt_task_id])
+        if isinstance(extract_result, list) and extract_result:
+            extract_result = extract_result[0]
     
     if not extract_result or not isinstance(extract_result, dict):
         print(f"No extract result found in XCom for region {region_id}")
@@ -392,7 +353,7 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
             )
             features_stored += 1
         
-        # Log extraction (always log, even if no features)
+        # Log extraction
         log_sql = """
             INSERT INTO meta_osm_extraction_log (
                 extraction_date, region_id, feature_types, features_extracted, status
@@ -455,25 +416,7 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
         raise AirflowException(f"Failed to store metrics for region {region_id}: {e}")
 
 
-# Get regions task
-get_regions_task = PythonOperator(
-    task_id='get_nuts2_regions',
-    python_callable=get_nuts2_regions,
-    dag=dag,
-)
-
-# Process regions in batches to avoid overwhelming the system
-# Each batch processes sequentially, one region at a time
-BATCH_SIZE = 3
-REGION_BATCHES = [
-    ['SE11', 'SE12', 'SE21'],  # Batch 1: Sweden
-    ['SE22', 'SE23', 'DE11'],  # Batch 2: Sweden + Germany
-    ['DE12', 'DE21', 'DE22'],  # Batch 3: Germany
-    ['DE30', 'FR10', 'FR21'],  # Batch 4: Germany + France
-    ['FR22', 'FR30', 'FR41'],  # Batch 5: France
-]
-
-# Create batches - each batch processes sequentially
+# Create batches
 batch_groups = []
 previous_batch = None
 
@@ -498,6 +441,7 @@ for batch_num, batch_regions in enumerate(REGION_BATCHES, start=1):
                     task_id=f'extract_{region_lower}',
                     python_callable=extract_region_features,
                     op_kwargs={'region_id': region_id},
+                    params={'batch_num': batch_num},
                     dag=dag,
                 )
                 
@@ -506,6 +450,7 @@ for batch_num, batch_regions in enumerate(REGION_BATCHES, start=1):
                     task_id=f'store_{region_lower}',
                     python_callable=store_region_metrics,
                     op_kwargs={'region_id': region_id},
+                    params={'batch_num': batch_num},
                     dag=dag,
                 )
                 
@@ -514,13 +459,13 @@ for batch_num, batch_regions in enumerate(REGION_BATCHES, start=1):
                 
                 region_tasks.append(region_group)
         
-        # Within batch, process regions sequentially (one after another)
+        # Within batch, process regions sequentially
         for i in range(len(region_tasks) - 1):
             region_tasks[i] >> region_tasks[i + 1]
     
     batch_groups.append(batch_group)
     
-    # Process batches sequentially (one batch after another)
+    # Process batches sequentially
     if previous_batch:
         previous_batch >> batch_group
     previous_batch = batch_group
