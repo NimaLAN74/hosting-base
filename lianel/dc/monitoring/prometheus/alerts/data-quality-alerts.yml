@@ -30,7 +30,7 @@ groups:
           (
             count(fact_energy_annual) 
             < 
-            (avg_over_time(count(fact_energy_annual)[7d]) * 0.8)
+            (avg_over_time(count(fact_energy_annual[7d]) * 0.8))
           )
         for: 1h
         labels:
