@@ -9,7 +9,7 @@
   "links": [],
   "panels": [
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -57,7 +57,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -87,7 +87,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -139,7 +139,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -169,7 +169,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -221,7 +221,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -251,7 +251,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -303,7 +303,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -333,7 +333,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -374,7 +374,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "time_series",
@@ -404,7 +404,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -445,7 +445,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",

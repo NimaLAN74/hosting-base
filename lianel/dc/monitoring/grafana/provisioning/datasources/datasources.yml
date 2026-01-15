@@ -33,3 +33,22 @@ datasources:
       timescaledb: false
     isDefault: false
     editable: true
+
+  - name: PostgreSQL Airflow
+    type: postgres
+    access: proxy
+    url: 172.18.0.1:5432
+    database: airflow
+    user: airflow
+    uid: postgres-airflow
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 100
+      maxIdleConns: 100
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+    isDefault: false
+    editable: true

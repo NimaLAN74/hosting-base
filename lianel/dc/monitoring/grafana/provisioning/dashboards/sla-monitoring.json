@@ -68,7 +68,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -120,7 +120,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -151,7 +151,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -203,7 +203,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -234,7 +234,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -286,7 +286,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -367,7 +367,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"energy-service\"}[5m]))",
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
           "refId": "A"
         }
       ],
@@ -376,7 +376,7 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -428,7 +428,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",
@@ -532,7 +532,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -598,7 +598,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "time_series",
@@ -628,7 +628,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": "PostgreSQL Airflow",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -669,7 +669,7 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "postgres-energy"
+            "uid": "postgres-airflow"
           },
           "editorMode": "code",
           "format": "table",

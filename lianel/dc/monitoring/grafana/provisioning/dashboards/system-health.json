@@ -568,8 +568,8 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "container_memory:bytes / 1024 / 1024",
-          "legendFormat": "{{container_id}}",
+          "expr": "container_memory_usage_bytes{id=~\"/system.slice/docker-.+\"} / 1024 / 1024",
+          "legendFormat": "{{id}}",
           "refId": "A"
         }
       ],
