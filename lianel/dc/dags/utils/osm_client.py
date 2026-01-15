@@ -31,15 +31,16 @@ OVERPASS_TIMEOUT = 180  # seconds
 # OSM feature queries
 # Overpass QL bbox format: (south,west,north,east) = (min_lat,min_lon,max_lat,max_lon)
 # Format: way["key"="value"](south,west,north,east)
+# Limit results to prevent memory issues - use (limit:1000) to cap results
 OSM_FEATURE_QUERIES = {
-    'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}});relation["power"="plant"]({{bbox}}););out geom;',
-    'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}});relation["power"="generator"]({{bbox}}););out geom;',
-    'power_substation': '[out:json][timeout:25];(way["power"="substation"]({{bbox}});relation["power"="substation"]({{bbox}}););out geom;',
-    'industrial_area': '[out:json][timeout:25];(way["landuse"="industrial"]({{bbox}});relation["landuse"="industrial"]({{bbox}}););out geom;',
-    'residential_building': '[out:json][timeout:25];(way["building"~"^(house|apartments|residential)$"]({{bbox}});relation["building"~"^(house|apartments|residential)$"]({{bbox}}););out geom;',
-    'commercial_building': '[out:json][timeout:25];(way["building"~"^(commercial|retail|office)$"]({{bbox}});relation["building"~"^(commercial|retail|office)$"]({{bbox}}););out geom;',
-    'railway_station': '[out:json][timeout:25];(way["railway"="station"]({{bbox}});relation["railway"="station"]({{bbox}}););out geom;',
-    'airport': '[out:json][timeout:25];(way["aeroway"="aerodrome"]({{bbox}});relation["aeroway"="aerodrome"]({{bbox}}););out geom;',
+    'power_plant': '[out:json][timeout:25];(way["power"="plant"]({{bbox}})(limit:500);relation["power"="plant"]({{bbox}})(limit:100););out geom;',
+    'power_generator': '[out:json][timeout:25];(way["power"="generator"]({{bbox}})(limit:1000);relation["power"="generator"]({{bbox}})(limit:200););out geom;',
+    'power_substation': '[out:json][timeout:25];(way["power"="substation"]({{bbox}})(limit:1000);relation["power"="substation"]({{bbox}})(limit:200););out geom;',
+    'industrial_area': '[out:json][timeout:25];(way["landuse"="industrial"]({{bbox}})(limit:500);relation["landuse"="industrial"]({{bbox}})(limit:100););out geom;',
+    'residential_building': '[out:json][timeout:25];(way["building"~"^(house|apartments|residential)$"]({{bbox}})(limit:2000);relation["building"~"^(house|apartments|residential)$"]({{bbox}})(limit:200););out geom;',
+    'commercial_building': '[out:json][timeout:25];(way["building"~"^(commercial|retail|office)$"]({{bbox}})(limit:1000);relation["building"~"^(commercial|retail|office)$"]({{bbox}})(limit:200););out geom;',
+    'railway_station': '[out:json][timeout:25];(way["railway"="station"]({{bbox}})(limit:200);relation["railway"="station"]({{bbox}})(limit:50););out geom;',
+    'airport': '[out:json][timeout:25];(way["aeroway"="aerodrome"]({{bbox}})(limit:100);relation["aeroway"="aerodrome"]({{bbox}})(limit:50););out geom;',
 }
 
 
@@ -192,11 +193,16 @@ class OSMClient:
                 results[feature_type] = []
                 continue
             
-            # Parse features from response
+            # Parse features from response - limit to prevent memory issues
             features = []
+            max_features = 2000  # Hard limit per feature type to prevent OOM
             if 'elements' in data:
                 for element in data['elements']:
+                    if len(features) >= max_features:
+                        logger.warning(f"Reached feature limit ({max_features}) for {feature_type}, truncating results")
+                        break
                     if element['type'] == 'way' and 'geometry' in element:
+                        # Store minimal data - only what's needed for metrics
                         features.append({
                             'id': element.get('id'),
                             'type': feature_type,
@@ -205,7 +211,10 @@ class OSMClient:
                         })
             
             results[feature_type] = features
-            logger.info(f"Extracted {len(features)} {feature_type} features")
+            if len(features) >= max_features:
+                logger.warning(f"Extracted {len(features)} {feature_type} features (truncated at {max_features})")
+            else:
+                logger.info(f"Extracted {len(features)} {feature_type} features")
             
             # Rate limiting: wait between feature type requests to avoid hitting rate limits
             # Longer delay if request failed (may have been rate limited)

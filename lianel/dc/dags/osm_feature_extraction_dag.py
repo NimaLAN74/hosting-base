@@ -61,14 +61,16 @@ dag = DAG(
     max_active_tasks=1,  # Process one region at a time to avoid memory issues and OOM kills
 )
 
-# Feature types to extract
+# Feature types to extract - reduced set to avoid memory issues
+# Focus on essential features for energy analysis
 FEATURE_TYPES = [
     'power_plant',
     'power_generator',
     'power_substation',
     'industrial_area',
-    'residential_building',
-    'commercial_building',
+    # Removed residential/commercial buildings - too many features, causing OOM
+    # 'residential_building',
+    # 'commercial_building',
     'railway_station',
     'airport',
 ]
