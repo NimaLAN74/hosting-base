@@ -230,8 +230,34 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                     print(f"Found {len(features)} {feature_type} features")
                     
                     # Calculate and store metrics immediately to free memory
+                    # Process in smaller chunks if too many features
                     if features:
-                        metrics = osm_client.calculate_feature_metrics(features, area_km2)
+                        # For very large feature sets, process in chunks
+                        chunk_size = 500
+                        if len(features) > chunk_size:
+                            print(f"Processing {len(features)} features in chunks of {chunk_size}")
+                            total_count = 0
+                            total_area = 0.0
+                            
+                            for i in range(0, len(features), chunk_size):
+                                chunk = features[i:i+chunk_size]
+                                chunk_metrics = osm_client.calculate_feature_metrics(chunk, area_km2)
+                                total_count += chunk_metrics['count']
+                                total_area += chunk_metrics['area_km2']
+                                
+                                # Clear chunk from memory
+                                del chunk
+                                import gc
+                                gc.collect()
+                            
+                            # Use aggregated metrics
+                            metrics = {
+                                'count': total_count,
+                                'area_km2': total_area,
+                                'density_per_km2': total_count / area_km2 if area_km2 > 0 else 0.0
+                            }
+                        else:
+                            metrics = osm_client.calculate_feature_metrics(features, area_km2)
                         
                         # Store count
                         count_feature_name = f"{feature_type}_count"
@@ -283,17 +309,21 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
                     
                     # Store minimal info for summary (just type name, not full features)
                     all_features[feature_type] = len(features)  # Store count only, not full features
+                    
+                    # Clear features from memory immediately
+                    del features
                 else:
                     all_features[feature_type] = 0
                 
-                # Clear features from memory explicitly
-                del features_result
+                # Clear features_result from memory explicitly
+                if 'features_result' in locals():
+                    del features_result
                 import gc
                 gc.collect()
                 
                 # Delay between feature types to reduce memory pressure
                 import time
-                time.sleep(2)  # Increased delay
+                time.sleep(3)  # Increased delay to allow memory cleanup
                 
             except Exception as e:
                 print(f"Error extracting {feature_type} for region {region_id}: {e}")
