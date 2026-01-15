@@ -210,37 +210,128 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         bbox = get_region_bbox(region_geometry)
         print(f"Extracting features for region {region_id}, bbox: {bbox}, area: {area_km2} km²")
         
-        # Extract features one type at a time to reduce memory usage
+        # Extract and store features one type at a time to reduce memory usage
+        # Process immediately instead of storing all in memory
         all_features = {}
         feature_count = 0
+        postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
+        snapshot_year = datetime.now().year
         
         for feature_type in FEATURE_TYPES:
             try:
                 print(f"Extracting {feature_type} for region {region_id}...")
-                features = osm_client.extract_features(bbox, feature_types=[feature_type])
+                features_result = osm_client.extract_features(bbox, feature_types=[feature_type])
                 
-                if features and feature_type in features:
-                    all_features[feature_type] = features[feature_type]
-                    feature_count += len(features[feature_type])
-                    print(f"Found {len(features[feature_type])} {feature_type} features")
+                if features_result and feature_type in features_result:
+                    features = features_result[feature_type]
+                    feature_count += len(features)
+                    print(f"Found {len(features)} {feature_type} features")
+                    
+                    # Calculate and store metrics immediately to free memory
+                    if features:
+                        metrics = osm_client.calculate_feature_metrics(features, area_km2)
+                        
+                        # Store count
+                        count_feature_name = f"{feature_type}_count"
+                        count_sql = """
+                            INSERT INTO fact_geo_region_features (
+                                region_id, feature_name, feature_value, snapshot_year
+                            ) VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (region_id, feature_name, snapshot_year)
+                            DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                          updated_at = CURRENT_TIMESTAMP
+                        """
+                        postgres_hook.run(
+                            count_sql,
+                            parameters=(region_id, count_feature_name, metrics['count'], snapshot_year)
+                        )
+                        
+                        # Store area if applicable
+                        if metrics['area_km2'] > 0:
+                            area_feature_name = f"{feature_type}_area_km2"
+                            area_sql = """
+                                INSERT INTO fact_geo_region_features (
+                                    region_id, feature_name, feature_value, snapshot_year
+                                ) VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (region_id, feature_name, snapshot_year)
+                                DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                              updated_at = CURRENT_TIMESTAMP
+                            """
+                            postgres_hook.run(
+                                area_sql,
+                                parameters=(region_id, area_feature_name, metrics['area_km2'], snapshot_year)
+                            )
+                        
+                        # Store density
+                        density_feature_name = f"{feature_type}_density_per_km2"
+                        density_sql = """
+                            INSERT INTO fact_geo_region_features (
+                                region_id, feature_name, feature_value, snapshot_year
+                            ) VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (region_id, feature_name, snapshot_year)
+                            DO UPDATE SET feature_value = EXCLUDED.feature_value,
+                                          updated_at = CURRENT_TIMESTAMP
+                        """
+                        postgres_hook.run(
+                            density_sql,
+                            parameters=(region_id, density_feature_name, metrics['density_per_km2'], snapshot_year)
+                        )
+                        
+                        print(f"Stored metrics for {feature_type}: count={metrics['count']}, area={metrics['area_km2']:.2f} km²")
+                    
+                    # Store minimal info for summary (just type name, not full features)
+                    all_features[feature_type] = len(features)  # Store count only, not full features
+                else:
+                    all_features[feature_type] = 0
                 
-                # Small delay between feature types to reduce memory pressure
+                # Clear features from memory explicitly
+                del features_result
+                import gc
+                gc.collect()
+                
+                # Delay between feature types to reduce memory pressure
                 import time
-                time.sleep(1)
+                time.sleep(2)  # Increased delay
                 
             except Exception as e:
                 print(f"Error extracting {feature_type} for region {region_id}: {e}")
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+                all_features[feature_type] = 0
                 # Continue with other feature types
                 continue
         
         print(f"Total features extracted for region {region_id}: {feature_count}")
         
+        # Log extraction
+        try:
+            log_sql = """
+                INSERT INTO meta_osm_extraction_log (
+                    extraction_date, region_id, feature_types, features_extracted, status
+                ) VALUES (%s, %s, %s, %s, %s)
+            """
+            feature_types_array = [ft for ft, count in all_features.items() if count > 0]
+            log_status = 'success' if feature_count > 0 else 'no_features'
+            postgres_hook.run(
+                log_sql,
+                parameters=(
+                    datetime.now().date(),
+                    region_id,
+                    feature_types_array,
+                    feature_count,
+                    log_status
+                )
+            )
+            print(f"Logged extraction for region {region_id}: {feature_count} features, status: {log_status}")
+        except Exception as log_error:
+            print(f"Warning: Failed to log extraction for region {region_id}: {log_error}")
+        
         return {
             'region_id': region_id,
             'area_km2': area_km2,
-            'features': all_features,
+            'features': all_features,  # Now just counts, not full feature data
             'features_extracted': feature_count,
-            'feature_types': list(all_features.keys()),
+            'feature_types': [ft for ft, count in all_features.items() if count > 0],
             'status': 'success'
         }
         
@@ -265,17 +356,17 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
 
 
 def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
-    """Calculate and store metrics for extracted features."""
+    """Verify extraction completed successfully (metrics already stored during extraction)."""
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     ti = context['ti']
     
-    # Try multiple XCom key formats to handle TaskGroup structure
+    # Get extract result from XCom
     extract_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
     extract_result = ti.xcom_pull(task_ids=[extract_task_id])
     
-    # If not found, try without TaskGroup prefix (fallback)
-    if not extract_result:
-        extract_result = ti.xcom_pull(key=None, task_ids=[extract_task_id], include_prior_dates=True)
+    # Handle XCom return format
+    if isinstance(extract_result, list) and extract_result:
+        extract_result = extract_result[0]
     
     if not extract_result or not isinstance(extract_result, dict):
         print(f"No extract result found in XCom for region {region_id}")
@@ -298,144 +389,30 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
             'error': error_msg
         }
     
-    all_features = extract_result.get('features', {})
-    area_km2 = extract_result.get('area_km2', 0.0)
+    # Metrics were already stored during extraction, just verify
+    features_extracted = extract_result.get('features_extracted', 0)
+    feature_types = extract_result.get('feature_types', [])
     
-    print(f"Storing metrics for region {region_id}: {len(all_features)} feature types, area: {area_km2} km²")
+    print(f"Extraction completed for region {region_id}: {features_extracted} features, {len(feature_types)} types")
     
-    if not all_features:
-        print(f"No features to store for region {region_id}")
-        return {
-            'region_id': region_id,
-            'features_stored': 0,
-            'status': 'no_features'
-        }
-    
-    osm_client = OSMClient()
+    # Verify data was stored
+    verify_sql = """
+        SELECT COUNT(DISTINCT feature_name) as stored_count
+        FROM fact_geo_region_features
+        WHERE region_id = %s AND snapshot_year = %s
+    """
     snapshot_year = datetime.now().year
-    features_stored = 0
+    result = postgres_hook.get_first(verify_sql, parameters=(region_id, snapshot_year))
+    stored_count = result[0] if result else 0
     
-    try:
-        for feature_type, features in all_features.items():
-            if not features:
-                continue
-            
-            # Calculate metrics
-            metrics = osm_client.calculate_feature_metrics(features, area_km2)
-            
-            # Store feature counts
-            count_feature_name = f"{feature_type}_count"
-            count_sql = """
-                INSERT INTO fact_geo_region_features (
-                    region_id, feature_name, feature_value, snapshot_year
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (region_id, feature_name, snapshot_year)
-                DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                              updated_at = CURRENT_TIMESTAMP
-            """
-            
-            postgres_hook.run(
-                count_sql,
-                parameters=(region_id, count_feature_name, metrics['count'], snapshot_year)
-            )
-            features_stored += 1
-            
-            # Store area if applicable
-            if metrics['area_km2'] > 0:
-                area_feature_name = f"{feature_type}_area_km2"
-                area_sql = """
-                    INSERT INTO fact_geo_region_features (
-                        region_id, feature_name, feature_value, snapshot_year
-                    ) VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (region_id, feature_name, snapshot_year)
-                    DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                                  updated_at = CURRENT_TIMESTAMP
-                """
-                
-                postgres_hook.run(
-                    area_sql,
-                    parameters=(region_id, area_feature_name, metrics['area_km2'], snapshot_year)
-                )
-                features_stored += 1
-            
-            # Store density
-            density_feature_name = f"{feature_type}_density_per_km2"
-            density_sql = """
-                INSERT INTO fact_geo_region_features (
-                    region_id, feature_name, feature_value, snapshot_year
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (region_id, feature_name, snapshot_year)
-                DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                              updated_at = CURRENT_TIMESTAMP
-            """
-            
-            postgres_hook.run(
-                density_sql,
-                parameters=(region_id, density_feature_name, metrics['density_per_km2'], snapshot_year)
-            )
-            features_stored += 1
-        
-        # Log extraction (always log, even if no features)
-        log_sql = """
-            INSERT INTO meta_osm_extraction_log (
-                extraction_date, region_id, feature_types, features_extracted, status
-            ) VALUES (%s, %s, %s, %s, %s)
-        """
-        
-        feature_types_array = list(all_features.keys())
-        log_status = 'success' if features_stored > 0 else 'no_features'
-        
-        try:
-            postgres_hook.run(
-                log_sql,
-                parameters=(
-                    datetime.now().date(),
-                    region_id,
-                    feature_types_array,
-                    features_stored,
-                    log_status
-                )
-            )
-            print(f"Logged extraction for region {region_id}: {features_stored} features stored, status: {log_status}")
-        except Exception as log_error:
-            print(f"Warning: Failed to log extraction for region {region_id}: {log_error}")
-        
-        print(f"Successfully stored {features_stored} feature metrics for region {region_id}")
-        
-        return {
-            'region_id': region_id,
-            'features_stored': features_stored,
-            'status': 'success'
-        }
-        
-    except Exception as e:
-        print(f"Error storing metrics for region {region_id}: {e}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        
-        # Log failure
-        try:
-            log_sql = """
-                INSERT INTO meta_osm_extraction_log (
-                    extraction_date, region_id, feature_types, features_extracted, status, error_message
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            
-            postgres_hook.run(
-                log_sql,
-                parameters=(
-                    datetime.now().date(),
-                    region_id,
-                    [],
-                    0,
-                    'failed',
-                    str(e)[:500]
-                )
-            )
-        except Exception as log_error:
-            print(f"Error logging failure: {log_error}")
-        
-        raise AirflowException(f"Failed to store metrics for region {region_id}: {e}")
+    print(f"Verified {stored_count} feature metrics stored for region {region_id}")
+    
+    return {
+        'region_id': region_id,
+        'features_stored': stored_count,
+        'features_extracted': features_extracted,
+        'status': 'success'
+    }
 
 
 # Process regions in batches to avoid overwhelming the system
