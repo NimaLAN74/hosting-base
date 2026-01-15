@@ -410,8 +410,24 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
     ti = context['ti']
     
     # Get extract result from XCom
-    extract_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
-    extract_result = ti.xcom_pull(task_ids=[extract_task_id])
+    # Need to find the correct task ID with batch prefix
+    possible_extract_task_ids = [
+        f'batch_1.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_2.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_3.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_4.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_5.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'region_{region_id.lower()}.extract_{region_id.lower()}',  # Fallback
+    ]
+    
+    extract_result = None
+    for extract_task_id in possible_extract_task_ids:
+        try:
+            extract_result = ti.xcom_pull(task_ids=extract_task_id)
+            if extract_result:
+                break
+        except:
+            continue
     
     # Handle XCom return format
     if isinstance(extract_result, list) and extract_result:
