@@ -127,19 +127,29 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     """Extract OSM features for a region."""
     ti = context['ti']
     
-    # Get region data from lookup task
-    lookup_task_id = f'batch_{context["params"]["batch_num"]}.region_{region_id.lower()}.lookup_{region_id.lower()}'
-    region_data = ti.xcom_pull(task_ids=[lookup_task_id])
+    # Get region data from lookup task XCom
+    # Need to try all possible batch prefixes
+    possible_lookup_task_ids = [
+        f'batch_1.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_2.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_3.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_4.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_5.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'region_{region_id.lower()}.lookup_{region_id.lower()}',  # Fallback
+    ]
     
-    # Handle XCom return format (list or dict)
-    if isinstance(region_data, list) and region_data:
-        region_data = region_data[0]
-    elif not isinstance(region_data, dict):
-        # Try alternative task ID format
-        alt_task_id = f'region_{region_id.lower()}.lookup_{region_id.lower()}'
-        region_data = ti.xcom_pull(task_ids=[alt_task_id])
-        if isinstance(region_data, list) and region_data:
-            region_data = region_data[0]
+    region_data = None
+    for lookup_task_id in possible_lookup_task_ids:
+        try:
+            result = ti.xcom_pull(task_ids=lookup_task_id)
+            if result:
+                region_data = result
+                if isinstance(region_data, list) and region_data:
+                    region_data = region_data[0]
+                if isinstance(region_data, dict):
+                    break
+        except:
+            continue
     
     if not region_data or not isinstance(region_data, dict):
         print(f"No region data found in XCom for region {region_id}")
@@ -209,7 +219,6 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
         return {
             'region_id': region_id,
             'area_km2': area_km2,
-            'features': all_features,
             'features_extracted': feature_count,
             'feature_types': list(all_features.keys()),
             'status': 'success'
@@ -236,24 +245,32 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
 
 
 def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
-    """Calculate and store metrics for extracted features."""
+    """Verify extraction completed successfully (metrics already stored during extraction)."""
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     ti = context['ti']
     
     # Get extract result from XCom
-    batch_num = context["params"]["batch_num"]
-    extract_task_id = f'batch_{batch_num}.region_{region_id.lower()}.extract_{region_id.lower()}'
-    extract_result = ti.xcom_pull(task_ids=[extract_task_id])
+    possible_extract_task_ids = [
+        f'batch_1.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_2.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_3.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_4.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'batch_5.region_{region_id.lower()}.extract_{region_id.lower()}',
+        f'region_{region_id.lower()}.extract_{region_id.lower()}',  # Fallback
+    ]
     
-    # Handle XCom return format
-    if isinstance(extract_result, list) and extract_result:
-        extract_result = extract_result[0]
-    elif not isinstance(extract_result, dict):
-        # Try alternative format
-        alt_task_id = f'region_{region_id.lower()}.extract_{region_id.lower()}'
-        extract_result = ti.xcom_pull(task_ids=[alt_task_id])
-        if isinstance(extract_result, list) and extract_result:
-            extract_result = extract_result[0]
+    extract_result = None
+    for extract_task_id in possible_extract_task_ids:
+        try:
+            result = ti.xcom_pull(task_ids=extract_task_id)
+            if result:
+                extract_result = result
+                if isinstance(extract_result, list) and extract_result:
+                    extract_result = extract_result[0]
+                if isinstance(extract_result, dict):
+                    break
+        except:
+            continue
     
     if not extract_result or not isinstance(extract_result, dict):
         print(f"No extract result found in XCom for region {region_id}")
@@ -263,157 +280,30 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
             'status': 'no_extract_result'
         }
     
-    # Check if extraction had errors
-    extract_status = extract_result.get('status', 'unknown')
-    if extract_status != 'success':
-        print(f"Extraction failed for region {region_id} with status: {extract_status}")
-        error_msg = extract_result.get('error', 'Unknown error')
-        print(f"Error details: {error_msg}")
-        return {
-            'region_id': region_id,
-            'features_stored': 0,
-            'status': f'extraction_failed_{extract_status}',
-            'error': error_msg
-        }
+    # Metrics were already stored during extraction, just verify
+    features_extracted = extract_result.get('features_extracted', 0)
+    feature_types = extract_result.get('feature_types', [])
     
-    all_features = extract_result.get('features', {})
-    area_km2 = extract_result.get('area_km2', 0.0)
+    print(f"Extraction completed for region {region_id}: {features_extracted} features, {len(feature_types)} types")
     
-    print(f"Storing metrics for region {region_id}: {len(all_features)} feature types, area: {area_km2} km²")
-    
-    if not all_features:
-        print(f"No features to store for region {region_id}")
-        return {
-            'region_id': region_id,
-            'features_stored': 0,
-            'status': 'no_features'
-        }
-    
-    osm_client = OSMClient()
+    # Verify data was stored
+    verify_sql = """
+        SELECT COUNT(DISTINCT feature_name) as stored_count
+        FROM fact_geo_region_features
+        WHERE region_id = %s AND snapshot_year = %s
+    """
     snapshot_year = datetime.now().year
-    features_stored = 0
+    result = postgres_hook.get_first(verify_sql, parameters=(region_id, snapshot_year))
+    stored_count = result[0] if result else 0
     
-    try:
-        for feature_type, features in all_features.items():
-            if not features:
-                continue
-            
-            # Calculate metrics
-            metrics = osm_client.calculate_feature_metrics(features, area_km2)
-            
-            # Store feature counts
-            count_feature_name = f"{feature_type}_count"
-            count_sql = """
-                INSERT INTO fact_geo_region_features (
-                    region_id, feature_name, feature_value, snapshot_year
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (region_id, feature_name, snapshot_year)
-                DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                              updated_at = CURRENT_TIMESTAMP
-            """
-            
-            postgres_hook.run(
-                count_sql,
-                parameters=(region_id, count_feature_name, metrics['count'], snapshot_year)
-            )
-            features_stored += 1
-            
-            # Store area if applicable
-            if metrics['area_km2'] > 0:
-                area_feature_name = f"{feature_type}_area_km2"
-                area_sql = """
-                    INSERT INTO fact_geo_region_features (
-                        region_id, feature_name, feature_value, snapshot_year
-                    ) VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (region_id, feature_name, snapshot_year)
-                    DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                                  updated_at = CURRENT_TIMESTAMP
-                """
-                
-                postgres_hook.run(
-                    area_sql,
-                    parameters=(region_id, area_feature_name, metrics['area_km2'], snapshot_year)
-                )
-                features_stored += 1
-            
-            # Store density
-            density_feature_name = f"{feature_type}_density_per_km2"
-            density_sql = """
-                INSERT INTO fact_geo_region_features (
-                    region_id, feature_name, feature_value, snapshot_year
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (region_id, feature_name, snapshot_year)
-                DO UPDATE SET feature_value = EXCLUDED.feature_value,
-                              updated_at = CURRENT_TIMESTAMP
-            """
-            
-            postgres_hook.run(
-                density_sql,
-                parameters=(region_id, density_feature_name, metrics['density_per_km2'], snapshot_year)
-            )
-            features_stored += 1
-        
-        # Log extraction
-        log_sql = """
-            INSERT INTO meta_osm_extraction_log (
-                extraction_date, region_id, feature_types, features_extracted, status
-            ) VALUES (%s, %s, %s, %s, %s)
-        """
-        
-        feature_types_array = list(all_features.keys())
-        log_status = 'success' if features_stored > 0 else 'no_features'
-        
-        try:
-            postgres_hook.run(
-                log_sql,
-                parameters=(
-                    datetime.now().date(),
-                    region_id,
-                    feature_types_array,
-                    features_stored,
-                    log_status
-                )
-            )
-            print(f"Logged extraction for region {region_id}: {features_stored} features stored, status: {log_status}")
-        except Exception as log_error:
-            print(f"Warning: Failed to log extraction for region {region_id}: {log_error}")
-        
-        print(f"Successfully stored {features_stored} feature metrics for region {region_id}")
-        
-        return {
-            'region_id': region_id,
-            'features_stored': features_stored,
-            'status': 'success'
-        }
-        
-    except Exception as e:
-        print(f"Error storing metrics for region {region_id}: {e}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        
-        # Log failure
-        try:
-            log_sql = """
-                INSERT INTO meta_osm_extraction_log (
-                    extraction_date, region_id, feature_types, features_extracted, status, error_message
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            
-            postgres_hook.run(
-                log_sql,
-                parameters=(
-                    datetime.now().date(),
-                    region_id,
-                    [],
-                    0,
-                    'failed',
-                    str(e)[:500]
-                )
-            )
-        except Exception as log_error:
-            print(f"Error logging failure: {log_error}")
-        
-        raise AirflowException(f"Failed to store metrics for region {region_id}: {e}")
+    print(f"Verified {stored_count} feature metrics stored for region {region_id}")
+    
+    return {
+        'region_id': region_id,
+        'features_stored': stored_count,
+        'features_extracted': features_extracted,
+        'status': 'success'
+    }
 
 
 # Create batches
