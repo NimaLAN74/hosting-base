@@ -92,8 +92,23 @@ def create_geo_enrichment_dataset_table(**context):
         is_urban BOOLEAN,
         is_rural BOOLEAN,
         
+        -- OSM Features (from fact_geo_region_features)
+        power_plant_count INTEGER,
+        power_generator_count INTEGER,
+        power_substation_count INTEGER,
+        industrial_area_km2 NUMERIC(12,2),
+        railway_station_count INTEGER,
+        airport_count INTEGER,
+        
+        -- OSM Feature Densities
+        power_plant_density_per_km2 NUMERIC(10,3),
+        power_generator_density_per_km2 NUMERIC(10,3),
+        power_substation_density_per_km2 NUMERIC(10,3),
+        industrial_area_pct NUMERIC(5,2),
+        
         -- Metadata
         feature_count INTEGER,
+        osm_feature_count INTEGER,
         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
         
@@ -192,9 +207,21 @@ def extract_geo_enrichment_features(**context):
         CASE WHEN r.mount_type IS NOT NULL AND r.mount_type != 'FLAT' THEN TRUE ELSE FALSE END as is_mountainous,
         CASE WHEN r.urbn_type IS NOT NULL AND (r.urbn_type LIKE '%URBAN%' OR r.urbn_type LIKE '%CITY%') THEN TRUE ELSE FALSE END as is_urban,
         CASE WHEN r.urbn_type IS NOT NULL AND (r.urbn_type LIKE '%RURAL%' OR r.urbn_type LIKE '%REMOTE%') THEN TRUE ELSE FALSE END as is_rural,
-        e.feature_count
+        COALESCE(o.power_plant_count, 0) as power_plant_count,
+        COALESCE(o.power_generator_count, 0) as power_generator_count,
+        COALESCE(o.power_substation_count, 0) as power_substation_count,
+        COALESCE(o.industrial_area_km2, 0) as industrial_area_km2,
+        COALESCE(o.railway_station_count, 0) as railway_station_count,
+        COALESCE(o.airport_count, 0) as airport_count,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_plant_count, 0)::NUMERIC / r.area_km2) ELSE NULL END as power_plant_density_per_km2,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_generator_count, 0)::NUMERIC / r.area_km2) ELSE NULL END as power_generator_density_per_km2,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_substation_count, 0)::NUMERIC / r.area_km2) ELSE NULL END as power_substation_density_per_km2,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.industrial_area_km2, 0) / r.area_km2 * 100) ELSE NULL END as industrial_area_pct,
+        e.feature_count,
+        COALESCE(o.osm_feature_count, 0) as osm_feature_count
     FROM energy_aggregated e
     INNER JOIN region_spatial r ON e.country_code = r.cntr_code
+    LEFT JOIN osm_features o ON r.region_id = o.region_id AND e.year = o.year
     ORDER BY r.region_id, e.year
     """
     
@@ -266,7 +293,11 @@ def load_geo_enrichment_dataset(**context):
         energy_density_gwh_per_km2, renewable_density_gwh_per_km2, fossil_density_gwh_per_km2,
         renewable_to_fossil_ratio, production_to_consumption_ratio, imports_to_production_ratio,
         is_coastal, is_mountainous, is_urban, is_rural,
-        feature_count, updated_at
+        power_plant_count, power_generator_count, power_substation_count,
+        industrial_area_km2, railway_station_count, airport_count,
+        power_plant_density_per_km2, power_generator_density_per_km2, power_substation_density_per_km2,
+        industrial_area_pct,
+        feature_count, osm_feature_count, updated_at
     )
     SELECT 
         r.region_id,
@@ -299,10 +330,22 @@ def load_geo_enrichment_dataset(**context):
         CASE WHEN r.mount_type IS NOT NULL AND r.mount_type != 'FLAT' THEN TRUE ELSE FALSE END,
         CASE WHEN r.urbn_type IS NOT NULL AND (r.urbn_type LIKE '%URBAN%' OR r.urbn_type LIKE '%CITY%') THEN TRUE ELSE FALSE END,
         CASE WHEN r.urbn_type IS NOT NULL AND (r.urbn_type LIKE '%RURAL%' OR r.urbn_type LIKE '%REMOTE%') THEN TRUE ELSE FALSE END,
+        COALESCE(o.power_plant_count, 0),
+        COALESCE(o.power_generator_count, 0),
+        COALESCE(o.power_substation_count, 0),
+        COALESCE(o.industrial_area_km2, 0),
+        COALESCE(o.railway_station_count, 0),
+        COALESCE(o.airport_count, 0),
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_plant_count, 0)::NUMERIC / r.area_km2) ELSE NULL END,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_generator_count, 0)::NUMERIC / r.area_km2) ELSE NULL END,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.power_substation_count, 0)::NUMERIC / r.area_km2) ELSE NULL END,
+        CASE WHEN r.area_km2 > 0 THEN (COALESCE(o.industrial_area_km2, 0) / r.area_km2 * 100) ELSE NULL END,
         e.feature_count,
+        COALESCE(o.osm_feature_count, 0),
         NOW()
     FROM energy_aggregated e
     INNER JOIN region_spatial r ON e.country_code = r.cntr_code
+    LEFT JOIN osm_features o ON r.region_id = o.region_id AND e.year = o.year
     ON CONFLICT (region_id, year) 
     DO UPDATE SET
         total_energy_gwh = EXCLUDED.total_energy_gwh,
@@ -330,7 +373,18 @@ def load_geo_enrichment_dataset(**context):
         is_mountainous = EXCLUDED.is_mountainous,
         is_urban = EXCLUDED.is_urban,
         is_rural = EXCLUDED.is_rural,
+        power_plant_count = EXCLUDED.power_plant_count,
+        power_generator_count = EXCLUDED.power_generator_count,
+        power_substation_count = EXCLUDED.power_substation_count,
+        industrial_area_km2 = EXCLUDED.industrial_area_km2,
+        railway_station_count = EXCLUDED.railway_station_count,
+        airport_count = EXCLUDED.airport_count,
+        power_plant_density_per_km2 = EXCLUDED.power_plant_density_per_km2,
+        power_generator_density_per_km2 = EXCLUDED.power_generator_density_per_km2,
+        power_substation_density_per_km2 = EXCLUDED.power_substation_density_per_km2,
+        industrial_area_pct = EXCLUDED.industrial_area_pct,
         feature_count = EXCLUDED.feature_count,
+        osm_feature_count = EXCLUDED.osm_feature_count,
         updated_at = NOW()
     """
     
