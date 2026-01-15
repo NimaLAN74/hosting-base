@@ -24,21 +24,18 @@ groups:
           summary: "Missing data in critical table"
           description: "fact_energy_annual table is empty"
 
-      # Data Volume Anomaly
+      # Data Volume Anomaly (simplified - requires custom metric)
+      # Note: This alert requires a custom metric from database exporter
+      # For now, using a simple threshold check
       - alert: DataVolumeAnomaly
-        expr: |
-          (
-            count(fact_energy_annual) 
-            < 
-            (avg_over_time(count(fact_energy_annual[7d]) * 0.8))
-          )
+        expr: count(fact_energy_annual) < 1000
         for: 1h
         labels:
           severity: warning
           component: data_quality
         annotations:
           summary: "Data volume anomaly detected"
-          description: "Data volume is 20% below 7-day average"
+          description: "Data volume is below expected threshold ({{ $value }} records)"
 
       # OSM Data Missing
       - alert: OSMDataMissing
