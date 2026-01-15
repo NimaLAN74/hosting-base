@@ -165,7 +165,7 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "expr": "count(count_over_time({container=\"nginx-proxy\", client_ip!=\"\"} [1h]) by (client_ip))",
+          "expr": "count(sum by (client_ip) (count_over_time({container=\"nginx-proxy\"} | json | client_ip!=\"\" | __error__=\"\" [1h])))",
           "refId": "A",
           "instant": true
         }
