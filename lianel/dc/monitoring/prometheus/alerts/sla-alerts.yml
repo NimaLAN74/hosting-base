@@ -1,0 +1,51 @@
+groups:
+  - name: sla_alerts
+    interval: 1m
+    rules:
+      # API Response Time SLA Violation
+      - alert: APISLAViolation
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="energy-service"}[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+          sla: response_time
+        annotations:
+          summary: "API SLA violation - response time"
+          description: "API p95 response time is {{ $value }}s (target: <0.5s)"
+
+      # DAG Completion SLA Violation
+      - alert: DAGCompletionSLAViolation
+        expr: airflow_dag_run_duration_seconds > 7200
+        for: 5m
+        labels:
+          severity: warning
+          component: airflow
+          sla: completion_time
+        annotations:
+          summary: "DAG completion SLA violation"
+          description: "DAG {{ $labels.dag_id }} has exceeded 2 hour completion SLA"
+
+      # Service Uptime SLA Violation
+      - alert: ServiceUptimeSLAViolation
+        expr: (1 - (sum(rate(up{job=~"airflow|energy-service|profile-service"}[5m])) / count(up{job=~"airflow|energy-service|profile-service"}))) > 0.005
+        for: 15m
+        labels:
+          severity: critical
+          component: infrastructure
+          sla: uptime
+        annotations:
+          summary: "Service uptime SLA violation"
+          description: "Service uptime is below 99.5% SLA"
+
+      # Data Freshness SLA Violation
+      - alert: DataFreshnessSLAViolation
+        expr: (time() - max(meta_ingestion_log_last_updated)) > 86400
+        for: 1h
+        labels:
+          severity: warning
+          component: data_quality
+          sla: freshness
+        annotations:
+          summary: "Data freshness SLA violation"
+          description: "Data is older than 24 hours (SLA violation)"

@@ -1,0 +1,68 @@
+groups:
+  - name: data_quality_alerts
+    interval: 1m
+    rules:
+      # Data Staleness Alert
+      - alert: DataStale
+        expr: (time() - max(meta_ingestion_log_last_updated)) > 86400
+        for: 1h
+        labels:
+          severity: warning
+          component: data_quality
+        annotations:
+          summary: "Data is stale"
+          description: "Data has not been updated in more than 24 hours"
+
+      # Missing Data in Critical Table
+      - alert: MissingDataInCriticalTable
+        expr: count(fact_energy_annual) == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: data_quality
+        annotations:
+          summary: "Missing data in critical table"
+          description: "fact_energy_annual table is empty"
+
+      # Data Volume Anomaly
+      - alert: DataVolumeAnomaly
+        expr: |
+          (
+            count(fact_energy_annual) 
+            < 
+            (avg_over_time(count(fact_energy_annual)[7d]) * 0.8)
+          )
+        for: 1h
+        labels:
+          severity: warning
+          component: data_quality
+        annotations:
+          summary: "Data volume anomaly detected"
+          description: "Data volume is 20% below 7-day average"
+
+      # OSM Data Missing
+      - alert: OSMDataMissing
+        expr: count(fact_geo_region_features) == 0
+        for: 1h
+        labels:
+          severity: warning
+          component: data_quality
+        annotations:
+          summary: "OSM geo data missing"
+          description: "fact_geo_region_features table is empty"
+
+      # Ingestion Failure Rate High
+      - alert: HighIngestionFailureRate
+        expr: |
+          (
+            sum(rate(ingestion_failures_total[5m]))
+            /
+            sum(rate(ingestion_attempts_total[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: data_quality
+        annotations:
+          summary: "High ingestion failure rate"
+          description: "Ingestion failure rate is above 10%"

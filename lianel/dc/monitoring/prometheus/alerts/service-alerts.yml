@@ -1,0 +1,91 @@
+groups:
+  - name: service_alerts
+    interval: 30s
+    rules:
+      # Container Down Alert
+      - alert: ContainerDown
+        expr: up{job=~"cadvisor|node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Container is down"
+          description: "Container {{ $labels.name }} has been down for more than 2 minutes"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes{name!=""}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage"
+          description: "Container {{ $labels.name }} is using {{ $value | humanizePercentage }} of its memory limit"
+
+      # Container OOM Killed
+      - alert: ContainerOOMKilled
+        expr: increase(container_last_seen{name!=""}[5m]) == 0 AND container_memory_usage_bytes{name!=""} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Container OOM killed"
+          description: "Container {{ $labels.name }} may have been OOM killed"
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name!=""}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage"
+          description: "Container {{ $labels.name }} is using {{ $value | humanizePercentage }} CPU"
+
+      # Disk Space Low
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Disk space low"
+          description: "Disk space is below 10% ({{ $value | humanizePercentage }} available)"
+
+      # Database Connection Failures
+      - alert: DatabaseConnectionFailure
+        expr: increase(pg_stat_database_numbackends{datname="lianel_energy"}[5m]) == 0 AND up{job="postgres"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection issues"
+          description: "No active connections to lianel_energy database"
+
+      # Redis Down
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis service has been down for more than 2 minutes"
+
+      # Nginx Down
+      - alert: NginxDown
+        expr: up{job="nginx"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: nginx
+        annotations:
+          summary: "Nginx is down"
+          description: "Nginx service has been down for more than 2 minutes"

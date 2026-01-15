@@ -1,0 +1,69 @@
+groups:
+  - name: airflow_alerts
+    interval: 30s
+    rules:
+      # DAG Run Failure Alert
+      - alert: AirflowDAGRunFailed
+        expr: increase(airflow_dag_run_failed_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: airflow
+        annotations:
+          summary: "Airflow DAG run failed"
+          description: "DAG {{ $labels.dag_id }} run {{ $labels.run_id }} has failed"
+
+      # DAG Task Failure Alert
+      - alert: AirflowTaskFailed
+        expr: increase(airflow_task_failed_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "Airflow task failed"
+          description: "Task {{ $labels.task_id }} in DAG {{ $labels.dag_id }} has failed"
+
+      # DAG Run Duration Too Long
+      - alert: AirflowDAGRunDurationTooLong
+        expr: airflow_dag_run_duration_seconds > 7200
+        for: 5m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "DAG run taking too long"
+          description: "DAG {{ $labels.dag_id }} run has been running for more than 2 hours"
+
+      # Airflow Scheduler Not Running
+      - alert: AirflowSchedulerDown
+        expr: up{job="airflow"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: airflow
+        annotations:
+          summary: "Airflow scheduler is down"
+          description: "Airflow scheduler has been down for more than 2 minutes"
+
+      # Airflow Worker Not Running
+      - alert: AirflowWorkerDown
+        expr: count(up{job="airflow", instance=~".*worker.*"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: airflow
+        annotations:
+          summary: "Airflow worker is down"
+          description: "No Airflow workers are running"
+
+      # High Task Queue Length
+      - alert: AirflowHighTaskQueueLength
+        expr: airflow_task_queue_length > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "High task queue length"
+          description: "Airflow task queue has {{ $value }} tasks waiting"
