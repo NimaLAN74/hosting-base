@@ -166,7 +166,8 @@
       "targets": [
         {
           "expr": "count(count_over_time({container=\"nginx-proxy\"} | json | client_ip!=\"\" | __error__=\"\" [1h]) by (client_ip))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Unique Visitors (by IP)",
