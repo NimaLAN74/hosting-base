@@ -74,23 +74,6 @@ FEATURE_TYPES = [
 ]
 
 
-def get_nuts2_regions(**context) -> List[str]:
-    """Get list of NUTS2 regions to process."""
-    postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
-    
-    sql = """
-        SELECT region_id
-        FROM dim_region
-        WHERE level_code = 2
-        ORDER BY region_id
-    """
-    
-    results = postgres_hook.get_records(sql)
-    regions = [row[0] for row in results]
-    
-    return regions
-
-
 def lookup_region(region_id: str, **context) -> Dict[str, Any]:
     """Get region geometry and metadata."""
     postgres_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
@@ -454,13 +437,6 @@ def store_region_metrics(region_id: str, **context) -> Dict[str, Any]:
         
         raise AirflowException(f"Failed to store metrics for region {region_id}: {e}")
 
-
-# Get regions task
-get_regions_task = PythonOperator(
-    task_id='get_nuts2_regions',
-    python_callable=get_nuts2_regions,
-    dag=dag,
-)
 
 # Process regions in batches to avoid overwhelming the system
 # Each batch processes sequentially, one region at a time
