@@ -133,8 +133,25 @@ def extract_region_features(region_id: str, **context) -> Dict[str, Any]:
     ti = context['ti']
     
     # Get region data from lookup task XCom
-    lookup_task_id = f'region_{region_id.lower()}.lookup_{region_id.lower()}'
-    region_data = ti.xcom_pull(task_ids=[lookup_task_id])
+    # Need to find the correct task ID with batch prefix
+    # Try multiple possible task ID formats
+    possible_lookup_task_ids = [
+        f'batch_1.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_2.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_3.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_4.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'batch_5.region_{region_id.lower()}.lookup_{region_id.lower()}',
+        f'region_{region_id.lower()}.lookup_{region_id.lower()}',  # Fallback
+    ]
+    
+    region_data = None
+    for lookup_task_id in possible_lookup_task_ids:
+        try:
+            region_data = ti.xcom_pull(task_ids=lookup_task_id)
+            if region_data:
+                break
+        except:
+            continue
     
     # Handle XCom return format (list or dict)
     if isinstance(region_data, list) and region_data:
