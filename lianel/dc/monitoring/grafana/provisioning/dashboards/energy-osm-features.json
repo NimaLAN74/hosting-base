@@ -68,7 +68,10 @@
       },
       "targets": [
         {
-          "datasource": "PostgreSQL Energy",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-energy"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -132,7 +135,10 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "datasource": "PostgreSQL Energy",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-energy"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -203,7 +209,10 @@
       },
       "targets": [
         {
-          "datasource": "PostgreSQL Energy",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-energy"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -274,7 +283,10 @@
       },
       "targets": [
         {
-          "datasource": "PostgreSQL Energy",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-energy"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
