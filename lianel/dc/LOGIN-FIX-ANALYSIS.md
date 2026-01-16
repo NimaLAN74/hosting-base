@@ -102,4 +102,25 @@
 
 ---
 
-**Status**: ⏳ **IN PROGRESS** - Frontend client restored, waiting for Keycloak to start and testing login
+**Status**: ⏳ **IN PROGRESS** - Multiple fixes applied, still investigating root cause
+
+## 🔧 Fixes Applied
+
+1. ✅ **Restored frontend-client to original configuration** - Removed PKCE attributes, restored webOrigins: ["*"]
+2. ✅ **Disabled conditional-credential authenticator** - Prevents NullPointerException from checking user.credentialManager() before user exists
+3. ⏳ **Still investigating**: "Unexpected error when handling authentication request to identity provider"
+
+## 🐛 Current Issue
+
+**Error**: "Unexpected error when handling authentication request to identity provider"  
+**Location**: Keycloak authentication flow  
+**Suspected Cause**: Identity Provider Redirector authenticator (step 3 in browser flow) is enabled but:
+- No identity providers configured, OR
+- Identity provider redirector has a misconfiguration
+
+**Next Steps**:
+- Check if identity providers exist
+- If none exist, disable Identity Provider Redirector authenticator
+- If providers exist, check their configuration
+
+---
