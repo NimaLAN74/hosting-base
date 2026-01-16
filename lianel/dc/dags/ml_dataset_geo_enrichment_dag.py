@@ -39,6 +39,7 @@ dag = DAG(
 def create_geo_enrichment_dataset_table(**context):
     """
     Create ml_dataset_geo_enrichment_v1 table if it doesn't exist.
+    Also add OSM columns if they're missing (for existing tables).
     """
     db_hook = PostgresHook(postgres_conn_id='lianel_energy_db')
     
