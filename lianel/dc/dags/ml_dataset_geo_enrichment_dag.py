@@ -132,6 +132,48 @@ def create_geo_enrichment_dataset_table(**context):
     db_hook.run(create_table_sql)
     logging.info("✅ Table ml_dataset_geo_enrichment_v1 created/verified")
     
+    # Add OSM columns if they don't exist (for existing tables)
+    logging.info("Adding OSM columns if they don't exist...")
+    alter_table_sql = """
+    DO $$
+    BEGIN
+        -- Add OSM feature count columns
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'ml_dataset_geo_enrichment_v1' 
+                       AND column_name = 'power_plant_count') THEN
+            ALTER TABLE ml_dataset_geo_enrichment_v1 
+            ADD COLUMN power_plant_count INTEGER,
+            ADD COLUMN power_generator_count INTEGER,
+            ADD COLUMN power_substation_count INTEGER,
+            ADD COLUMN industrial_area_km2 NUMERIC(12,2),
+            ADD COLUMN railway_station_count INTEGER,
+            ADD COLUMN airport_count INTEGER;
+        END IF;
+        
+        -- Add OSM feature density columns
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'ml_dataset_geo_enrichment_v1' 
+                       AND column_name = 'power_plant_density_per_km2') THEN
+            ALTER TABLE ml_dataset_geo_enrichment_v1 
+            ADD COLUMN power_plant_density_per_km2 NUMERIC(10,3),
+            ADD COLUMN power_generator_density_per_km2 NUMERIC(10,3),
+            ADD COLUMN power_substation_density_per_km2 NUMERIC(10,3),
+            ADD COLUMN industrial_area_pct NUMERIC(5,2);
+        END IF;
+        
+        -- Add OSM feature count metadata
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'ml_dataset_geo_enrichment_v1' 
+                       AND column_name = 'osm_feature_count') THEN
+            ALTER TABLE ml_dataset_geo_enrichment_v1 
+            ADD COLUMN osm_feature_count INTEGER;
+        END IF;
+    END $$;
+    """
+    
+    db_hook.run(alter_table_sql)
+    logging.info("✅ OSM columns verified/added")
+    
     return {'table_created': True}
 
 
