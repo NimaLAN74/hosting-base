@@ -72,13 +72,13 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
     entrypoint: |
       sh -c "
         # Substitute POSTGRES_PASSWORD in datasources file before Grafana starts
         if [ -n \"$$POSTGRES_PASSWORD\" ]; then
-          sed -i.bak \"s|\\\$${POSTGRES_PASSWORD}|$$POSTGRES_PASSWORD|g\" /etc/grafana/provisioning/datasources/datasources.yml 2>/dev/null || true
+          sed -i.bak \"s|\\\$${POSTGRES_PASSWORD}|$$POSTGRES_PASSWORD|g\" /etc/grafana/provisioning/datasources/datasources.yml
         fi
         /run.sh
       "
