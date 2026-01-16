@@ -68,7 +68,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -151,7 +154,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -234,7 +240,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -376,7 +385,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -532,7 +544,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -628,7 +643,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Airflow",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
