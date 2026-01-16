@@ -74,23 +74,16 @@ function Dashboard() {
     }
   }, [authenticated, isAdminFromAPI, adminCheckLoading, roles, hasRoleResult, hasRoleInToken, finalIsAdmin, keycloak, userInfo]);
 
-  // Base services available to all users
-  const baseServices = [
-    {
-      name: 'User Profile',
-      description: 'View and edit your user profile',
-      icon: '👤',
-      url: '/profile',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
-    },
+  // Main analytics and visualizations - shown prominently on main page
+  const mainAnalytics = [
     {
       name: 'EU Energy Data',
       description: 'Explore EU energy statistics and analytics',
       icon: '⚡',
       url: '/energy',
       status: 'active',
-      gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
+      gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
+      category: 'Analytics'
     },
     {
       name: 'Electricity Timeseries',
@@ -98,7 +91,8 @@ function Dashboard() {
       icon: '🔌',
       url: '/electricity',
       status: 'active',
-      gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+      gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      category: 'Analytics'
     },
     {
       name: 'Geospatial Features',
@@ -106,7 +100,30 @@ function Dashboard() {
       icon: '🗺️',
       url: '/geo',
       status: 'active',
-      gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
+      gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+      category: 'Analytics'
+    },
+    {
+      name: 'Monitoring & Dashboards',
+      description: 'System monitoring, data quality, and Grafana dashboards',
+      icon: '📊',
+      url: '/monitoring',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+      category: 'Monitoring'
+    }
+  ];
+
+  // Base services - moved to sub-pages
+  const baseServices = [
+    {
+      name: 'User Profile',
+      description: 'View and edit your user profile',
+      icon: '👤',
+      url: '/profile',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+      category: 'Account'
     }
   ];
 
@@ -198,11 +215,12 @@ function Dashboard() {
             <p className="welcome-subtitle">Here's what's happening with your services</p>
           </div>
 
-          {/* Services Grid */}
+          {/* Main Analytics & Visualizations */}
           <section className="services-section">
-            <h2 className="section-title">Your Services</h2>
+            <h2 className="section-title">Analytics & Data Visualizations</h2>
+            <p className="section-subtitle">Explore energy data, timeseries, geospatial features, and monitoring dashboards</p>
             <div className="services-grid">
-              {services.map((service, index) => (
+              {mainAnalytics.map((service, index) => (
                 <a 
                   key={index} 
                   href={service.url} 
@@ -229,6 +247,40 @@ function Dashboard() {
               ))}
             </div>
           </section>
+
+          {/* Other Services */}
+          {services.length > 0 && (
+            <section className="services-section">
+              <h2 className="section-title">Other Services</h2>
+              <div className="services-grid">
+                {services.map((service, index) => (
+                  <a 
+                    key={index} 
+                    href={service.url} 
+                    className="service-card"
+                    target={service.url.startsWith('http') ? '_self' : '_self'}
+                    rel={service.url.startsWith('http') ? 'noopener noreferrer' : ''}
+                  >
+                    <div className="service-header" style={{ background: service.gradient }}>
+                      <div className="service-icon">{service.icon}</div>
+                      <div className={`service-status status-${service.status}`}>
+                        <span className="status-dot"></span>
+                        {service.status}
+                      </div>
+                    </div>
+                    <div className="service-content">
+                      <h3 className="service-name">{service.name}</h3>
+                      <p className="service-description">{service.description}</p>
+                      <div className="service-action">
+                        Open Service
+                        <span className="arrow">→</span>
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Recent Activity */}
           <section className="activity-section">

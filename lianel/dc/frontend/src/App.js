@@ -35,6 +35,7 @@ function App() {
             <Route path="/energy" element={<Energy />} />
             <Route path="/electricity" element={<ElectricityTimeseries />} />
             <Route path="/geo" element={<GeoFeatures />} />
+            <Route path="/monitoring" element={<Monitoring />} />
             <Route
               path="/admin/users"
               element={
