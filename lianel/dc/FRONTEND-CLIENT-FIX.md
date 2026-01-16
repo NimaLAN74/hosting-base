@@ -6,14 +6,19 @@
 ## ✅ Issue Fixed
 
 **Problem**: Frontend authentication failing with 400 Bad Request  
-**Error**: `GET https://auth.lianel.se/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=https://www.lianel.se/`  
-**Root Cause**: The redirect URI `https://www.lianel.se/` was not in the frontend-client's allowed redirect URIs
+**Error**: `Invalid parameter: code_challenge`  
+**Error Details**: `PKCE supporting Client with invalid code challenge specified in PKCE`  
+**Root Cause**: The frontend-client's PKCE configuration may not have been properly set, or the redirect URIs were missing
 
 ---
 
 ## ✅ Fix Applied
 
-**Action**: Added exact redirect URI `https://www.lianel.se/` to frontend-client configuration
+**Actions Taken**:
+1. ✅ Verified/Updated PKCE Code Challenge Method to `S256`
+2. ✅ Added exact redirect URI `https://www.lianel.se/` to frontend-client configuration
+3. ✅ Ensured all redirect URI variants (with/without trailing slash, wildcards) are configured
+4. ✅ Verified Web Origins include `https://www.lianel.se` and `https://lianel.se`
 
 **Previous redirect URIs**:
 - `http://localhost:3000/*`
@@ -30,6 +35,13 @@
 
 ## ✅ Current Configuration
 
+### PKCE Settings
+- **PKCE Code Challenge Method**: `S256` ✅
+- **Standard Flow**: Enabled ✅
+- **Public Client**: Yes ✅
+- **Direct Access Grants**: Enabled ✅
+
+### Redirect URIs
 The `frontend-client` now has the following redirect URIs configured:
 
 ```
