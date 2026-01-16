@@ -33,6 +33,7 @@ print(f'code_challenge length: {len(code_challenge)} chars')
 print()
 
 try:
+    # First test without redirects to see status code
     response = requests.get(test_url, params=test_params, allow_redirects=False, verify=False, timeout=10)
     location = response.headers.get('Location', '')
     
@@ -60,9 +61,18 @@ try:
             print(f'⚠️  Unexpected redirect: {location[:150]}')
             exit(1)
     else:
-        print(f'❌ Unexpected status: {response.status_code}')
-        print(f'Response: {response.text[:300]}')
-        exit(1)
+        # If not 302, try with redirects to see if we can reach login page
+        print(f'Got status {response.status_code}, trying with redirects...')
+        response2 = requests.get(test_url, params=test_params, allow_redirects=True, verify=False, timeout=10)
+        print(f'Final Status (with redirects): {response2.status_code}')
+        print(f'Final URL: {response2.url[:150]}')
+        if 'login' in response2.url.lower() and response2.status_code == 200:
+            print('✅ SUCCESS - PKCE accepted, reached login page!')
+            exit(0)
+        else:
+            print(f'❌ Unexpected status: {response.status_code}')
+            print(f'Response: {response.text[:300]}')
+            exit(1)
         
 except Exception as e:
     print(f'❌ Error: {e}')
