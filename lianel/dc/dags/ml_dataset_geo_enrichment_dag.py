@@ -222,7 +222,6 @@ def extract_geo_enrichment_features(**context):
     osm_features AS (
         SELECT 
             region_id,
-            snapshot_year as year,
             MAX(CASE WHEN feature_name = 'power_plant_count' THEN feature_value ELSE 0 END)::INTEGER as power_plant_count,
             MAX(CASE WHEN feature_name = 'power_generator_count' THEN feature_value ELSE 0 END)::INTEGER as power_generator_count,
             MAX(CASE WHEN feature_name = 'power_substation_count' THEN feature_value ELSE 0 END)::INTEGER as power_substation_count,
@@ -231,8 +230,8 @@ def extract_geo_enrichment_features(**context):
             MAX(CASE WHEN feature_name = 'airport_count' THEN feature_value ELSE 0 END)::INTEGER as airport_count,
             COUNT(*) as osm_feature_count
         FROM fact_geo_region_features
-        WHERE snapshot_year = EXTRACT(YEAR FROM CURRENT_DATE)
-        GROUP BY region_id, snapshot_year
+        WHERE snapshot_year = (SELECT MAX(snapshot_year) FROM fact_geo_region_features)
+        GROUP BY region_id
     )
     SELECT 
         r.region_id,
@@ -279,7 +278,7 @@ def extract_geo_enrichment_features(**context):
         COALESCE(o.osm_feature_count, 0) as osm_feature_count
     FROM energy_aggregated e
     INNER JOIN region_spatial r ON e.country_code = r.cntr_code
-    LEFT JOIN osm_features o ON r.region_id = o.region_id AND e.year = o.year
+    LEFT JOIN osm_features o ON r.region_id = o.region_id
     ORDER BY r.region_id, e.year
     """
     
@@ -345,7 +344,6 @@ def load_geo_enrichment_dataset(**context):
     osm_features AS (
         SELECT 
             region_id,
-            snapshot_year as year,
             MAX(CASE WHEN feature_name = 'power_plant_count' THEN feature_value ELSE 0 END)::INTEGER as power_plant_count,
             MAX(CASE WHEN feature_name = 'power_generator_count' THEN feature_value ELSE 0 END)::INTEGER as power_generator_count,
             MAX(CASE WHEN feature_name = 'power_substation_count' THEN feature_value ELSE 0 END)::INTEGER as power_substation_count,
@@ -354,8 +352,8 @@ def load_geo_enrichment_dataset(**context):
             MAX(CASE WHEN feature_name = 'airport_count' THEN feature_value ELSE 0 END)::INTEGER as airport_count,
             COUNT(*) as osm_feature_count
         FROM fact_geo_region_features
-        WHERE snapshot_year = EXTRACT(YEAR FROM CURRENT_DATE)
-        GROUP BY region_id, snapshot_year
+        WHERE snapshot_year = (SELECT MAX(snapshot_year) FROM fact_geo_region_features)
+        GROUP BY region_id
     )
     INSERT INTO ml_dataset_geo_enrichment_v1 (
         region_id, level_code, cntr_code, region_name, year,
@@ -418,7 +416,7 @@ def load_geo_enrichment_dataset(**context):
         NOW()
     FROM energy_aggregated e
     INNER JOIN region_spatial r ON e.country_code = r.cntr_code
-    LEFT JOIN osm_features o ON r.region_id = o.region_id AND e.year = o.year
+    LEFT JOIN osm_features o ON r.region_id = o.region_id
     ON CONFLICT (region_id, year) 
     DO UPDATE SET
         total_energy_gwh = EXCLUDED.total_energy_gwh,
