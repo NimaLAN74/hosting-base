@@ -50,5 +50,6 @@ datasources:
       connMaxLifetime: 14400
       postgresVersion: 1500
       timescaledb: false
+      postgresqlOptions: "-c search_path=public"
     isDefault: false
     editable: true
