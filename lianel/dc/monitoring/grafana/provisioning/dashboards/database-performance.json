@@ -9,7 +9,10 @@
   "links": [],
   "panels": [
     {
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -61,7 +64,10 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "datasource": "PostgreSQL",
+          "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
           "rawSql": "SELECT COUNT(*) FROM pg_stat_activity WHERE state = 'active'",
           "refId": "A",
           "format": "table"
@@ -71,7 +77,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -123,7 +132,10 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "datasource": "PostgreSQL",
+          "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
           "rawSql": "SELECT SUM(seq_scan) as total_seq_scans FROM pg_stat_user_tables WHERE schemaname = 'public'",
           "refId": "A",
           "format": "table"
@@ -133,7 +145,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -193,7 +208,10 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "datasource": "PostgreSQL",
+          "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
           "rawSql": "SELECT relname as table_name, seq_scan FROM pg_stat_user_tables WHERE schemaname = 'public' AND seq_scan > 0 ORDER BY seq_scan DESC LIMIT 10",
           "refId": "A",
           "format": "table"
@@ -203,7 +221,10 @@
       "type": "table"
     },
     {
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -263,7 +284,10 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "datasource": "PostgreSQL",
+          "datasource": {
+        "type": "postgres",
+        "uid": "postgres-airflow"
+      },
           "rawSql": "SELECT tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10",
           "refId": "A",
           "format": "table"

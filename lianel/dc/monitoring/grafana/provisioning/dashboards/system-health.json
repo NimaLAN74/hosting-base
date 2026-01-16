@@ -109,7 +109,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "count(up{job=~\"airflow|nginx|redis\"} == 1)",
+          "expr": "count(container_memory_usage_bytes{name=~\"nginx-proxy|dc-airflow.*|dc-redis-1\"} > 0)",
           "refId": "A"
         }
       ],

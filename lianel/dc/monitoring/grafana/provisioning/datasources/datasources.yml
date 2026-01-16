@@ -37,7 +37,7 @@ datasources:
   - name: PostgreSQL Airflow
     type: postgres
     access: proxy
-    url: postgres:5432
+    url: 172.18.0.1:5432
     database: airflow
     user: airflow
     uid: postgres-airflow
@@ -50,5 +50,6 @@ datasources:
       connMaxLifetime: 14400
       postgresVersion: 1500
       timescaledb: false
+      search_path: public
     isDefault: false
     editable: true

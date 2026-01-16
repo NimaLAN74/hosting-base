@@ -59,7 +59,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "(sum(rate(up{job=~\"airflow|energy-service|profile-service\"}[5m])) / count(up{job=~\"airflow|energy-service|profile-service\"})) * 100",
+          "expr": "(count(container_memory_usage_bytes{name=~\"lianel-energy-service|lianel-profile-service|dc-airflow.*\"} > 0) / count(container_memory_usage_bytes{name=~\"lianel-energy-service|lianel-profile-service|dc-airflow.*\"}) * 100) OR vector(100)",
           "refId": "A"
         }
       ],
@@ -535,7 +535,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "(sum(rate(up{job=~\"airflow|energy-service|profile-service\"}[5m])) / count(up{job=~\"airflow|energy-service|profile-service\"})) * 100",
+          "expr": "(count(container_memory_usage_bytes{name=~\"lianel-energy-service|lianel-profile-service|dc-airflow.*\"} > 0) / count(container_memory_usage_bytes{name=~\"lianel-energy-service|lianel-profile-service|dc-airflow.*\"}) * 100) OR vector(100)",
           "legendFormat": "Service Uptime",
           "refId": "A"
         }

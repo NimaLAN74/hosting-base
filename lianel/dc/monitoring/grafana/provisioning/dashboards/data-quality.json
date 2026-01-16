@@ -9,7 +9,10 @@
   "links": [],
   "panels": [
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -92,7 +95,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -171,7 +177,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -250,7 +259,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -333,7 +345,10 @@
       "type": "stat"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -425,7 +440,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -517,7 +535,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -588,7 +609,10 @@
       "type": "table"
     },
     {
-      "datasource": "PostgreSQL Energy",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-energy"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
