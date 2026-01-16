@@ -74,6 +74,13 @@ services:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini
+    entrypoint: |
+      sh -c "
+        if [ -n \"$$POSTGRES_PASSWORD\" ]; then
+          sed -i \"s|\\\$${POSTGRES_PASSWORD}|$$POSTGRES_PASSWORD|g\" /etc/grafana/provisioning/datasources/datasources.yml
+        fi &&
+        /run.sh
+      "
     expose:
       - "3000"
     restart: unless-stopped
