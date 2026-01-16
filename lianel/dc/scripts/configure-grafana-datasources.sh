@@ -9,8 +9,15 @@ GRAFANA_USER="${GRAFANA_ADMIN_USER:-admin}"
 GRAFANA_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-admin}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 
+# Try to get password from .env file if not set
 if [ -z "$POSTGRES_PASSWORD" ]; then
-    echo "Error: POSTGRES_PASSWORD not set"
+    if [ -f ".env" ]; then
+        export $(grep -v '^#' .env | grep POSTGRES_PASSWORD | xargs)
+    fi
+fi
+
+if [ -z "$POSTGRES_PASSWORD" ]; then
+    echo "Error: POSTGRES_PASSWORD not set in environment or .env file"
     exit 1
 fi
 
