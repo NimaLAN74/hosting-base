@@ -128,7 +128,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN total > 0 THEN (success::float / total::float * 100) ELSE 0 END as success_rate FROM (SELECT COUNT(*) FILTER (WHERE state = 'success') as success, COUNT(*) as total FROM dag_run WHERE end_date > NOW() - INTERVAL '7 days') subq;",
+          "rawSql": "SELECT CASE WHEN total > 0 THEN (success::float / total::float * 100) ELSE 0 END as success_rate FROM (SELECT COUNT(*) FILTER (WHERE state = 'success') as success, COUNT(*) FILTER (WHERE end_date IS NOT NULL) as total FROM dag_run WHERE end_date IS NOT NULL AND end_date > NOW() - INTERVAL '7 days') subq;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -214,7 +214,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(EXTRACT(EPOCH FROM (end_date - start_date))) as avg_duration FROM dag_run WHERE state = 'success' AND end_date > NOW() - INTERVAL '7 days';",
+          "rawSql": "SELECT AVG(EXTRACT(EPOCH FROM (end_date - start_date))) as avg_duration FROM dag_run WHERE state = 'success' AND end_date IS NOT NULL AND start_date IS NOT NULL AND end_date > NOW() - INTERVAL '7 days';",
           "refId": "A",
           "sql": {
             "columns": [
@@ -445,7 +445,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(EXTRACT(EPOCH FROM (end_date - start_date))) as avg_query_time FROM (SELECT start_date, end_date FROM dag_run WHERE state = 'success' AND end_date > NOW() - INTERVAL '7 days' LIMIT 100) subq;",
+          "rawSql": "SELECT AVG(EXTRACT(EPOCH FROM (end_date - start_date))) as avg_query_time FROM (SELECT start_date, end_date FROM dag_run WHERE state = 'success' AND end_date IS NOT NULL AND start_date IS NOT NULL AND end_date > NOW() - INTERVAL '7 days' LIMIT 100) subq;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -618,7 +618,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('hour', end_date) as time, (COUNT(*) FILTER (WHERE state = 'success')::float / COUNT(*)::float * 100) as success_rate FROM dag_run WHERE end_date > NOW() - INTERVAL '7 days' GROUP BY time ORDER BY time;",
+          "rawSql": "SELECT date_trunc('hour', end_date)::timestamp as time, (COUNT(*) FILTER (WHERE state = 'success')::float / NULLIF(COUNT(*), 0)::float * 100) as success_rate FROM dag_run WHERE end_date IS NOT NULL AND end_date > NOW() - INTERVAL '7 days' GROUP BY time ORDER BY time;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -692,7 +692,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT dag_id, COUNT(*) FILTER (WHERE state = 'success') as success_count, COUNT(*) FILTER (WHERE state = 'failed') as failed_count, COUNT(*) as total_runs, (COUNT(*) FILTER (WHERE state = 'success')::float / COUNT(*)::float * 100) as success_rate, AVG(EXTRACT(EPOCH FROM (end_date - start_date))) as avg_duration_seconds FROM dag_run WHERE end_date > NOW() - INTERVAL '7 days' GROUP BY dag_id ORDER BY success_rate ASC;",
+          "rawSql": "SELECT dag_id, COUNT(*) FILTER (WHERE state = 'success') as success_count, COUNT(*) FILTER (WHERE state = 'failed') as failed_count, COUNT(*) as total_runs, CASE WHEN COUNT(*) > 0 THEN (COUNT(*) FILTER (WHERE state = 'success')::float / COUNT(*)::float * 100) ELSE 0 END as success_rate, AVG(EXTRACT(EPOCH FROM (end_date - start_date))) FILTER (WHERE end_date IS NOT NULL AND start_date IS NOT NULL) as avg_duration_seconds FROM dag_run WHERE end_date IS NOT NULL AND end_date > NOW() - INTERVAL '7 days' GROUP BY dag_id ORDER BY success_rate ASC;",
           "refId": "A",
           "sql": {
             "columns": [
