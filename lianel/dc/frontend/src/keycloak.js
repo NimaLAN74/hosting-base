@@ -19,7 +19,7 @@ export { keycloak };
 const initOptions = {
   checkLoginIframe: false,  // DISABLED: X-Frame-Options blocks cross-domain iframe
   enableLogging: true,
-  // pkceMethod: 'S256',  // TEMPORARILY DISABLED: Keycloak 26.4.6 rejects PKCE code_challenge from keycloak-js 26.2.1
+  pkceMethod: 'S256',  // REQUIRED: Keycloak 26.4.6 requires PKCE for public clients
   flow: 'standard'
 };
 
