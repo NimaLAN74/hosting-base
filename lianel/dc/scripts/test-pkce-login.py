@@ -44,7 +44,7 @@ try:
             print('✅ SUCCESS - Redirects to Keycloak login page')
             print(f'   PKCE challenge accepted!')
             print(f'   Location: {location[:120]}...')
-            return 0
+            exit(0)
         elif 'error' in location:
             error_parts = location.split('#error=')[1].split('&') if '#error=' in location else []
             error = error_parts[0] if error_parts else 'unknown'
@@ -55,20 +55,17 @@ try:
             print(f'Description: {desc}')
             if 'code_challenge' in desc or 'PKCE' in desc:
                 print('   Issue: PKCE validation failed')
-            return 1
+            exit(1)
         else:
             print(f'⚠️  Unexpected redirect: {location[:150]}')
-            return 1
+            exit(1)
     else:
         print(f'❌ Unexpected status: {response.status_code}')
         print(f'Response: {response.text[:300]}')
-        return 1
+        exit(1)
         
 except Exception as e:
     print(f'❌ Error: {e}')
     import traceback
     traceback.print_exc()
-    return 1
-
-if __name__ == '__main__':
-    exit(main() if 'main' in dir() else 0)
+    exit(1)
