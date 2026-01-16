@@ -65,7 +65,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) as running_dags FROM dag_run WHERE state = 'running';",
+          "rawSql": "SELECT COUNT(*) as running_dags FROM public.dag_run WHERE state = 'running';",
           "refId": "A",
           "sql": {
             "columns": [
@@ -150,7 +150,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) as failed_dags FROM dag_run WHERE state = 'failed' AND end_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours';",
+          "rawSql": "SELECT COUNT(*) as failed_dags FROM public.dag_run WHERE state = 'failed' AND end_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours';",
           "refId": "A",
           "sql": {
             "columns": [
@@ -235,7 +235,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) as queued_tasks FROM task_instance WHERE state = 'queued';",
+          "rawSql": "SELECT COUNT(*) as queued_tasks FROM public.task_instance WHERE state = 'queued';",
           "refId": "A",
           "sql": {
             "columns": [
@@ -320,7 +320,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN total > 0 THEN (success::float / total::float * 100) ELSE 0 END as success_rate FROM (SELECT COUNT(*) FILTER (WHERE state = 'success') as success, COUNT(*) FILTER (WHERE end_date IS NOT NULL) as total FROM dag_run WHERE end_date > NOW() - INTERVAL '24 hours') subq;",
+          "rawSql": "SELECT CASE WHEN total > 0 THEN (success::float / total::float * 100) ELSE 0 END as success_rate FROM (SELECT COUNT(*) FILTER (WHERE state = 'success') as success, COUNT(*) FILTER (WHERE end_date IS NOT NULL) as total FROM public.dag_run WHERE end_date > NOW() - INTERVAL '24 hours') subq;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -394,7 +394,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT end_date::timestamp as time, EXTRACT(EPOCH FROM (end_date - start_date)) as duration FROM dag_run WHERE state = 'success' AND end_date IS NOT NULL AND start_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours' ORDER BY end_date;",
+          "rawSql": "SELECT end_date::timestamp as time, EXTRACT(EPOCH FROM (end_date - start_date)) as duration FROM public.dag_run WHERE state = 'success' AND end_date IS NOT NULL AND start_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours' ORDER BY end_date;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -468,7 +468,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT dag_id, state, COUNT(*) as count, MAX(end_date) as last_run FROM dag_run WHERE end_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours' GROUP BY dag_id, state ORDER BY dag_id, state;",
+          "rawSql": "SELECT dag_id, state, COUNT(*) as count, MAX(end_date) as last_run FROM public.dag_run WHERE end_date IS NOT NULL AND end_date > NOW() - INTERVAL '24 hours' GROUP BY dag_id, state ORDER BY dag_id, state;",
           "refId": "A",
           "sql": {
             "columns": [
