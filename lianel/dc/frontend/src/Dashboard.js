@@ -181,6 +181,9 @@ function Dashboard() {
 
   // Combine services: base services for everyone, admin services for admins
   const services = [...baseServices, ...adminServices];
+  
+  // All services combined for stats
+  const allServices = [...mainAnalytics, ...baseServices, ...adminServices];
 
   // Recent activity - show different activities based on role
   const recentActivity = [
@@ -308,7 +311,7 @@ function Dashboard() {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-icon">🚀</div>
-                <div className="stat-value">{services.length}</div>
+                <div className="stat-value">{allServices.length}</div>
                 <div className="stat-label">Active Services</div>
               </div>
               <div className="stat-card">
