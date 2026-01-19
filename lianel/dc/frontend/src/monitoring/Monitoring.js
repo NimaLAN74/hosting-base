@@ -4,16 +4,11 @@ import { useKeycloak } from '../KeycloakProvider';
 import './Monitoring.css';
 
 function Monitoring() {
-  const { authenticated, login } = useKeycloak();
+  const { authenticated, login, keycloakReady } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
 
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!authenticated) {
-      login();
-      return;
-    }
-  }, [authenticated, login]);
+  // Wait for Keycloak to be ready before checking authentication
+  // Don't auto-redirect - let user see the message and click login if needed
 
   // Grafana dashboards configuration
   // UIDs match the dashboard JSON files in monitoring/grafana/provisioning/dashboards/
@@ -111,11 +106,49 @@ function Monitoring() {
     window.open(url, '_blank');
   };
 
+  // Show loading state while Keycloak initializes
+  if (!keycloakReady) {
+    return (
+      <PageTemplate title="Monitoring & Dashboards">
+        <div className="monitoring-container" style={{ padding: '24px', textAlign: 'center' }}>
+          <p style={{ fontSize: '16px', color: '#4a5568' }}>Loading authentication...</p>
+        </div>
+      </PageTemplate>
+    );
+  }
+
+  // Show login message if not authenticated (but don't auto-redirect)
   if (!authenticated) {
     return (
       <PageTemplate title="Monitoring & Dashboards">
         <div className="monitoring-container" style={{ padding: '24px', textAlign: 'center' }}>
-          <p style={{ fontSize: '16px', color: '#4a5568' }}>Please log in to view monitoring dashboards.</p>
+          <p style={{ fontSize: '16px', color: '#4a5568', marginBottom: '20px' }}>
+            Please log in to view monitoring dashboards.
+          </p>
+          <button
+            onClick={() => login(true)}
+            style={{
+              padding: '12px 24px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'transform 0.2s, box-shadow 0.2s'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            Log In
+          </button>
         </div>
       </PageTemplate>
     );

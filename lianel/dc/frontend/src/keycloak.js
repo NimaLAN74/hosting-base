@@ -140,7 +140,7 @@ export const initKeycloak = () => {
 /**
  * Login function - redirects to Keycloak login
  */
-export const login = () => {
+export const login = (redirectToCurrentPath = true) => {
   // Clear any stored token to avoid using a stale session when switching users
   try {
     keycloak.clearToken();
@@ -150,9 +150,15 @@ export const login = () => {
   } catch (e) {
     console.warn('Could not clear stored token before login:', e);
   }
+  
+  // Preserve current path so user returns to the same page after login
+  const redirectUri = redirectToCurrentPath 
+    ? window.location.origin + window.location.pathname + window.location.search
+    : window.location.origin + '/';
+  
   // Use Keycloak's built-in login method which handles PKCE automatically
   return keycloak.login({
-    redirectUri: window.location.origin + '/',
+    redirectUri: redirectUri,
     prompt: 'login'  // Force re-authentication
   });
 };
