@@ -30,6 +30,11 @@ echo ""
 # Check if we can use psql directly or need to use docker exec
 if command -v psql >/dev/null 2>&1; then
   echo "Using psql from host..."
+  if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+    echo "Error: POSTGRES_PASSWORD not set in .env file"
+    echo "Please set POSTGRES_PASSWORD in .env or export it before running this script"
+    exit 1
+  fi
   export PGPASSWORD="${POSTGRES_PASSWORD}"
   psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f database/migrations/003_create_fact_electricity_timeseries.sql
 elif docker ps --format '{{.Names}}' | grep -q 'lianel-energy-service'; then
