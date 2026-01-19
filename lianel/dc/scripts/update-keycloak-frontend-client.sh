@@ -54,26 +54,29 @@ fi
 echo "✓ Frontend client found: $FRONTEND_CLIENT_UUID"
 
 # Update frontend-client with comprehensive redirect URIs
-echo "Updating frontend-client redirect URIs..."
+# IMPORTANT: Remove baseUrl and rootUrl to prevent Keycloak from redirecting to /login
+echo "Updating frontend-client redirect URIs and removing baseUrl/rootUrl..."
 curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$FRONTEND_CLIENT_UUID" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-      "redirectUris": [
-        "https://${DOMAIN_MAIN}/*",
-        "https://${DOMAIN_ALT}/*",
-        "https://${DOMAIN_MAIN}/monitoring",
-        "https://${DOMAIN_MAIN}/monitoring/*",
-        "https://${DOMAIN_ALT}/monitoring",
-        "https://${DOMAIN_ALT}/monitoring/*"
-      ],
-      "webOrigins": [
-        "https://${DOMAIN_MAIN}",
-        "https://${DOMAIN_ALT}"
-      ],
-      "attributes": {
-        "post.logout.redirect.uris": "https://${DOMAIN_MAIN}\nhttps://${DOMAIN_ALT}\nhttps://${DOMAIN_MAIN}/monitoring\nhttps://${DOMAIN_ALT}/monitoring"
-      }
+    "redirectUris": [
+      "https://${DOMAIN_MAIN}/*",
+      "https://${DOMAIN_ALT}/*",
+      "https://${DOMAIN_MAIN}/monitoring",
+      "https://${DOMAIN_MAIN}/monitoring/*",
+      "https://${DOMAIN_ALT}/monitoring",
+      "https://${DOMAIN_ALT}/monitoring/*"
+    ],
+    "webOrigins": [
+      "https://${DOMAIN_MAIN}",
+      "https://${DOMAIN_ALT}"
+    ],
+    "baseUrl": "",
+    "rootUrl": "",
+    "attributes": {
+      "post.logout.redirect.uris": "https://${DOMAIN_MAIN}\nhttps://${DOMAIN_ALT}\nhttps://${DOMAIN_MAIN}/monitoring\nhttps://${DOMAIN_ALT}/monitoring"
+    }
   }' > /dev/null
 
 echo "✅ Frontend client updated with /monitoring redirect URIs"
