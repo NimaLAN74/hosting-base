@@ -4,7 +4,7 @@ import { useKeycloak } from '../KeycloakProvider';
 import './Monitoring.css';
 
 function Monitoring() {
-  const { authenticated, login } = useKeycloak();
+  const { authenticated, login, keycloakReady } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
 
   // Get Grafana URL from environment variable
@@ -105,6 +105,16 @@ function Monitoring() {
   const handleOpenInGrafana = (url) => {
     window.open(url, '_blank');
   };
+
+  // Wait for Keycloak to be ready before checking authentication
+  // This prevents redirect loops when Keycloak is still initializing
+  if (!keycloakReady) {
+    return (
+      <div className="monitoring-container" style={{ padding: '40px', textAlign: 'center' }}>
+        <p style={{ fontSize: '18px', marginBottom: '20px' }}>Loading authentication...</p>
+      </div>
+    );
+  }
 
   // Show login message if not authenticated (same pattern as /electricity and /geo)
   if (!authenticated) {
