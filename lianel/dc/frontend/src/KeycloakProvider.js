@@ -60,13 +60,21 @@ export const KeycloakProvider = ({ children }) => {
 
     // Set up Keycloak event listeners for auth state changes
     const onAuthSuccess = () => {
-      console.log('Keycloak onAuthSuccess event');
-      updateAuthState();
+      console.log('Keycloak onAuthSuccess event - updating state');
+      // Force immediate state update
+      setTimeout(() => {
+        updateAuthState();
+        // Double-check after a short delay to ensure state is correct
+        setTimeout(() => {
+          updateAuthState();
+        }, 100);
+      }, 50);
     };
 
     const onAuthError = () => {
       console.log('Keycloak onAuthError event');
       setAuthenticated(false);
+      setUserInfo(null);
     };
 
     const onTokenExpired = () => {
@@ -90,6 +98,12 @@ export const KeycloakProvider = ({ children }) => {
     keycloak.onAuthSuccess = onAuthSuccess;
     keycloak.onAuthError = onAuthError;
     keycloak.onTokenExpired = onTokenExpired;
+    
+    // Also listen for auth refresh success
+    keycloak.onAuthRefreshSuccess = () => {
+      console.log('Keycloak onAuthRefreshSuccess event');
+      updateAuthState();
+    };
 
     // Listen for token updates and force refresh to get updated roles
     const updateToken = async () => {

@@ -6,9 +6,18 @@ import './Monitoring.css';
 function Monitoring() {
   const { authenticated, login, keycloakReady } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
+  const [authCheckComplete, setAuthCheckComplete] = useState(false);
 
-  // Wait for Keycloak to be ready before checking authentication
-  // Don't auto-redirect - let user see the message and click login if needed
+  // Wait for Keycloak to be ready and give it time to process callback
+  useEffect(() => {
+    if (keycloakReady) {
+      // Give Keycloak a moment to process any callback
+      const timer = setTimeout(() => {
+        setAuthCheckComplete(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [keycloakReady]);
 
   // Grafana dashboards configuration
   // UIDs match the dashboard JSON files in monitoring/grafana/provisioning/dashboards/
@@ -107,7 +116,7 @@ function Monitoring() {
   };
 
   // Show loading state while Keycloak initializes
-  if (!keycloakReady) {
+  if (!keycloakReady || !authCheckComplete) {
     return (
       <PageTemplate title="Monitoring & Dashboards">
         <div className="monitoring-container" style={{ padding: '24px', textAlign: 'center' }}>
