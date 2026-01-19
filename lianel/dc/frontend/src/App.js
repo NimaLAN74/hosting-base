@@ -6,6 +6,7 @@ import Dashboard from './Dashboard';
 import Energy from './energy/Energy';
 import ElectricityTimeseries from './electricity/ElectricityTimeseries';
 import GeoFeatures from './geo/GeoFeatures';
+import Monitoring from './monitoring/Monitoring';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
