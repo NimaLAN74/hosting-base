@@ -74,14 +74,9 @@ services:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
-    entrypoint: |
-      sh -c "
-        # Substitute POSTGRES_PASSWORD in datasources file before Grafana starts
-        if [ -n \"$$POSTGRES_PASSWORD\" ]; then
-          sed -i.bak \"s|\\\$${POSTGRES_PASSWORD}|$$POSTGRES_PASSWORD|g\" /etc/grafana/provisioning/datasources/datasources.yml
-        fi
-        /run.sh
-      "
+    # Use init script to configure datasources after Grafana starts
+    # The script will be run via docker exec after container starts
+    # This is more reliable than trying to do it in entrypoint
     expose:
       - "3000"
     restart: unless-stopped

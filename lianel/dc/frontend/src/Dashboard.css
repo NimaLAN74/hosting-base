@@ -352,6 +352,42 @@
   }
 }
 
+/* ===== SERVICES LINK CARD ===== */
+.services-link-card {
+  background: white;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  text-align: center;
+}
+
+.services-link-card .section-title {
+  margin-bottom: 12px;
+}
+
+.services-link-card .section-subtitle {
+  font-size: 16px;
+  color: #64748b;
+  margin-bottom: 24px;
+}
+
+.btn-view-services {
+  display: inline-block;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.btn-view-services:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 /* ===== ANIMATIONS ===== */
 @keyframes pulse {
   0%, 100% {

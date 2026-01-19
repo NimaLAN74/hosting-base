@@ -1,9 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PageTemplate from '../PageTemplate';
+import { useKeycloak } from '../KeycloakProvider';
 import './Monitoring.css';
 
 function Monitoring() {
+  const { authenticated, login } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!authenticated) {
+      login();
+      return;
+    }
+  }, [authenticated, login]);
 
   // Grafana dashboards configuration
   // UIDs match the dashboard JSON files in monitoring/grafana/provisioning/dashboards/
@@ -100,6 +110,16 @@ function Monitoring() {
   const handleOpenInGrafana = (url) => {
     window.open(url, '_blank');
   };
+
+  if (!authenticated) {
+    return (
+      <PageTemplate title="Monitoring & Dashboards">
+        <div className="monitoring-container">
+          <p>Please log in to view monitoring dashboards.</p>
+        </div>
+      </PageTemplate>
+    );
+  }
 
   return (
     <PageTemplate title="Monitoring & Dashboards">

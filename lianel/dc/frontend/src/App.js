@@ -7,6 +7,7 @@ import Energy from './energy/Energy';
 import ElectricityTimeseries from './electricity/ElectricityTimeseries';
 import GeoFeatures from './geo/GeoFeatures';
 import Monitoring from './monitoring/Monitoring';
+import Services from './services/Services';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -37,6 +38,7 @@ function App() {
             <Route path="/electricity" element={<ElectricityTimeseries />} />
             <Route path="/geo" element={<GeoFeatures />} />
             <Route path="/monitoring" element={<Monitoring />} />
+            <Route path="/services" element={<Services />} />
             <Route
               path="/admin/users"
               element={

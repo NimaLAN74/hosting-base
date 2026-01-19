@@ -114,76 +114,8 @@ function Dashboard() {
     }
   ];
 
-  // Base services - moved to sub-pages
-  const baseServices = [
-    {
-      name: 'User Profile',
-      description: 'View and edit your user profile',
-      icon: '👤',
-      url: '/profile',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-      category: 'Account'
-    }
-  ];
-
-  // Admin-only services
-  const adminServices = finalIsAdmin ? [
-    {
-      name: 'Apache Airflow',
-      description: 'Workflow orchestration and management',
-      icon: '⚙️',
-      url: 'https://airflow.lianel.se',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-    },
-    {
-      name: 'Grafana Monitoring',
-      description: 'Real-time system monitoring and analytics',
-      icon: '📊',
-      url: 'https://monitoring.lianel.se',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
-    },
-    {
-      name: 'Profile Management',
-      description: 'Admin tools to manage users',
-      icon: '🧑‍💼',
-      url: '/admin/users',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
-    },
-    {
-      name: 'Profile Service API',
-      description: 'User profile management service (Admin only)',
-      icon: '🔧',
-      url: '/swagger-ui',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
-    },
-    {
-      name: 'Energy Service API',
-      description: 'Energy data service API documentation (Admin only)',
-      icon: '🔧',
-      url: '/api/energy/swagger-ui',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)'
-    },
-    {
-      name: 'Admin Console',
-      description: 'Manage users and access',
-      icon: '🛡️',
-      url: '/admin/users',
-      status: 'active',
-      gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)'
-    }
-  ] : [];
-
-  // Combine services: base services for everyone, admin services for admins
-  const services = [...baseServices, ...adminServices];
-  
-  // All services combined for stats
-  const allServices = [...mainAnalytics, ...baseServices, ...adminServices];
+  // All services combined for stats (only main analytics on main page)
+  const allServices = [...mainAnalytics];
 
   // Recent activity - show different activities based on role
   const recentActivity = [
@@ -251,39 +183,16 @@ function Dashboard() {
             </div>
           </section>
 
-          {/* Other Services */}
-          {services.length > 0 && (
-            <section className="services-section">
+          {/* Link to Services Page */}
+          <section className="services-section">
+            <div className="services-link-card">
               <h2 className="section-title">Other Services</h2>
-              <div className="services-grid">
-                {services.map((service, index) => (
-                  <a 
-                    key={index} 
-                    href={service.url} 
-                    className="service-card"
-                    target={service.url.startsWith('http') ? '_self' : '_self'}
-                    rel={service.url.startsWith('http') ? 'noopener noreferrer' : ''}
-                  >
-                    <div className="service-header" style={{ background: service.gradient }}>
-                      <div className="service-icon">{service.icon}</div>
-                      <div className={`service-status status-${service.status}`}>
-                        <span className="status-dot"></span>
-                        {service.status}
-                      </div>
-                    </div>
-                    <div className="service-content">
-                      <h3 className="service-name">{service.name}</h3>
-                      <p className="service-description">{service.description}</p>
-                      <div className="service-action">
-                        Open Service
-                        <span className="arrow">→</span>
-                      </div>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </section>
-          )}
+              <p className="section-subtitle">Access user profile, admin tools, and API documentation</p>
+              <a href="/services" className="btn-view-services">
+                View All Services →
+              </a>
+            </div>
+          </section>
 
           {/* Recent Activity */}
           <section className="activity-section">
