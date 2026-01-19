@@ -13,6 +13,8 @@ The workflow expected the deployment script at:
 But the script was actually located at:
 - `lianel/dc/scripts/deployment/deploy-frontend.sh`
 
+**Note**: The script has been moved to the proper location in `scripts/deployment/` and the workflow has been updated to reference the correct path.
+
 When the workflow tried to copy the script via SCP, it couldn't find the file, causing the SCP command to fail with exit code 255.
 
 ## Fix Applied
