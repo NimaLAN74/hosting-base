@@ -185,11 +185,42 @@ export const login = (redirectToCurrentPath = true) => {
     ? window.location.origin + window.location.pathname + window.location.search
     : window.location.origin + '/';
   
-  // Use Keycloak's built-in login method which handles PKCE automatically
-  return keycloak.login({
-    redirectUri: redirectUri,
-    prompt: 'login'  // Force re-authentication
-  });
+  console.log('Login: redirecting to Keycloak with redirectUri:', redirectUri);
+  
+  try {
+    // Use Keycloak's createLoginUrl to build the URL explicitly
+    // This ensures we always redirect to Keycloak, not /login
+    const loginUrl = keycloak.createLoginUrl({
+      redirectUri: redirectUri,
+      prompt: 'login'  // Force re-authentication
+    });
+    
+    console.log('Login: Keycloak login URL:', loginUrl);
+    
+    // Explicitly redirect to Keycloak
+    window.location.href = loginUrl;
+  } catch (error) {
+    console.error('Login error:', error);
+    // Fallback: try keycloak.login() if createLoginUrl fails
+    try {
+      keycloak.login({
+        redirectUri: redirectUri,
+        prompt: 'login'
+      });
+    } catch (fallbackError) {
+      console.error('Login fallback error:', fallbackError);
+      // Last resort: redirect to Keycloak manually
+      const keycloakUrl = `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/auth`;
+      const params = new URLSearchParams({
+        client_id: keycloakConfig.clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'openid profile email',
+        prompt: 'login'
+      });
+      window.location.href = `${keycloakUrl}?${params.toString()}`;
+    }
+  }
 };
 
 /**
