@@ -186,30 +186,51 @@ export const login = (redirectToCurrentPath = true) => {
     ? window.location.origin + window.location.pathname + window.location.search
     : window.location.origin + '/';
   
+  console.log('=== LOGIN FUNCTION CALLED ===');
   console.log('Login: redirecting to Keycloak with redirectUri:', redirectUri);
   console.log('Login: current pathname:', window.location.pathname);
+  console.log('Login: current origin:', window.location.origin);
   console.log('Login: keycloakConfig:', keycloakConfig);
+  console.log('Login: keycloak.authenticated:', keycloak.authenticated);
+  console.log('Login: keycloak.token exists:', !!keycloak.token);
   
   try {
     // Use Keycloak's createLoginUrl to build the URL explicitly
     // This ensures we always redirect to Keycloak, not /login
+    console.log('Login: Calling keycloak.createLoginUrl() with:', {
+      redirectUri: redirectUri,
+      prompt: 'login'
+    });
+    
     const loginUrl = keycloak.createLoginUrl({
       redirectUri: redirectUri,
       prompt: 'login'  // Force re-authentication
     });
     
     console.log('Login: Keycloak login URL generated:', loginUrl);
+    console.log('Login: URL contains /login?', loginUrl.includes('/login'));
+    console.log('Login: URL contains auth.lianel.se?', loginUrl.includes('auth.lianel.se'));
+    console.log('Login: URL contains redirect_uri?', loginUrl.includes('redirect_uri'));
     
-    // Verify the URL doesn't contain /login
+    // Verify the URL doesn't contain /login (except in Keycloak domain)
     if (loginUrl.includes('/login') && !loginUrl.includes('auth.lianel.se')) {
-      console.error('ERROR: Generated login URL contains /login! URL:', loginUrl);
+      console.error('❌ ERROR: Generated login URL contains /login outside Keycloak domain!');
+      console.error('URL:', loginUrl);
       console.error('This should not happen. Falling back to manual URL construction.');
       // Fall through to manual construction
       throw new Error('Generated URL contains /login');
     }
     
+    // Check if redirect_uri is in the URL
+    if (!loginUrl.includes(encodeURIComponent(redirectUri)) && !loginUrl.includes(redirectUri)) {
+      console.warn('⚠️ WARNING: redirect_uri might not be in the generated URL!');
+      console.warn('Expected redirect_uri:', redirectUri);
+      console.warn('Generated URL:', loginUrl);
+    }
+    
     // Explicitly redirect to Keycloak
-    console.log('Login: Redirecting to Keycloak:', loginUrl);
+    console.log('Login: About to redirect to Keycloak:', loginUrl);
+    console.log('Login: Setting window.location.href...');
     window.location.href = loginUrl;
   } catch (error) {
     console.error('Login error:', error);
