@@ -40,11 +40,36 @@ export const initKeycloak = () => {
         // If we have a code, we went through the callback flow
         if (code) {
           console.log('Processing authorization callback - code detected');
-          // Clean up the callback URL
+          // Clean up the callback URL immediately to prevent issues
           window.history.replaceState({}, '', window.location.pathname);
-          // Force re-check authentication after callback
+          
+          // Keycloak.js should have already exchanged the code for a token
+          // But we need to verify authentication state
           if (keycloak.authenticated && keycloak.token) {
-            console.log('Authentication confirmed after callback');
+            console.log('Authentication confirmed after callback - token available');
+            // Ensure token is stored
+            try {
+              localStorage.setItem('keycloak_token', keycloak.token);
+              localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+              localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+            } catch (e) {
+              console.warn('Could not store token after callback:', e);
+            }
+          } else {
+            console.warn('Callback detected but authentication not confirmed yet');
+            // Wait a bit for Keycloak to finish processing
+            setTimeout(() => {
+              if (keycloak.authenticated && keycloak.token) {
+                console.log('Authentication confirmed after delay');
+                try {
+                  localStorage.setItem('keycloak_token', keycloak.token);
+                  localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+                  localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+                } catch (e) {
+                  console.warn('Could not store token:', e);
+                }
+              }
+            }, 200);
           }
         }
 

@@ -23,27 +23,73 @@ export const KeycloakProvider = ({ children }) => {
     const code = urlParams.get('code');
     const isCallback = !!code;
 
+    // Function to update authentication state
+    const updateAuthState = () => {
+      const auth = isAuthenticated();
+      setAuthenticated(auth);
+      if (auth) {
+        setUserInfo(getUserInfo());
+      }
+    };
+
     // Initialize Keycloak
     initKeycloak()
       .then((auth) => {
-        setAuthenticated(auth);
-        if (auth) {
-          setUserInfo(getUserInfo());
-        }
+        console.log('Keycloak initialized, authenticated:', auth);
+        updateAuthState();
         setKeycloakReady(true);
         
-        // If we came from a callback and are now authenticated, update state
-        if (isCallback && auth) {
-          console.log('Login callback detected, user authenticated');
-          // Force state update to ensure UI reflects authentication
-          setAuthenticated(true);
-          setUserInfo(getUserInfo());
+        // If we came from a callback, wait a bit for Keycloak to process it
+        if (isCallback) {
+          console.log('Login callback detected, waiting for token exchange...');
+          // Give Keycloak time to exchange the code for a token
+          setTimeout(() => {
+            updateAuthState();
+            // Double-check after a short delay
+            setTimeout(() => {
+              updateAuthState();
+            }, 500);
+          }, 100);
         }
       })
       .catch((error) => {
         console.error('Keycloak initialization error:', error);
         setKeycloakReady(true);
+        setAuthenticated(false);
       });
+
+    // Set up Keycloak event listeners for auth state changes
+    const onAuthSuccess = () => {
+      console.log('Keycloak onAuthSuccess event');
+      updateAuthState();
+    };
+
+    const onAuthError = () => {
+      console.log('Keycloak onAuthError event');
+      setAuthenticated(false);
+    };
+
+    const onTokenExpired = () => {
+      console.log('Keycloak onTokenExpired event');
+      // Try to refresh token
+      keycloak.updateToken(70)
+        .then((refreshed) => {
+          if (refreshed) {
+            console.log('Token refreshed after expiry');
+            updateAuthState();
+          } else {
+            setAuthenticated(false);
+          }
+        })
+        .catch(() => {
+          setAuthenticated(false);
+        });
+    };
+
+    // Register event listeners
+    keycloak.onAuthSuccess = onAuthSuccess;
+    keycloak.onAuthError = onAuthError;
+    keycloak.onTokenExpired = onTokenExpired;
 
     // Listen for token updates and force refresh to get updated roles
     const updateToken = async () => {
@@ -53,18 +99,14 @@ export const KeycloakProvider = ({ children }) => {
           const refreshed = await keycloak.updateToken(70);
           if (refreshed) {
             console.log('Token refreshed, updating user info');
-            setUserInfo(getUserInfo());
-            setAuthenticated(true); // Ensure state is updated
+            updateAuthState();
           } else {
             // Token still valid, just update user info
-            setUserInfo(getUserInfo());
-            setAuthenticated(true); // Ensure state is updated
+            updateAuthState();
           }
         } catch (error) {
           console.error('Token refresh failed:', error);
-          setUserInfo(getUserInfo()); // Still update with current token
-          // Check if still authenticated
-          setAuthenticated(isAuthenticated());
+          updateAuthState();
         }
       } else {
         // Not authenticated - update state
@@ -76,8 +118,28 @@ export const KeycloakProvider = ({ children }) => {
     updateToken(); // Refresh immediately on mount
     const tokenInterval = setInterval(updateToken, 30000);
 
+    // Also watch for URL changes (callback handling)
+    const handleLocationChange = () => {
+      const newParams = new URLSearchParams(window.location.search);
+      const newCode = newParams.get('code');
+      if (newCode && !isCallback) {
+        // New callback detected, update state
+        setTimeout(() => {
+          updateAuthState();
+        }, 200);
+      }
+    };
+
+    // Listen for popstate (back/forward) and hashchange
+    window.addEventListener('popstate', handleLocationChange);
+
     return () => {
       clearInterval(tokenInterval);
+      window.removeEventListener('popstate', handleLocationChange);
+      // Clean up event listeners
+      keycloak.onAuthSuccess = null;
+      keycloak.onAuthError = null;
+      keycloak.onTokenExpired = null;
     };
   }, []);
 
