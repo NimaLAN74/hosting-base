@@ -4,7 +4,7 @@ import { useKeycloak } from '../KeycloakProvider';
 import './Monitoring.css';
 
 function Monitoring() {
-  const { authenticated } = useKeycloak();
+  const { authenticated, login } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
 
   // Grafana dashboards configuration
@@ -105,7 +105,26 @@ function Monitoring() {
 
   // Show login message if not authenticated (same pattern as /electricity and /geo)
   if (!authenticated) {
-    return <div className="monitoring-container">Please log in to view monitoring dashboards.</div>;
+    return (
+      <div className="monitoring-container" style={{ padding: '40px', textAlign: 'center' }}>
+        <p style={{ fontSize: '18px', marginBottom: '20px' }}>Please log in to view monitoring dashboards.</p>
+        <button
+          onClick={() => login(true)}
+          style={{
+            padding: '12px 24px',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '16px',
+            fontWeight: '600',
+            cursor: 'pointer'
+          }}
+        >
+          Log In
+        </button>
+      </div>
+    );
   }
 
   return (
