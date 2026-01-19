@@ -40,9 +40,14 @@ function ElectricityTimeseries() {
       if (response.ok) {
         const result = await response.json();
         setData(result.data || []);
+        if (!result.data || result.data.length === 0) {
+          setError('No data available. The electricity timeseries table may be empty. Please check if the ENTSO-E ingestion DAG has run successfully.');
+        }
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setError(errorData.error || 'Failed to load electricity data');
+        const errorMessage = errorData.error || errorData.details || `Failed to load electricity data (${response.status})`;
+        setError(errorMessage);
+        console.error('Electricity API error:', errorData);
       }
     } catch (err) {
       console.error('Error fetching electricity data:', err);

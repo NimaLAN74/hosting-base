@@ -130,6 +130,7 @@ body {
 }
 
 .page-content {
+  min-height: 400px;
   color: var(--text-primary);
 }
 

@@ -114,8 +114,8 @@ function Monitoring() {
   if (!authenticated) {
     return (
       <PageTemplate title="Monitoring & Dashboards">
-        <div className="monitoring-container">
-          <p>Please log in to view monitoring dashboards.</p>
+        <div className="monitoring-container" style={{ padding: '24px', textAlign: 'center' }}>
+          <p style={{ fontSize: '16px', color: '#4a5568' }}>Please log in to view monitoring dashboards.</p>
         </div>
       </PageTemplate>
     );
@@ -123,7 +123,7 @@ function Monitoring() {
 
   return (
     <PageTemplate title="Monitoring & Dashboards">
-      <div className="monitoring-container">
+      <div className="monitoring-container" style={{ minHeight: '400px' }}>
         <div className="monitoring-header">
           <p className="monitoring-description">
             Access Grafana dashboards for system monitoring, data quality, and analytics.
