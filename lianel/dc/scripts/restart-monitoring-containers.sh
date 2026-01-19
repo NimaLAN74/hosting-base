@@ -29,8 +29,16 @@ else
   exit 1
 fi
 
-# Wait a moment for Grafana to start
-sleep 3
+# Wait for Grafana to be ready, then configure datasources
+echo ""
+echo "Waiting for Grafana to be ready..."
+sleep 5
+
+# Configure datasources via API to fix password issue
+if [ -f "scripts/fix-grafana-datasource-password.sh" ]; then
+  echo "Configuring Grafana datasources..."
+  bash scripts/fix-grafana-datasource-password.sh || echo "Warning: Datasource configuration failed, but Grafana is running"
+fi
 
 # Check Grafana status
 echo ""
@@ -44,8 +52,10 @@ echo "Grafana should now have:"
 echo "  - Updated dashboard queries with correct column names"
 echo "  - Updated OAuth configuration for admin access"
 echo "  - Connections feature enabled"
+echo "  - Database passwords configured via API"
 echo ""
 echo "Next steps:"
 echo "1. Log out and log back in to Grafana to get fresh token"
 echo "2. Verify Configuration menu is visible"
 echo "3. Check Data Quality dashboard shows all columns correctly"
+echo "4. Verify database connections work in Grafana"
