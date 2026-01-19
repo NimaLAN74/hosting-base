@@ -39,9 +39,13 @@ export const initKeycloak = () => {
       .then((authenticated) => {
         // If we have a code, we went through the callback flow
         if (code) {
-          console.log('Processing authorization callback');
+          console.log('Processing authorization callback - code detected');
           // Clean up the callback URL
           window.history.replaceState({}, '', window.location.pathname);
+          // Force re-check authentication after callback
+          if (keycloak.authenticated && keycloak.token) {
+            console.log('Authentication confirmed after callback');
+          }
         }
 
         // Keycloak auto-loaded token from sessionStorage/cookie if available

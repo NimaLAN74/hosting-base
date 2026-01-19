@@ -18,6 +18,11 @@ export const KeycloakProvider = ({ children }) => {
   const [userInfo, setUserInfo] = useState(null);
 
   useEffect(() => {
+    // Check if we're returning from Keycloak login (has code parameter)
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const isCallback = !!code;
+
     // Initialize Keycloak
     initKeycloak()
       .then((auth) => {
@@ -26,6 +31,14 @@ export const KeycloakProvider = ({ children }) => {
           setUserInfo(getUserInfo());
         }
         setKeycloakReady(true);
+        
+        // If we came from a callback and are now authenticated, update state
+        if (isCallback && auth) {
+          console.log('Login callback detected, user authenticated');
+          // Force state update to ensure UI reflects authentication
+          setAuthenticated(true);
+          setUserInfo(getUserInfo());
+        }
       })
       .catch((error) => {
         console.error('Keycloak initialization error:', error);
@@ -41,14 +54,21 @@ export const KeycloakProvider = ({ children }) => {
           if (refreshed) {
             console.log('Token refreshed, updating user info');
             setUserInfo(getUserInfo());
+            setAuthenticated(true); // Ensure state is updated
           } else {
             // Token still valid, just update user info
             setUserInfo(getUserInfo());
+            setAuthenticated(true); // Ensure state is updated
           }
         } catch (error) {
           console.error('Token refresh failed:', error);
           setUserInfo(getUserInfo()); // Still update with current token
+          // Check if still authenticated
+          setAuthenticated(isAuthenticated());
         }
+      } else {
+        // Not authenticated - update state
+        setAuthenticated(false);
       }
     };
 
