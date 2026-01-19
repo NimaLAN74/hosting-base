@@ -187,6 +187,8 @@ export const login = (redirectToCurrentPath = true) => {
     : window.location.origin + '/';
   
   console.log('Login: redirecting to Keycloak with redirectUri:', redirectUri);
+  console.log('Login: current pathname:', window.location.pathname);
+  console.log('Login: keycloakConfig:', keycloakConfig);
   
   try {
     // Use Keycloak's createLoginUrl to build the URL explicitly
@@ -196,9 +198,18 @@ export const login = (redirectToCurrentPath = true) => {
       prompt: 'login'  // Force re-authentication
     });
     
-    console.log('Login: Keycloak login URL:', loginUrl);
+    console.log('Login: Keycloak login URL generated:', loginUrl);
+    
+    // Verify the URL doesn't contain /login
+    if (loginUrl.includes('/login') && !loginUrl.includes('auth.lianel.se')) {
+      console.error('ERROR: Generated login URL contains /login! URL:', loginUrl);
+      console.error('This should not happen. Falling back to manual URL construction.');
+      // Fall through to manual construction
+      throw new Error('Generated URL contains /login');
+    }
     
     // Explicitly redirect to Keycloak
+    console.log('Login: Redirecting to Keycloak:', loginUrl);
     window.location.href = loginUrl;
   } catch (error) {
     console.error('Login error:', error);
