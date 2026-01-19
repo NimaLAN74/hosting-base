@@ -3,6 +3,23 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Keycloak configuration
+        REACT_APP_KEYCLOAK_URL: ${REACT_APP_KEYCLOAK_URL:-https://auth.lianel.se}
+        REACT_APP_KEYCLOAK_REALM: ${REACT_APP_KEYCLOAK_REALM:-lianel}
+        REACT_APP_KEYCLOAK_CLIENT_ID: ${REACT_APP_KEYCLOAK_CLIENT_ID:-frontend-client}
+        # Service URLs
+        REACT_APP_GRAFANA_URL: ${REACT_APP_GRAFANA_URL:-https://monitoring.lianel.se}
+        REACT_APP_AIRFLOW_URL: ${REACT_APP_AIRFLOW_URL:-https://airflow.lianel.se}
+        REACT_APP_FRONTEND_URL: ${REACT_APP_FRONTEND_URL:-https://www.lianel.se}
+        # Domain configuration
+        REACT_APP_DOMAIN_MAIN: ${REACT_APP_DOMAIN_MAIN:-www.lianel.se}
+        REACT_APP_DOMAIN_ALT: ${REACT_APP_DOMAIN_ALT:-lianel.se}
+        REACT_APP_DOMAIN_AUTH: ${REACT_APP_DOMAIN_AUTH:-auth.lianel.se}
+        REACT_APP_DOMAIN_MONITORING: ${REACT_APP_DOMAIN_MONITORING:-monitoring.lianel.se}
+        REACT_APP_DOMAIN_AIRFLOW: ${REACT_APP_DOMAIN_AIRFLOW:-airflow.lianel.se}
+        # OAuth2 Proxy
+        REACT_APP_OAUTH2_PROXY_CLIENT_ID: ${REACT_APP_OAUTH2_PROXY_CLIENT_ID:-oauth2-proxy}
     image: lianel-frontend:latest
     container_name: lianel-frontend
     expose:

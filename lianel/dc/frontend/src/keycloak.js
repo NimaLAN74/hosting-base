@@ -1,10 +1,11 @@
 // Keycloak initialization and configuration
 import Keycloak from 'keycloak-js';
 
+// Get configuration from environment variables (REACT_APP_ prefix required)
 const keycloakConfig = {
-  url: 'https://auth.lianel.se',
-  realm: 'lianel',
-  clientId: 'frontend-client'
+  url: process.env.REACT_APP_KEYCLOAK_URL || 'https://auth.lianel.se',
+  realm: process.env.REACT_APP_KEYCLOAK_REALM || 'lianel',
+  clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'frontend-client'
 };
 
 // Initialize Keycloak instance

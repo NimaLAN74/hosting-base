@@ -167,7 +167,11 @@ function Profile() {
     
     // Use OAuth2-proxy sign_out first to clear OAuth2-proxy session
     // Then redirect to Keycloak logout
-    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent('https://auth.lianel.se/realms/lianel/protocol/openid-connect/logout?client_id=oauth2-proxy');
+    const keycloakUrl = process.env.REACT_APP_KEYCLOAK_URL || 'https://auth.lianel.se';
+    const keycloakRealm = process.env.REACT_APP_KEYCLOAK_REALM || 'lianel';
+    const oauth2ProxyClientId = process.env.REACT_APP_OAUTH2_PROXY_CLIENT_ID || 'oauth2-proxy';
+    const logoutUrl = `${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect/logout?client_id=${oauth2ProxyClientId}`;
+    window.location.href = '/oauth2/sign_out?rd=' + encodeURIComponent(logoutUrl);
   };
 
   const getInitials = () => {

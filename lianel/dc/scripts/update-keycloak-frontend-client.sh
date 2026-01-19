@@ -4,10 +4,21 @@
 
 set -e
 
+# Source .env file if it exists
+if [ -f "/root/hosting-base/lianel/dc/.env" ]; then
+    source "/root/hosting-base/lianel/dc/.env"
+elif [ -f ".env" ]; then
+    source ".env"
+fi
+
 KEYCLOAK_URL="${KEYCLOAK_URL:-https://auth.lianel.se}"
-REALM_NAME="${REALM_NAME:-lianel}"
+REALM_NAME="${KEYCLOAK_REALM:-${REALM_NAME:-lianel}}"
 ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
 ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-D2eF5gH9jK3lM7nP1qR4sT8vW2xY6zA}"
+
+# Get domain configuration from environment
+DOMAIN_MAIN="${DOMAIN_MAIN:-www.lianel.se}"
+DOMAIN_ALT="${DOMAIN_ALT:-lianel.se}"
 
 echo "=== Updating Keycloak frontend-client ==="
 echo "Keycloak URL: $KEYCLOAK_URL"
@@ -48,28 +59,28 @@ curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$FRONTEND_CLIENT_
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "redirectUris": [
-      "https://www.lianel.se/*",
-      "https://lianel.se/*",
-      "https://www.lianel.se/monitoring",
-      "https://www.lianel.se/monitoring/*",
-      "https://lianel.se/monitoring",
-      "https://lianel.se/monitoring/*"
-    ],
-    "webOrigins": [
-      "https://www.lianel.se",
-      "https://lianel.se"
-    ],
-    "attributes": {
-      "post.logout.redirect.uris": "https://www.lianel.se\nhttps://lianel.se\nhttps://www.lianel.se/monitoring\nhttps://lianel.se/monitoring"
-    }
+      "redirectUris": [
+        "https://${DOMAIN_MAIN}/*",
+        "https://${DOMAIN_ALT}/*",
+        "https://${DOMAIN_MAIN}/monitoring",
+        "https://${DOMAIN_MAIN}/monitoring/*",
+        "https://${DOMAIN_ALT}/monitoring",
+        "https://${DOMAIN_ALT}/monitoring/*"
+      ],
+      "webOrigins": [
+        "https://${DOMAIN_MAIN}",
+        "https://${DOMAIN_ALT}"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "https://${DOMAIN_MAIN}\nhttps://${DOMAIN_ALT}\nhttps://${DOMAIN_MAIN}/monitoring\nhttps://${DOMAIN_ALT}/monitoring"
+      }
   }' > /dev/null
 
 echo "✅ Frontend client updated with /monitoring redirect URIs"
 echo ""
 echo "Updated redirect URIs:"
-echo "  - https://www.lianel.se/*"
-echo "  - https://www.lianel.se/monitoring"
-echo "  - https://www.lianel.se/monitoring/*"
+echo "  - https://${DOMAIN_MAIN}/*"
+echo "  - https://${DOMAIN_MAIN}/monitoring"
+echo "  - https://${DOMAIN_MAIN}/monitoring/*"
 echo ""
 echo "The login button should now work correctly and return to /monitoring after login."

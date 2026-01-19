@@ -7,6 +7,9 @@ function Monitoring() {
   const { authenticated, login } = useKeycloak();
   const [selectedDashboard, setSelectedDashboard] = useState(null);
 
+  // Get Grafana URL from environment variable
+  const grafanaUrl = process.env.REACT_APP_GRAFANA_URL || 'https://monitoring.lianel.se';
+  
   // Grafana dashboards configuration
   // UIDs match the dashboard JSON files in monitoring/grafana/provisioning/dashboards/
   const grafanaDashboards = [
@@ -15,8 +18,8 @@ function Monitoring() {
       name: 'System Health',
       description: 'Overall system health, CPU, memory, disk, and network metrics',
       uid: 'system-health',
-      url: 'https://monitoring.lianel.se/d/system-health',
-      embedUrl: 'https://monitoring.lianel.se/d/system-health?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/system-health`,
+      embedUrl: `${grafanaUrl}/d/system-health?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -24,8 +27,8 @@ function Monitoring() {
       name: 'Pipeline Status',
       description: 'Airflow DAG execution status, success rates, and task performance',
       uid: 'pipeline-status',
-      url: 'https://monitoring.lianel.se/d/pipeline-status',
-      embedUrl: 'https://monitoring.lianel.se/d/pipeline-status?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/pipeline-status`,
+      embedUrl: `${grafanaUrl}/d/pipeline-status?kiosk=tv&orgId=1`,
       category: 'Data Pipelines'
     },
     {
@@ -33,8 +36,8 @@ function Monitoring() {
       name: 'Database Performance',
       description: 'PostgreSQL performance metrics, query times, and connection stats',
       uid: 'database-performance',
-      url: 'https://monitoring.lianel.se/d/database-performance',
-      embedUrl: 'https://monitoring.lianel.se/d/database-performance?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/database-performance`,
+      embedUrl: `${grafanaUrl}/d/database-performance?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -42,8 +45,8 @@ function Monitoring() {
       name: 'Error Tracking',
       description: 'System errors, OOM kills, HTTP errors, and active alerts',
       uid: 'error-tracking',
-      url: 'https://monitoring.lianel.se/d/error-tracking',
-      embedUrl: 'https://monitoring.lianel.se/d/error-tracking?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/error-tracking`,
+      embedUrl: `${grafanaUrl}/d/error-tracking?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -51,8 +54,8 @@ function Monitoring() {
       name: 'SLA Monitoring',
       description: 'Service level agreements, API response times, and uptime metrics',
       uid: 'sla-monitoring',
-      url: 'https://monitoring.lianel.se/d/sla-monitoring',
-      embedUrl: 'https://monitoring.lianel.se/d/sla-monitoring?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/sla-monitoring`,
+      embedUrl: `${grafanaUrl}/d/sla-monitoring?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -60,8 +63,8 @@ function Monitoring() {
       name: 'Data Quality',
       description: 'Data freshness, completeness, and anomaly detection',
       uid: 'data-quality',
-      url: 'https://monitoring.lianel.se/d/data-quality',
-      embedUrl: 'https://monitoring.lianel.se/d/data-quality?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/data-quality`,
+      embedUrl: `${grafanaUrl}/d/data-quality?kiosk=tv&orgId=1`,
       category: 'Data Quality'
     },
     {
@@ -69,8 +72,8 @@ function Monitoring() {
       name: 'Energy & OSM Features',
       description: 'Energy data vs OpenStreetMap features analysis',
       uid: 'energy-osm-features',
-      url: 'https://monitoring.lianel.se/d/energy-osm-features',
-      embedUrl: 'https://monitoring.lianel.se/d/energy-osm-features?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/energy-osm-features`,
+      embedUrl: `${grafanaUrl}/d/energy-osm-features?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -78,8 +81,8 @@ function Monitoring() {
       name: 'Web Analytics',
       description: 'User access logs, unique visitors, and request statistics',
       uid: 'web-analytics',
-      url: 'https://monitoring.lianel.se/d/web-analytics',
-      embedUrl: 'https://monitoring.lianel.se/d/web-analytics?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/web-analytics`,
+      embedUrl: `${grafanaUrl}/d/web-analytics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -87,8 +90,8 @@ function Monitoring() {
       name: 'Energy Metrics',
       description: 'Energy consumption and production metrics',
       uid: 'energy-metrics',
-      url: 'https://monitoring.lianel.se/d/energy-metrics',
-      embedUrl: 'https://monitoring.lianel.se/d/energy-metrics?kiosk=tv&orgId=1',
+      url: `${grafanaUrl}/d/energy-metrics`,
+      embedUrl: `${grafanaUrl}/d/energy-metrics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     }
   ];
