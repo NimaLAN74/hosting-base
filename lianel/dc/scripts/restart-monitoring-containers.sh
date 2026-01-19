@@ -19,7 +19,15 @@ git pull origin master || echo "Warning: Could not pull latest changes"
 # Restart Grafana to apply configuration and dashboard changes
 echo ""
 echo "Restarting Grafana..."
-docker-compose -f docker-compose.monitoring.yaml restart grafana
+# Try docker compose (newer) first, fallback to docker-compose
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  docker compose -f docker-compose.monitoring.yaml restart grafana
+elif command -v docker-compose >/dev/null 2>&1; then
+  docker-compose -f docker-compose.monitoring.yaml restart grafana
+else
+  echo "Error: Neither 'docker compose' nor 'docker-compose' found"
+  exit 1
+fi
 
 # Wait a moment for Grafana to start
 sleep 3
