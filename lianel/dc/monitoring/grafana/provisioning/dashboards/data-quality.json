@@ -69,7 +69,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_date))) as data_age FROM meta_ingestion_log WHERE ingestion_date IS NOT NULL;",
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_timestamp))) as data_age FROM meta_ingestion_log WHERE ingestion_timestamp IS NOT NULL;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -415,7 +415,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('hour', ingestion_date) as time, EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_date))) as data_age FROM meta_ingestion_log WHERE ingestion_date > NOW() - INTERVAL '7 days' GROUP BY time ORDER BY time;",
+          "rawSql": "SELECT date_trunc('hour', ingestion_timestamp) as time, EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_timestamp))) as data_age FROM meta_ingestion_log WHERE ingestion_timestamp > NOW() - INTERVAL '7 days' GROUP BY time ORDER BY time;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -510,7 +510,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('day', ingestion_date) as time, COUNT(*) as ingestion_count FROM meta_ingestion_log WHERE ingestion_date > NOW() - INTERVAL '30 days' GROUP BY time ORDER BY time;",
+          "rawSql": "SELECT date_trunc('day', ingestion_timestamp) as time, COUNT(*) as ingestion_count FROM meta_ingestion_log WHERE ingestion_timestamp > NOW() - INTERVAL '30 days' GROUP BY time ORDER BY time;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -584,7 +584,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT source_name, COUNT(*) as record_count, MAX(ingestion_date) as last_ingestion, EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_date))) as age_seconds FROM meta_ingestion_log WHERE ingestion_date > NOW() - INTERVAL '30 days' GROUP BY source_name ORDER BY age_seconds DESC;",
+          "rawSql": "SELECT source_system, table_name, COUNT(*) as record_count, MAX(ingestion_timestamp) as last_ingestion, EXTRACT(EPOCH FROM (NOW() - MAX(ingestion_timestamp))) as age_seconds FROM meta_ingestion_log WHERE ingestion_timestamp > NOW() - INTERVAL '30 days' GROUP BY source_system, table_name ORDER BY age_seconds DESC;",
           "refId": "A",
           "sql": {
             "columns": [
