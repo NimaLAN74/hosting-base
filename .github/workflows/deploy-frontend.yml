@@ -9,7 +9,7 @@ on:
       - 'lianel/dc/frontend/**'
       - 'lianel/dc/docker-compose.frontend.yaml'
       - 'lianel/dc/docker-compose.yaml'
-      - 'lianel/dc/deploy-frontend.sh'
+      - 'lianel/dc/scripts/deployment/deploy-frontend.sh'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:  # Allow manual trigger
 
@@ -215,7 +215,7 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -P ${REMOTE_PORT} \
-            lianel/dc/deploy-frontend.sh \
+            lianel/dc/scripts/deployment/deploy-frontend.sh \
             ${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-frontend.sh
           
           echo "Setting execute permissions on remote script..."
