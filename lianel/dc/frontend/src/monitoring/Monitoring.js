@@ -173,10 +173,10 @@ function Monitoring() {
                         className="btn-view"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDashboardClick(dashboard);
+                          handleOpenInGrafana(dashboard.url);
                         }}
                       >
-                        View Embedded
+                        View in New Tab
                       </button>
                       <button
                         className="btn-open"
