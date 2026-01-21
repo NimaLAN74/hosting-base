@@ -210,10 +210,18 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
         # Insert records into database (batch insert for better performance)
         records_inserted = 0
         batch_size = 100
+        
+        # Convert ISO timestamp strings to datetime objects for PostgreSQL
         for i in range(0, len(all_records), batch_size):
             batch = all_records[i:i + batch_size]
             for record in batch:
                 try:
+                    # Convert timestamp from ISO string to datetime if needed
+                    timestamp = record['timestamp_utc']
+                    if isinstance(timestamp, str):
+                        # Parse ISO format string to datetime
+                        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    
                     sql = """
                         INSERT INTO fact_electricity_timeseries (
                             timestamp_utc, country_code, bidding_zone,
@@ -228,7 +236,7 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
                     postgres_hook.run(
                         sql,
                         parameters=(
-                            record['timestamp_utc'],
+                            timestamp,
                             record['country_code'],
                             record.get('bidding_zone'),
                             record.get('production_type'),
@@ -241,6 +249,8 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
                     records_inserted += 1
                 except Exception as e:
                     print(f"Error inserting record: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
         
         # Log ingestion
