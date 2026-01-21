@@ -161,7 +161,7 @@ function Monitoring() {
                   <div
                     key={dashboard.id}
                     className="dashboard-card"
-                    onClick={() => handleDashboardClick(dashboard)}
+                    onClick={() => handleOpenInGrafana(dashboard.url)}
                   >
                     <div className="dashboard-card-header">
                       <h3 className="dashboard-name">{dashboard.name}</h3>
