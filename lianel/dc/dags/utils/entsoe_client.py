@@ -176,13 +176,30 @@ class ENTSOEClient:
             bidding_zone = zones[0]  # Use first zone
         
         # Build request parameters
+        # ENTSO-E API requires YYYYMMDDHHMM format (12 digits)
+        # Convert date strings to proper format
+        def format_date_for_api(date_str: str, is_end: bool = False) -> str:
+            """Format date string to ENTSO-E API format YYYYMMDDHHMM."""
+            # Remove separators
+            clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
+            # If only date (8 chars), add time: 0000 for start, 2300 for end
+            if len(clean_date) == 8:
+                if is_end:
+                    return clean_date + '2300'  # End of day
+                else:
+                    return clean_date + '0000'  # Start of day
+            # If already has time, pad to 12 chars if needed
+            elif len(clean_date) < 12:
+                clean_date = clean_date.ljust(12, '0')
+            return clean_date[:12]  # Ensure exactly 12 digits
+        
         params = {
             'securityToken': self.api_token or '',
             'documentType': 'A65',  # Actual Total Load
             'processType': 'A16',   # Realised
             'outBiddingZone_Domain': bidding_zone,
-            'periodStart': start_date.replace('-', '').replace(':', '').replace('T', ''),
-            'periodEnd': end_date.replace('-', '').replace(':', '').replace('T', ''),
+            'periodStart': format_date_for_api(start_date, is_end=False),
+            'periodEnd': format_date_for_api(end_date, is_end=True),
         }
         
         root = self._make_request(params)
@@ -271,13 +288,30 @@ class ENTSOEClient:
             bidding_zone = zones[0]
         
         # Build request parameters
+        # ENTSO-E API requires YYYYMMDDHHMM format (12 digits)
+        # Convert date strings to proper format
+        def format_date_for_api(date_str: str, is_end: bool = False) -> str:
+            """Format date string to ENTSO-E API format YYYYMMDDHHMM."""
+            # Remove separators
+            clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
+            # If only date (8 chars), add time: 0000 for start, 2300 for end
+            if len(clean_date) == 8:
+                if is_end:
+                    return clean_date + '2300'  # End of day
+                else:
+                    return clean_date + '0000'  # Start of day
+            # If already has time, pad to 12 chars if needed
+            elif len(clean_date) < 12:
+                clean_date = clean_date.ljust(12, '0')
+            return clean_date[:12]  # Ensure exactly 12 digits
+        
         params = {
             'securityToken': self.api_token or '',
             'documentType': 'A75',  # Actual Generation per Production Type
             'processType': 'A16',   # Realised
             'outBiddingZone_Domain': bidding_zone,
-            'periodStart': start_date.replace('-', '').replace(':', '').replace('T', ''),
-            'periodEnd': end_date.replace('-', '').replace(':', '').replace('T', ''),
+            'periodStart': format_date_for_api(start_date, is_end=False),
+            'periodEnd': format_date_for_api(end_date, is_end=True),
         }
         
         if production_type:
