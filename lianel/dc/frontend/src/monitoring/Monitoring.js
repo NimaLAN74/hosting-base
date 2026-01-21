@@ -19,7 +19,7 @@ function Monitoring() {
       description: 'Overall system health, CPU, memory, disk, and network metrics',
       uid: 'system-health',
       url: `${grafanaUrl}/d/system-health`,
-      embedUrl: `${grafanaUrl}/d/system-health?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/system-health?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -28,7 +28,7 @@ function Monitoring() {
       description: 'Airflow DAG execution status, success rates, and task performance',
       uid: 'pipeline-status',
       url: `${grafanaUrl}/d/pipeline-status`,
-      embedUrl: `${grafanaUrl}/d/pipeline-status?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/pipeline-status?kiosk=tv&orgId=1`,
       category: 'Data Pipelines'
     },
     {
@@ -37,7 +37,7 @@ function Monitoring() {
       description: 'PostgreSQL performance metrics, query times, and connection stats',
       uid: 'database-performance',
       url: `${grafanaUrl}/d/database-performance`,
-      embedUrl: `${grafanaUrl}/d/database-performance?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/database-performance?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -46,7 +46,7 @@ function Monitoring() {
       description: 'System errors, OOM kills, HTTP errors, and active alerts',
       uid: 'error-tracking',
       url: `${grafanaUrl}/d/error-tracking`,
-      embedUrl: `${grafanaUrl}/d/error-tracking?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/error-tracking?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -55,7 +55,7 @@ function Monitoring() {
       description: 'Service level agreements, API response times, and uptime metrics',
       uid: 'sla-monitoring',
       url: `${grafanaUrl}/d/sla-monitoring`,
-      embedUrl: `${grafanaUrl}/d/sla-monitoring?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/sla-monitoring?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -64,7 +64,7 @@ function Monitoring() {
       description: 'Data freshness, completeness, and anomaly detection',
       uid: 'data-quality',
       url: `${grafanaUrl}/d/data-quality`,
-      embedUrl: `${grafanaUrl}/d/data-quality?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/data-quality?kiosk=tv&orgId=1`,
       category: 'Data Quality'
     },
     {
@@ -73,7 +73,7 @@ function Monitoring() {
       description: 'Energy data vs OpenStreetMap features analysis',
       uid: 'energy-osm-features',
       url: `${grafanaUrl}/d/energy-osm-features`,
-      embedUrl: `${grafanaUrl}/d/energy-osm-features?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/energy-osm-features?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -82,7 +82,7 @@ function Monitoring() {
       description: 'User access logs, unique visitors, and request statistics',
       uid: 'web-analytics',
       url: `${grafanaUrl}/d/web-analytics`,
-      embedUrl: `${grafanaUrl}/d/web-analytics?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/web-analytics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -91,16 +91,12 @@ function Monitoring() {
       description: 'Energy consumption and production metrics',
       uid: 'energy-metrics',
       url: `${grafanaUrl}/d/energy-metrics`,
-      embedUrl: `${grafanaUrl}/d/energy-metrics?kiosk=tv&orgId=1`,
+      url: `${grafanaUrl}/d/energy-metrics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     }
   ];
 
   const categories = [...new Set(grafanaDashboards.map(d => d.category))];
-
-  const handleDashboardClick = (dashboard) => {
-    setSelectedDashboard(dashboard);
-  };
 
   const handleOpenInGrafana = (url) => {
     window.open(url, '_blank');
@@ -194,42 +190,6 @@ function Monitoring() {
           </div>
         ))}
 
-        {/* Embedded Dashboard Modal/View */}
-        {selectedDashboard && (
-          <div className="dashboard-modal" onClick={() => setSelectedDashboard(null)}>
-            <div className="dashboard-modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="dashboard-modal-header">
-                <h2>{selectedDashboard.name}</h2>
-                <div className="dashboard-modal-actions">
-                  <button
-                    className="btn-open-full"
-                    onClick={() => handleOpenInGrafana(selectedDashboard.url)}
-                  >
-                    Open in New Tab
-                  </button>
-                  <button
-                    className="btn-close"
-                    onClick={() => setSelectedDashboard(null)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-              <div className="dashboard-embed-container" style={{ padding: '20px', textAlign: 'center' }}>
-                <p style={{ fontSize: '18px', marginBottom: '20px' }}>
-                  Click the button above to open the dashboard in a new tab.
-                </p>
-                <button
-                  className="btn-open-full"
-                  onClick={() => handleOpenInGrafana(selectedDashboard.url)}
-                  style={{ fontSize: '16px', padding: '12px 24px' }}
-                >
-                  Open {selectedDashboard.name} in New Tab
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </PageTemplate>
   );
