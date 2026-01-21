@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS fact_electricity_timeseries (
     id BIGSERIAL PRIMARY KEY,
     timestamp_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     country_code VARCHAR(2) NOT NULL,
-    bidding_zone VARCHAR(10),
+    bidding_zone VARCHAR(50),
     production_type VARCHAR(10),
     load_mw NUMERIC(12, 3),
     generation_mw NUMERIC(12, 3),
