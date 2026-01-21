@@ -24,11 +24,11 @@ pub async fn get_electricity_timeseries_records(
     }
     if start_date.is_some() {
         bind_count += 1;
-        conditions.push(format!("timestamp_utc >= ${}", bind_count));
+        conditions.push(format!("timestamp_utc >= ${}::timestamp", bind_count));
     }
     if end_date.is_some() {
         bind_count += 1;
-        conditions.push(format!("timestamp_utc <= ${}", bind_count));
+        conditions.push(format!("timestamp_utc <= ${}::timestamp", bind_count));
     }
     if production_type.is_some() {
         bind_count += 1;
