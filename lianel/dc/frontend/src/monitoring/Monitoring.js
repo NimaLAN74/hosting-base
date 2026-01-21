@@ -19,7 +19,6 @@ function Monitoring() {
       description: 'Overall system health, CPU, memory, disk, and network metrics',
       uid: 'system-health',
       url: `${grafanaUrl}/d/system-health`,
-      url: `${grafanaUrl}/d/system-health?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -28,7 +27,6 @@ function Monitoring() {
       description: 'Airflow DAG execution status, success rates, and task performance',
       uid: 'pipeline-status',
       url: `${grafanaUrl}/d/pipeline-status`,
-      url: `${grafanaUrl}/d/pipeline-status?kiosk=tv&orgId=1`,
       category: 'Data Pipelines'
     },
     {
@@ -37,7 +35,6 @@ function Monitoring() {
       description: 'PostgreSQL performance metrics, query times, and connection stats',
       uid: 'database-performance',
       url: `${grafanaUrl}/d/database-performance`,
-      url: `${grafanaUrl}/d/database-performance?kiosk=tv&orgId=1`,
       category: 'Infrastructure'
     },
     {
@@ -46,7 +43,6 @@ function Monitoring() {
       description: 'System errors, OOM kills, HTTP errors, and active alerts',
       uid: 'error-tracking',
       url: `${grafanaUrl}/d/error-tracking`,
-      url: `${grafanaUrl}/d/error-tracking?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -55,7 +51,6 @@ function Monitoring() {
       description: 'Service level agreements, API response times, and uptime metrics',
       uid: 'sla-monitoring',
       url: `${grafanaUrl}/d/sla-monitoring`,
-      url: `${grafanaUrl}/d/sla-monitoring?kiosk=tv&orgId=1`,
       category: 'Operations'
     },
     {
@@ -64,7 +59,6 @@ function Monitoring() {
       description: 'Data freshness, completeness, and anomaly detection',
       uid: 'data-quality',
       url: `${grafanaUrl}/d/data-quality`,
-      url: `${grafanaUrl}/d/data-quality?kiosk=tv&orgId=1`,
       category: 'Data Quality'
     },
     {
@@ -73,7 +67,6 @@ function Monitoring() {
       description: 'Energy data vs OpenStreetMap features analysis',
       uid: 'energy-osm-features',
       url: `${grafanaUrl}/d/energy-osm-features`,
-      url: `${grafanaUrl}/d/energy-osm-features?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -82,7 +75,6 @@ function Monitoring() {
       description: 'User access logs, unique visitors, and request statistics',
       uid: 'web-analytics',
       url: `${grafanaUrl}/d/web-analytics`,
-      url: `${grafanaUrl}/d/web-analytics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     },
     {
@@ -91,7 +83,6 @@ function Monitoring() {
       description: 'Energy consumption and production metrics',
       uid: 'energy-metrics',
       url: `${grafanaUrl}/d/energy-metrics`,
-      url: `${grafanaUrl}/d/energy-metrics?kiosk=tv&orgId=1`,
       category: 'Analytics'
     }
   ];
