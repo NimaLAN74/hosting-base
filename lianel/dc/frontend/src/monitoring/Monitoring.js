@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import PageTemplate from '../PageTemplate';
 import { useKeycloak } from '../KeycloakProvider';
 import './Monitoring.css';
 
 function Monitoring() {
   const { authenticated, login, keycloakReady } = useKeycloak();
-  const [selectedDashboard, setSelectedDashboard] = useState(null);
 
   // Get Grafana URL from environment variable
   const grafanaUrl = process.env.REACT_APP_GRAFANA_URL || 'https://monitoring.lianel.se';
