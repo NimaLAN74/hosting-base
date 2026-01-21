@@ -96,8 +96,8 @@ class ENTSOEClient:
         self.api_token = api_token
         self.base_url = base_url
         self.session = requests.Session()
-        if api_token:
-            self.session.headers.update({'Authorization': f'Bearer {api_token}'})
+        # ENTSO-E API uses securityToken query parameter, not Authorization header
+        # Don't set Authorization header as it may cause 401 errors
         self.session.headers.update({'Content-Type': 'application/xml'})
     
     def _make_request(self, params: Dict[str, Any], retries: int = 3) -> Optional[ET.Element]:
