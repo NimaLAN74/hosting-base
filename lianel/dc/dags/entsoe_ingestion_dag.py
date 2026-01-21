@@ -168,14 +168,15 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
     try:
         # Get load data
         load_data = client.get_load_data(country_code, start_date, end_date)
-        print(f"Retrieved {len(load_data)} load records")
+        print(f"Retrieved {len(load_data)} load records for {country_code} ({start_date} to {end_date})")
         
         # Get generation data (all production types)
         generation_data = client.get_generation_data(country_code, start_date, end_date)
-        print(f"Retrieved {len(generation_data)} generation records")
+        print(f"Retrieved {len(generation_data)} generation records for {country_code}")
         
         # Combine data
         all_records = load_data + generation_data
+        print(f"Total records to insert: {len(all_records)}")
         
         if not all_records:
             print(f"No data retrieved for {country_code}")
@@ -230,23 +231,32 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
                         ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s
                         )
-                        ON CONFLICT DO NOTHING
                     """
                     
-                    postgres_hook.run(
-                        sql,
-                        parameters=(
-                            timestamp,
-                            record['country_code'],
-                            record.get('bidding_zone'),
-                            record.get('production_type'),
-                            record.get('load_mw'),
-                            record.get('generation_mw'),
-                            record.get('resolution', 'PT60M'),
-                            record.get('quality_flag', 'actual'),
+                    try:
+                        postgres_hook.run(
+                            sql,
+                            parameters=(
+                                timestamp,
+                                record['country_code'],
+                                record.get('bidding_zone'),
+                                record.get('production_type'),
+                                record.get('load_mw'),
+                                record.get('generation_mw'),
+                                record.get('resolution', 'PT60M'),
+                                record.get('quality_flag', 'actual'),
+                            )
                         )
-                    )
-                    records_inserted += 1
+                        records_inserted += 1
+                    except Exception as insert_error:
+                        # Check if it's a duplicate key error (unique constraint violation)
+                        error_str = str(insert_error)
+                        if 'duplicate key' in error_str.lower() or 'unique constraint' in error_str.lower():
+                            # Skip duplicate records
+                            continue
+                        else:
+                            # Re-raise other errors
+                            raise
                 except Exception as e:
                     print(f"Error inserting record: {e}")
                     import traceback
@@ -276,14 +286,17 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
             )
         )
         
-        print(f"Successfully ingested {records_inserted} records for {country_code} ({start_date} to {end_date})")
+        print(f"Successfully ingested {records_inserted} out of {len(all_records)} records for {country_code} ({start_date} to {end_date})")
+        
+        if records_inserted == 0 and len(all_records) > 0:
+            print(f"WARNING: Retrieved {len(all_records)} records but inserted 0. Check for insertion errors above.")
         
         return {
             'country_code': country_code,
             'start_date': start_date,
             'end_date': end_date,
             'records_ingested': records_inserted,
-            'status': 'success'
+            'status': 'success' if records_inserted > 0 else 'no_data'
         }
         
     except Exception as e:
@@ -325,11 +338,17 @@ def ingest_country_chunks(country_code: str, **context) -> Dict[str, Any]:
     task_ids = [f'country_{country_code.lower()}.plan_{country_code.lower()}']
     plan_result = ti.xcom_pull(task_ids=task_ids)
     
+    print(f"Ingesting chunks for {country_code}. Plan result: {plan_result}")
+    
     date_chunks = []
     if plan_result and isinstance(plan_result, dict):
         date_chunks = plan_result.get('date_chunks', [])
+        print(f"Found {len(date_chunks)} date chunks for {country_code}")
+    else:
+        print(f"No plan result or invalid format for {country_code}. Plan result: {plan_result}")
     
     if not date_chunks:
+        print(f"No date chunks for {country_code}, skipping ingestion")
         return {
             'country_code': country_code,
             'records_ingested': 0,
@@ -337,19 +356,23 @@ def ingest_country_chunks(country_code: str, **context) -> Dict[str, Any]:
         }
     
     total_records = 0
-    for chunk in date_chunks:
+    for i, chunk in enumerate(date_chunks, 1):
+        print(f"Processing chunk {i}/{len(date_chunks)} for {country_code}: {chunk['start']} to {chunk['end']}")
         result = ingest_date_chunk(
             country_code=country_code,
             start_date=chunk['start'],
             end_date=chunk['end'],
             **context
         )
-        total_records += result.get('records_ingested', 0)
+        chunk_records = result.get('records_ingested', 0)
+        total_records += chunk_records
+        print(f"Chunk {i} completed: {chunk_records} records ingested")
     
+    print(f"Total records ingested for {country_code}: {total_records}")
     return {
         'country_code': country_code,
         'records_ingested': total_records,
-        'status': 'success'
+        'status': 'success' if total_records > 0 else 'no_data'
     }
 
 
