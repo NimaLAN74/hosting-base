@@ -146,7 +146,7 @@ function Monitoring() {
         <div className="monitoring-header">
           <p className="monitoring-description">
             Access Grafana dashboards for system monitoring, data quality, and analytics.
-            Click on a dashboard to view it embedded, or open it in Grafana for full functionality.
+            Click on a dashboard card or button to open it in a new tab.
           </p>
         </div>
 
@@ -205,7 +205,7 @@ function Monitoring() {
                     className="btn-open-full"
                     onClick={() => handleOpenInGrafana(selectedDashboard.url)}
                   >
-                    Open Full Dashboard
+                    Open in New Tab
                   </button>
                   <button
                     className="btn-close"
@@ -215,14 +215,17 @@ function Monitoring() {
                   </button>
                 </div>
               </div>
-              <div className="dashboard-embed-container">
-                <iframe
-                  src={selectedDashboard.embedUrl}
-                  title={selectedDashboard.name}
-                  className="dashboard-iframe"
-                  frameBorder="0"
-                  allowFullScreen
-                />
+              <div className="dashboard-embed-container" style={{ padding: '20px', textAlign: 'center' }}>
+                <p style={{ fontSize: '18px', marginBottom: '20px' }}>
+                  Click the button above to open the dashboard in a new tab.
+                </p>
+                <button
+                  className="btn-open-full"
+                  onClick={() => handleOpenInGrafana(selectedDashboard.url)}
+                  style={{ fontSize: '16px', padding: '12px 24px' }}
+                >
+                  Open {selectedDashboard.name} in New Tab
+                </button>
               </div>
             </div>
           </div>
