@@ -218,6 +218,7 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
         
         # Insert records into database (batch insert for better performance)
         records_inserted = 0
+        records_failed = 0
         batch_size = 100
         
         # Convert ISO timestamp strings to datetime objects for PostgreSQL
@@ -239,6 +240,12 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
                         ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s
                         )
+                        ON CONFLICT (timestamp_utc, country_code, bidding_zone, production_type) 
+                        DO UPDATE SET 
+                            load_mw = EXCLUDED.load_mw,
+                            generation_mw = EXCLUDED.generation_mw,
+                            quality_flag = EXCLUDED.quality_flag,
+                            created_at = EXCLUDED.created_at
                     """
                     
                     try:
@@ -260,16 +267,27 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
                         # Check if it's a duplicate key error (unique constraint violation)
                         error_str = str(insert_error)
                         if 'duplicate key' in error_str.lower() or 'unique constraint' in error_str.lower():
-                            # Skip duplicate records
+                            # Skip duplicate records (shouldn't happen with ON CONFLICT, but handle anyway)
+                            records_inserted += 1  # Count as inserted since ON CONFLICT handles it
                             continue
                         else:
-                            # Re-raise other errors
-                            raise
+                            # Log other errors but continue processing
+                            records_failed += 1
+                            print(f"ERROR inserting record {record.get('timestamp_utc', 'unknown')}: {insert_error}")
+                            print(f"Record data: {record}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
                 except Exception as e:
-                    print(f"Error inserting record: {e}")
+                    records_failed += 1
+                    print(f"ERROR processing record: {e}")
+                    print(f"Record data: {record}")
                     import traceback
                     traceback.print_exc()
                     continue
+        
+        if records_failed > 0:
+            print(f"WARNING: {records_failed} records failed to insert out of {len(all_records)} total records")
         
         # Log ingestion
         log_sql = """
