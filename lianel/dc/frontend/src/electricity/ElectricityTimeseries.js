@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useKeycloak } from '../KeycloakProvider';
 import PageTemplate from '../PageTemplate';
 import './ElectricityTimeseries.css';
@@ -16,7 +16,7 @@ function ElectricityTimeseries() {
     limit: 1000
   });
 
-  const fetchData = React.useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!authenticated) return;
     
     try {
@@ -134,7 +134,7 @@ function ElectricityTimeseries() {
   };
 
   // Aggregate data for visualization
-  const aggregatedData = React.useMemo(() => {
+  const aggregatedData = useMemo(() => {
     if (!data.length) return [];
 
     // Group by date and country
