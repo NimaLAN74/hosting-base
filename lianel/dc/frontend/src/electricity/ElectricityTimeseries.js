@@ -101,7 +101,13 @@ function ElectricityTimeseries() {
     if (!authenticated) return;
     
     const timeoutId = setTimeout(() => {
-      console.log('Fetching data with filters:', filters);
+      console.log('Filters changed, fetching data with:', {
+        country_code: filters.country_code,
+        start_date: filters.start_date,
+        end_date: filters.end_date,
+        production_type: filters.production_type,
+        limit: filters.limit
+      });
       fetchData();
     }, 500); // Wait 500ms after last filter change
 
