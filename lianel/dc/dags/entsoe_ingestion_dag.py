@@ -165,15 +165,22 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
     client = ENTSOEClient(api_token=api_token)
     
     print(f"Ingesting ENTSO-E data for {country_code} from {start_date} to {end_date}")
+    print(f"API Token present: {bool(api_token)}")
     
     try:
         # Get load data
+        print(f"Calling get_load_data for {country_code} with dates {start_date} to {end_date}")
         load_data = client.get_load_data(country_code, start_date, end_date)
         print(f"Retrieved {len(load_data)} load records for {country_code} ({start_date} to {end_date})")
+        if load_data:
+            print(f"Sample load record: {load_data[0]}")
         
         # Get generation data (all production types)
+        print(f"Calling get_generation_data for {country_code} with dates {start_date} to {end_date}")
         generation_data = client.get_generation_data(country_code, start_date, end_date)
         print(f"Retrieved {len(generation_data)} generation records for {country_code}")
+        if generation_data:
+            print(f"Sample generation record: {generation_data[0]}")
         
         # Combine data
         all_records = load_data + generation_data
