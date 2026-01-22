@@ -86,30 +86,17 @@ function ElectricityTimeseries() {
     }
   }, [authenticated, filters, authenticatedFetch]);
 
-  // Initial fetch when authenticated
+  // Debounced fetch when filters change or when authenticated
   useEffect(() => {
-    if (authenticated) {
-      fetchData();
-    }
-  }, [authenticated, fetchData]);
-
-  // Debounced fetch when filters change (but not on initial mount)
-  const isInitialMount = useRef(true);
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    
     if (!authenticated) return;
     
     const timeoutId = setTimeout(() => {
-      console.log('Filters changed, fetching data...', filters);
+      console.log('Fetching data with filters:', filters);
       fetchData();
     }, 500); // Wait 500ms after last filter change
 
     return () => clearTimeout(timeoutId);
-  }, [filters.country_code, filters.start_date, filters.end_date, filters.production_type, filters.limit, authenticated, fetchData]);
+  }, [authenticated, filters.country_code, filters.start_date, filters.end_date, filters.production_type, filters.limit, fetchData]);
 
   // Helper function to format date as DDMMYYYY
   const formatDateDDMMYYYY = (dateString) => {
@@ -195,7 +182,31 @@ function ElectricityTimeseries() {
         </div>
 
         <div className="filter-group">
-          <label>Start Date (DDMMYYYY):</label>
+          <label>Start Date:</label>
+          <input
+            type="date"
+            value={filters.start_date ? (() => {
+              // Convert DDMMYYYY to YYYY-MM-DD for date input
+              const dateStr = filters.start_date.trim();
+              if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
+                const day = dateStr.substring(0, 2);
+                const month = dateStr.substring(2, 4);
+                const year = dateStr.substring(4, 8);
+                return `${year}-${month}-${day}`;
+              }
+              return dateStr; // Already in YYYY-MM-DD format
+            })() : ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value) {
+                // Convert YYYY-MM-DD to DDMMYYYY for storage
+                const [year, month, day] = value.split('-');
+                handleFilterChange('start_date', `${day}${month}${year}`);
+              } else {
+                handleFilterChange('start_date', '');
+              }
+            }}
+          />
           <input
             type="text"
             value={filters.start_date}
@@ -203,14 +214,39 @@ function ElectricityTimeseries() {
               const value = e.target.value.replace(/\D/g, '').slice(0, 8);
               handleFilterChange('start_date', value);
             }}
-            placeholder="DDMMYYYY (e.g., 20012026)"
+            placeholder="Or enter DDMMYYYY"
             pattern="\d{8}"
             maxLength={8}
+            style={{ marginTop: '5px', width: '100%' }}
           />
         </div>
 
         <div className="filter-group">
-          <label>End Date (DDMMYYYY):</label>
+          <label>End Date:</label>
+          <input
+            type="date"
+            value={filters.end_date ? (() => {
+              // Convert DDMMYYYY to YYYY-MM-DD for date input
+              const dateStr = filters.end_date.trim();
+              if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
+                const day = dateStr.substring(0, 2);
+                const month = dateStr.substring(2, 4);
+                const year = dateStr.substring(4, 8);
+                return `${year}-${month}-${day}`;
+              }
+              return dateStr; // Already in YYYY-MM-DD format
+            })() : ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value) {
+                // Convert YYYY-MM-DD to DDMMYYYY for storage
+                const [year, month, day] = value.split('-');
+                handleFilterChange('end_date', `${day}${month}${year}`);
+              } else {
+                handleFilterChange('end_date', '');
+              }
+            }}
+          />
           <input
             type="text"
             value={filters.end_date}
@@ -218,9 +254,10 @@ function ElectricityTimeseries() {
               const value = e.target.value.replace(/\D/g, '').slice(0, 8);
               handleFilterChange('end_date', value);
             }}
-            placeholder="DDMMYYYY (e.g., 21012026)"
+            placeholder="Or enter DDMMYYYY"
             pattern="\d{8}"
             maxLength={8}
+            style={{ marginTop: '5px', width: '100%' }}
           />
         </div>
 
