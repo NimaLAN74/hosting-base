@@ -377,22 +377,26 @@ function ElectricityTimeseries() {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>
-                      No data to display
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                      No data to display for the selected filters
                     </td>
                   </tr>
                 ) : (
                   data.slice(0, 100).map((record, idx) => {
                     console.log('Rendering record', idx, record);
+                    if (!record) {
+                      console.warn('Record is null/undefined at index', idx);
+                      return null;
+                    }
                     return (
-                      <tr key={idx}>
+                      <tr key={record.id || idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
                         <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
-                        <td>{record.country_code}</td>
+                        <td>{record.country_code || 'N/A'}</td>
                         <td>{record.bidding_zone || 'N/A'}</td>
                         <td>{record.production_type || 'Load'}</td>
-                        <td>{record.load_mw ? record.load_mw.toFixed(2) : '-'}</td>
-                        <td>{record.generation_mw ? record.generation_mw.toFixed(2) : '-'}</td>
-                        <td>{record.resolution}</td>
+                        <td>{record.load_mw != null ? Number(record.load_mw).toFixed(2) : '-'}</td>
+                        <td>{record.generation_mw != null ? Number(record.generation_mw).toFixed(2) : '-'}</td>
+                        <td>{record.resolution || 'N/A'}</td>
                       </tr>
                     );
                   })
