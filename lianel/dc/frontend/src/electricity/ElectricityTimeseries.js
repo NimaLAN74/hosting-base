@@ -17,7 +17,13 @@ function ElectricityTimeseries() {
   });
 
   const fetchData = useCallback(async () => {
-    if (!authenticated) return;
+    if (!authenticated) {
+      console.log('Not authenticated, skipping fetch');
+      return;
+    }
+    
+    console.log('=== Starting fetchData ===');
+    console.log('Current filters:', JSON.stringify(filters, null, 2));
     
     try {
       setLoading(true);
@@ -78,9 +84,16 @@ function ElectricityTimeseries() {
 
       if (response.ok) {
         const result = await response.json();
+        console.log('API response received:', {
+          dataCount: result.data?.length || 0,
+          total: result.total || 0,
+          firstRecord: result.data?.[0] || null
+        });
         setData(result.data || []);
         if (!result.data || result.data.length === 0) {
-          setError('No data available. The electricity timeseries table may be empty. Please check if the ENTSO-E ingestion DAG has run successfully.');
+          setError('No data available for the selected filters. Try adjusting the date range or country code.');
+        } else {
+          setError(''); // Clear error if we have data
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -130,7 +143,12 @@ function ElectricityTimeseries() {
   };
 
   const handleFilterChange = (field, value) => {
-    setFilters(prev => ({ ...prev, [field]: value }));
+    console.log(`Filter changed: ${field} = ${value}`);
+    setFilters(prev => {
+      const newFilters = { ...prev, [field]: value };
+      console.log('New filters state:', newFilters);
+      return newFilters;
+    });
   };
 
   // Aggregate data for visualization
@@ -321,12 +339,12 @@ function ElectricityTimeseries() {
             <div className="stat-card">
               <div className="stat-label">Date Range</div>
               <div className="stat-value">
-                {data.length > 0 ? (
-                  <>
-                    {formatDateDDMMYYYY(data[data.length - 1].timestamp_utc)} - {' '}
-                    {formatDateDDMMYYYY(data[0].timestamp_utc)}
-                  </>
-                ) : 'N/A'}
+                {data.length > 0 ? (() => {
+                  const dates = data.map(r => new Date(r.timestamp_utc)).sort((a, b) => a - b);
+                  const minDate = dates[0];
+                  const maxDate = dates[dates.length - 1];
+                  return `${formatDateDDMMYYYY(minDate.toISOString())} - ${formatDateDDMMYYYY(maxDate.toISOString())}`;
+                })() : 'N/A'}
               </div>
             </div>
             <div className="stat-card">
