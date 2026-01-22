@@ -21,6 +21,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowException
+from airflow.utils.trigger_rule import TriggerRule
 import sys
 import os
 from typing import Dict, List, Any, Optional
@@ -47,7 +48,8 @@ dag = DAG(
     schedule='0 3 * * *',  # Daily at 03:00 UTC (after ENTSO-E data is available)
     catchup=False,
     tags=['data-ingestion', 'entsoe', 'electricity', 'timeseries'],
-    max_active_runs=1,
+    max_active_runs=1,  # Only one DAG run at a time
+    max_active_tasks=50,  # Limit concurrent tasks to prevent resource exhaustion
 )
 
 # Countries with ENTSO-E data availability (subset of EU27)
@@ -473,9 +475,11 @@ def summarize_ingestion(**context):
 summarize_task = PythonOperator(
     task_id='summarize_ingestion',
     python_callable=summarize_ingestion,
+    trigger_rule=TriggerRule.ALL_DONE,  # Run summary even if some countries fail
     dag=dag,
 )
 
 # Set dependencies: all country groups run in parallel, then summary
+# Using ALL_DONE trigger rule allows summary to run even if some countries fail
 for country_group in country_groups:
     country_group >> summarize_task
