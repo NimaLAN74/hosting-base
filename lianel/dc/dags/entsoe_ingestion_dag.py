@@ -440,6 +440,7 @@ for country_code in ENTSOE_COUNTRIES:
             task_id=f'ingest_{country_lower}',
             python_callable=ingest_country_chunks,
             op_kwargs={'country_code': country_code},
+            trigger_rule=TriggerRule.ALL_SUCCESS,  # Only run if planning succeeded
             dag=dag,
         )
         
