@@ -35,10 +35,15 @@ function ElectricityTimeseries() {
           const day = dateStr.substring(0, 2);
           const month = dateStr.substring(2, 4);
           const year = dateStr.substring(4, 8);
-          params.append('start_date', `${year}-${month}-${day}`);
-        } else {
+          const apiDate = `${year}-${month}-${day}`;
+          params.append('start_date', apiDate);
+          console.log('Converted start_date:', dateStr, '->', apiDate);
+        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
           // Already in YYYY-MM-DD format
           params.append('start_date', dateStr);
+          console.log('Using start_date as-is:', dateStr);
+        } else {
+          console.warn('Invalid start_date format:', dateStr);
         }
       }
       if (filters.end_date && filters.end_date.trim()) {
@@ -49,10 +54,15 @@ function ElectricityTimeseries() {
           const day = dateStr.substring(0, 2);
           const month = dateStr.substring(2, 4);
           const year = dateStr.substring(4, 8);
-          params.append('end_date', `${year}-${month}-${day}`);
-        } else {
+          const apiDate = `${year}-${month}-${day}`;
+          params.append('end_date', apiDate);
+          console.log('Converted end_date:', dateStr, '->', apiDate);
+        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
           // Already in YYYY-MM-DD format
           params.append('end_date', dateStr);
+          console.log('Using end_date as-is:', dateStr);
+        } else {
+          console.warn('Invalid end_date format:', dateStr);
         }
       }
       if (filters.production_type && filters.production_type.trim()) {
