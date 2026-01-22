@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useKeycloak } from '../KeycloakProvider';
+import PageTemplate from '../PageTemplate';
 import './GeoFeatures.css';
 
 function GeoFeatures() {
@@ -80,13 +81,17 @@ function GeoFeatures() {
   };
 
   if (!authenticated) {
-    return <div className="geo-container">Please log in to view geo features.</div>;
+    return (
+      <PageTemplate title="Geospatial Features (OSM)">
+        <div className="geo-container">Please log in to view geo features.</div>
+      </PageTemplate>
+    );
   }
 
   return (
-    <div className="geo-container">
-      <h2>Geospatial Features (OSM)</h2>
-      <p className="subtitle">OpenStreetMap features aggregated to NUTS2 regions</p>
+    <PageTemplate title="Geospatial Features (OSM)">
+      <div className="geo-container">
+        <p className="subtitle">OpenStreetMap features aggregated to NUTS2 regions</p>
 
       {/* Filters */}
       <div className="filters">
@@ -243,7 +248,8 @@ function GeoFeatures() {
           </details>
         </>
       )}
-    </div>
+      </div>
+    </PageTemplate>
   );
 }
 

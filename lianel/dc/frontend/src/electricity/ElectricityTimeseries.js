@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useKeycloak } from '../KeycloakProvider';
+import PageTemplate from '../PageTemplate';
 import './ElectricityTimeseries.css';
 
 function ElectricityTimeseries() {
@@ -19,7 +20,8 @@ function ElectricityTimeseries() {
     if (authenticated) {
       fetchData();
     }
-  }, [authenticated, filters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated]);
 
   const fetchData = async () => {
     try {
@@ -100,13 +102,17 @@ function ElectricityTimeseries() {
   }, [data]);
 
   if (!authenticated) {
-    return <div className="electricity-container">Please log in to view electricity data.</div>;
+    return (
+      <PageTemplate title="Electricity Timeseries Data">
+        <div className="electricity-container">Please log in to view electricity data.</div>
+      </PageTemplate>
+    );
   }
 
   return (
-    <div className="electricity-container">
-      <h2>Electricity Timeseries Data</h2>
-      <p className="subtitle">High-frequency electricity load and generation data from ENTSO-E</p>
+    <PageTemplate title="Electricity Timeseries Data">
+      <div className="electricity-container">
+        <p className="subtitle">High-frequency electricity load and generation data from ENTSO-E</p>
 
       {/* Filters */}
       <div className="filters">
@@ -235,7 +241,8 @@ function ElectricityTimeseries() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </PageTemplate>
   );
 }
 
