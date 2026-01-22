@@ -60,7 +60,25 @@ function ElectricityTimeseries() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authenticated, filters, authenticatedFetch]);
+
+  // Initial fetch when authenticated
+  useEffect(() => {
+    if (authenticated) {
+      fetchData();
+    }
+  }, [authenticated, fetchData]);
+
+  // Debounced fetch when filters change
+  useEffect(() => {
+    if (!authenticated) return;
+    
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 500); // Wait 500ms after last filter change
+
+    return () => clearTimeout(timeoutId);
+  }, [filters, authenticated, fetchData]);
 
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({ ...prev, [field]: value }));
