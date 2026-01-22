@@ -113,9 +113,17 @@ class ENTSOEClient:
         """
         url = f"{self.base_url}"
         
+        # Log request details (without token for security)
+        safe_params = {k: v if k != 'securityToken' else ('***' if v else 'None') for k, v in params.items()}
+        logger.info(f"ENTSO-E API request: {url} with params: {safe_params}")
+        print(f"ENTSO-E API request: {url}")
+        print(f"Request params (token masked): {safe_params}")
+        
         for attempt in range(retries):
             try:
                 response = self.session.get(url, params=params, timeout=30)
+                logger.info(f"ENTSO-E API response status: {response.status_code}")
+                print(f"ENTSO-E API response status: {response.status_code}")
                 response.raise_for_status()
                 
                 # Parse XML response
@@ -131,7 +139,12 @@ class ENTSOEClient:
                         if code is not None and code.text != '0':
                             error_msg = text.text if text is not None else 'Unknown error'
                             logger.warning(f"ENTSO-E API error: {error_msg}")
+                            print(f"ENTSO-E API error: {error_msg}")
                             return None
+                
+                # Log success
+                logger.info(f"ENTSO-E API request successful, parsed XML root tag: {root.tag}")
+                print(f"ENTSO-E API request successful, parsed XML root tag: {root.tag}")
                 
                 return root
                 
