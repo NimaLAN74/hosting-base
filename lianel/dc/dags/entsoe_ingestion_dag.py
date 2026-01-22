@@ -102,8 +102,9 @@ def plan_ingestion(country_code: str, **context) -> Dict[str, Any]:
         last_date = datetime.fromisoformat(last_date_str)
         start_date = (last_date + timedelta(days=1)).strftime('%Y-%m-%d')
     else:
-        # Start from 30 days ago (initial load)
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        # Start from 2 years ago (initial load for historical data)
+        # ENTSO-E data is typically available from 2015 onwards
+        start_date = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
     
     # End date is yesterday (ENTSO-E data available with 1-day delay)
     end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
