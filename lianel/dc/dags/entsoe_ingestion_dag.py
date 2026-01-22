@@ -342,11 +342,19 @@ def ingest_country_chunks(country_code: str, **context) -> Dict[str, Any]:
     print(f"Ingesting chunks for {country_code}. Plan result: {plan_result}")
     
     date_chunks = []
-    if plan_result and isinstance(plan_result, dict):
-        date_chunks = plan_result.get('date_chunks', [])
-        print(f"Found {len(date_chunks)} date chunks for {country_code}")
+    # Handle XCom returning a list (when multiple values) or a dict (single value)
+    if plan_result:
+        if isinstance(plan_result, list) and len(plan_result) > 0:
+            # XCom returned a list, take the first element
+            plan_result = plan_result[0]
+        
+        if isinstance(plan_result, dict):
+            date_chunks = plan_result.get('date_chunks', [])
+            print(f"Found {len(date_chunks)} date chunks for {country_code}")
+        else:
+            print(f"No plan result or invalid format for {country_code}. Plan result type: {type(plan_result)}, value: {plan_result}")
     else:
-        print(f"No plan result or invalid format for {country_code}. Plan result: {plan_result}")
+        print(f"No plan result for {country_code}")
     
     if not date_chunks:
         print(f"No date chunks for {country_code}, skipping ingestion")

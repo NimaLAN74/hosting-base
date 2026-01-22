@@ -180,18 +180,33 @@ class ENTSOEClient:
         # Convert date strings to proper format
         def format_date_for_api(date_str: str, is_end: bool = False) -> str:
             """Format date string to ENTSO-E API format YYYYMMDDHHMM."""
-            # Remove separators
-            clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
-            # If only date (8 chars), add time: 0000 for start, 2300 for end
-            if len(clean_date) == 8:
-                if is_end:
-                    return clean_date + '2300'  # End of day
+            try:
+                # Parse the date string
+                if 'T' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 else:
-                    return clean_date + '0000'  # Start of day
-            # If already has time, pad to 12 chars if needed
-            elif len(clean_date) < 12:
-                clean_date = clean_date.ljust(12, '0')
-            return clean_date[:12]  # Ensure exactly 12 digits
+                    dt = datetime.fromisoformat(date_str)
+                
+                # For end date, set to end of day (23:59)
+                if is_end:
+                    dt = dt.replace(hour=23, minute=59)
+                else:
+                    dt = dt.replace(hour=0, minute=0)
+                
+                # Format as YYYYMMDDHHMM
+                return dt.strftime('%Y%m%d%H%M')
+            except (ValueError, AttributeError) as e:
+                # Fallback to string manipulation if parsing fails
+                logger.warning(f"Failed to parse date {date_str}, using fallback: {e}")
+                clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
+                if len(clean_date) == 8:
+                    if is_end:
+                        return clean_date + '2359'  # End of day (23:59)
+                    else:
+                        return clean_date + '0000'  # Start of day
+                elif len(clean_date) < 12:
+                    clean_date = clean_date.ljust(12, '0')
+                return clean_date[:12]
         
         params = {
             'securityToken': self.api_token or '',
@@ -292,18 +307,33 @@ class ENTSOEClient:
         # Convert date strings to proper format
         def format_date_for_api(date_str: str, is_end: bool = False) -> str:
             """Format date string to ENTSO-E API format YYYYMMDDHHMM."""
-            # Remove separators
-            clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
-            # If only date (8 chars), add time: 0000 for start, 2300 for end
-            if len(clean_date) == 8:
-                if is_end:
-                    return clean_date + '2300'  # End of day
+            try:
+                # Parse the date string
+                if 'T' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 else:
-                    return clean_date + '0000'  # Start of day
-            # If already has time, pad to 12 chars if needed
-            elif len(clean_date) < 12:
-                clean_date = clean_date.ljust(12, '0')
-            return clean_date[:12]  # Ensure exactly 12 digits
+                    dt = datetime.fromisoformat(date_str)
+                
+                # For end date, set to end of day (23:59)
+                if is_end:
+                    dt = dt.replace(hour=23, minute=59)
+                else:
+                    dt = dt.replace(hour=0, minute=0)
+                
+                # Format as YYYYMMDDHHMM
+                return dt.strftime('%Y%m%d%H%M')
+            except (ValueError, AttributeError) as e:
+                # Fallback to string manipulation if parsing fails
+                logger.warning(f"Failed to parse date {date_str}, using fallback: {e}")
+                clean_date = date_str.replace('-', '').replace(':', '').replace('T', '').replace(' ', '')
+                if len(clean_date) == 8:
+                    if is_end:
+                        return clean_date + '2359'  # End of day (23:59)
+                    else:
+                        return clean_date + '0000'  # Start of day
+                elif len(clean_date) < 12:
+                    clean_date = clean_date.ljust(12, '0')
+                return clean_date[:12]
         
         params = {
             'securityToken': self.api_token or '',
