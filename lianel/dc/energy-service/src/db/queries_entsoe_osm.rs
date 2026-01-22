@@ -1,7 +1,7 @@
 use sqlx::{PgPool, Row};
 use sqlx::types::BigDecimal;
 use bigdecimal::ToPrimitive;
-use chrono::{DateTime, Utc};
+use chrono::NaiveDateTime;
 use std::result::Result;
 use crate::models::*;
 
@@ -106,7 +106,7 @@ pub async fn get_electricity_timeseries_records(
         .iter()
         .map(|row| ElectricityTimeseriesRecord {
             id: row.get::<i64, _>(0),
-            timestamp_utc: row.get::<DateTime<Utc>, _>(1),
+            timestamp_utc: row.get::<chrono::NaiveDateTime, _>(1),
             country_code: row.get::<String, _>(2),
             bidding_zone: row.get::<Option<String>, _>(3),
             production_type: row.get::<Option<String>, _>(4),

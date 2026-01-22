@@ -15,7 +15,7 @@ pub struct ElectricityTimeseriesQueryParams {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ElectricityTimeseriesRecord {
     pub id: i64,
-    pub timestamp_utc: DateTime<Utc>,
+    pub timestamp_utc: chrono::NaiveDateTime,
     pub country_code: String,
     pub bidding_zone: Option<String>,
     pub production_type: Option<String>,
