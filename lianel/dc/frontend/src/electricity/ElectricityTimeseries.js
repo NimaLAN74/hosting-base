@@ -16,27 +16,7 @@ function ElectricityTimeseries() {
     limit: 1000
   });
 
-  // Initial fetch when authenticated
-  useEffect(() => {
-    if (authenticated) {
-      fetchData();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated]);
-
-  // Debounced fetch when filters change
-  useEffect(() => {
-    if (!authenticated) return;
-    
-    const timeoutId = setTimeout(() => {
-      fetchData();
-    }, 500); // Wait 500ms after last filter change
-
-    return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters]);
-
-  const fetchData = async () => {
+  const fetchData = React.useCallback(async () => {
     if (!authenticated) return;
     
     try {
