@@ -16,6 +16,7 @@ function ElectricityTimeseries() {
     limit: 1000
   });
 
+  // Initial fetch when authenticated
   useEffect(() => {
     if (authenticated) {
       fetchData();
@@ -23,17 +24,39 @@ function ElectricityTimeseries() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated]);
 
+  // Debounced fetch when filters change
+  useEffect(() => {
+    if (!authenticated) return;
+    
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 500); // Wait 500ms after last filter change
+
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters]);
+
   const fetchData = async () => {
+    if (!authenticated) return;
+    
     try {
       setLoading(true);
       setError('');
 
       const params = new URLSearchParams();
-      if (filters.country_code) params.append('country_code', filters.country_code);
-      if (filters.start_date) params.append('start_date', filters.start_date);
-      if (filters.end_date) params.append('end_date', filters.end_date);
-      if (filters.production_type) params.append('production_type', filters.production_type);
-      params.append('limit', filters.limit);
+      if (filters.country_code && filters.country_code.trim()) {
+        params.append('country_code', filters.country_code.trim());
+      }
+      if (filters.start_date && filters.start_date.trim()) {
+        params.append('start_date', filters.start_date.trim());
+      }
+      if (filters.end_date && filters.end_date.trim()) {
+        params.append('end_date', filters.end_date.trim());
+      }
+      if (filters.production_type && filters.production_type.trim()) {
+        params.append('production_type', filters.production_type.trim());
+      }
+      params.append('limit', filters.limit || 1000);
 
       const response = await authenticatedFetch(
         `/api/v1/electricity/timeseries?${params.toString()}`
