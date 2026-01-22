@@ -93,16 +93,23 @@ function ElectricityTimeseries() {
     }
   }, [authenticated, fetchData]);
 
-  // Debounced fetch when filters change
+  // Debounced fetch when filters change (but not on initial mount)
+  const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
     if (!authenticated) return;
     
     const timeoutId = setTimeout(() => {
+      console.log('Filters changed, fetching data...', filters);
       fetchData();
     }, 500); // Wait 500ms after last filter change
 
     return () => clearTimeout(timeoutId);
-  }, [filters, authenticated, fetchData]);
+  }, [filters.country_code, filters.start_date, filters.end_date, filters.production_type, filters.limit, authenticated, fetchData]);
 
   // Helper function to format date as DDMMYYYY
   const formatDateDDMMYYYY = (dateString) => {
