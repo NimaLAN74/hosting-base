@@ -87,13 +87,18 @@ function ElectricityTimeseries() {
         console.log('API response received:', {
           dataCount: result.data?.length || 0,
           total: result.total || 0,
-          firstRecord: result.data?.[0] || null
+          firstRecord: result.data?.[0] || null,
+          fullData: result.data
         });
-        setData(result.data || []);
+        const dataArray = result.data || [];
+        console.log('Setting data state with', dataArray.length, 'records');
+        console.log('First record in array:', dataArray[0]);
+        setData(dataArray);
         if (!result.data || result.data.length === 0) {
           setError('No data available for the selected filters. Try adjusting the date range or country code.');
         } else {
           setError(''); // Clear error if we have data
+          console.log('Data set successfully, should render', dataArray.length, 'records');
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -370,9 +375,18 @@ function ElectricityTimeseries() {
                 </tr>
               </thead>
               <tbody>
-                {data.slice(0, 100).map((record, idx) => (
-                  <tr key={idx}>
-                    <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
+                {data.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>
+                      No data to display
+                    </td>
+                  </tr>
+                ) : (
+                  data.slice(0, 100).map((record, idx) => {
+                    console.log('Rendering record', idx, record);
+                    return (
+                      <tr key={idx}>
+                        <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
                     <td>{record.country_code}</td>
                     <td>{record.bidding_zone || 'N/A'}</td>
                     <td>{record.production_type || 'Load'}</td>
