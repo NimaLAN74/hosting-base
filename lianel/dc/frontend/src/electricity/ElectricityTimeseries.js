@@ -270,8 +270,8 @@ function ElectricityTimeseries() {
               <div className="stat-value">
                 {data.length > 0 ? (
                   <>
-                    {new Date(data[data.length - 1].timestamp_utc).toLocaleDateString()} - {' '}
-                    {new Date(data[0].timestamp_utc).toLocaleDateString()}
+                    {formatDateDDMMYYYY(data[data.length - 1].timestamp_utc)} - {' '}
+                    {formatDateDDMMYYYY(data[0].timestamp_utc)}
                   </>
                 ) : 'N/A'}
               </div>
@@ -301,7 +301,7 @@ function ElectricityTimeseries() {
               <tbody>
                 {data.slice(0, 100).map((record, idx) => (
                   <tr key={idx}>
-                    <td>{new Date(record.timestamp_utc).toLocaleString()}</td>
+                    <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
                     <td>{record.country_code}</td>
                     <td>{record.bidding_zone || 'N/A'}</td>
                     <td>{record.production_type || 'Load'}</td>
