@@ -198,20 +198,32 @@ function ElectricityTimeseries() {
         </div>
 
         <div className="filter-group">
-          <label>Start Date:</label>
+          <label>Start Date (DDMMYYYY):</label>
           <input
-            type="date"
+            type="text"
             value={filters.start_date}
-            onChange={(e) => handleFilterChange('start_date', e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value.replace(/\D/g, '').slice(0, 8);
+              handleFilterChange('start_date', value);
+            }}
+            placeholder="DDMMYYYY (e.g., 20012026)"
+            pattern="\d{8}"
+            maxLength={8}
           />
         </div>
 
         <div className="filter-group">
-          <label>End Date:</label>
+          <label>End Date (DDMMYYYY):</label>
           <input
-            type="date"
+            type="text"
             value={filters.end_date}
-            onChange={(e) => handleFilterChange('end_date', e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value.replace(/\D/g, '').slice(0, 8);
+              handleFilterChange('end_date', value);
+            }}
+            placeholder="DDMMYYYY (e.g., 21012026)"
+            pattern="\d{8}"
+            maxLength={8}
           />
         </div>
 
