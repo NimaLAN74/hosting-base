@@ -387,14 +387,16 @@ function ElectricityTimeseries() {
                     return (
                       <tr key={idx}>
                         <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
-                    <td>{record.country_code}</td>
-                    <td>{record.bidding_zone || 'N/A'}</td>
-                    <td>{record.production_type || 'Load'}</td>
-                    <td>{record.load_mw ? record.load_mw.toFixed(2) : '-'}</td>
-                    <td>{record.generation_mw ? record.generation_mw.toFixed(2) : '-'}</td>
-                    <td>{record.resolution}</td>
-                  </tr>
-                ))}
+                        <td>{record.country_code}</td>
+                        <td>{record.bidding_zone || 'N/A'}</td>
+                        <td>{record.production_type || 'Load'}</td>
+                        <td>{record.load_mw ? record.load_mw.toFixed(2) : '-'}</td>
+                        <td>{record.generation_mw ? record.generation_mw.toFixed(2) : '-'}</td>
+                        <td>{record.resolution}</td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
             {data.length > 100 && (
