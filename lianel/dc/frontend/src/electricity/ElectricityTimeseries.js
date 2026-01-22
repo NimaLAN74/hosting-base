@@ -28,15 +28,39 @@ function ElectricityTimeseries() {
         params.append('country_code', filters.country_code.trim());
       }
       if (filters.start_date && filters.start_date.trim()) {
-        params.append('start_date', filters.start_date.trim());
+        // Convert DDMMYYYY to YYYY-MM-DD format for API
+        const dateStr = filters.start_date.trim();
+        if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
+          // DDMMYYYY format
+          const day = dateStr.substring(0, 2);
+          const month = dateStr.substring(2, 4);
+          const year = dateStr.substring(4, 8);
+          params.append('start_date', `${year}-${month}-${day}`);
+        } else {
+          // Already in YYYY-MM-DD format
+          params.append('start_date', dateStr);
+        }
       }
       if (filters.end_date && filters.end_date.trim()) {
-        params.append('end_date', filters.end_date.trim());
+        // Convert DDMMYYYY to YYYY-MM-DD format for API
+        const dateStr = filters.end_date.trim();
+        if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
+          // DDMMYYYY format
+          const day = dateStr.substring(0, 2);
+          const month = dateStr.substring(2, 4);
+          const year = dateStr.substring(4, 8);
+          params.append('end_date', `${year}-${month}-${day}`);
+        } else {
+          // Already in YYYY-MM-DD format
+          params.append('end_date', dateStr);
+        }
       }
       if (filters.production_type && filters.production_type.trim()) {
         params.append('production_type', filters.production_type.trim());
       }
       params.append('limit', filters.limit || 1000);
+      
+      console.log('Fetching with params:', params.toString());
 
       const response = await authenticatedFetch(
         `/api/v1/electricity/timeseries?${params.toString()}`
@@ -79,6 +103,16 @@ function ElectricityTimeseries() {
 
     return () => clearTimeout(timeoutId);
   }, [filters, authenticated, fetchData]);
+
+  // Helper function to format date as DDMMYYYY
+  const formatDateDDMMYYYY = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}${month}${year}`;
+  };
 
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({ ...prev, [field]: value }));
