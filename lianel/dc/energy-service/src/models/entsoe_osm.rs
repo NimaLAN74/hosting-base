@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use chrono::{DateTime, Utc};
+use chrono::NaiveDateTime;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ElectricityTimeseriesQueryParams {
