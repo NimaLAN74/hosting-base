@@ -114,6 +114,21 @@ function ElectricityTimeseries() {
     return `${day}${month}${year}`;
   };
 
+  // Helper function to format date as DDMMYYYY
+  const formatDateDDMMYYYY = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}${month}${year}`;
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
