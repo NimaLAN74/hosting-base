@@ -4,7 +4,6 @@ pub mod keycloak;
 pub use keycloak::*;
 
 use axum::{
-    async_trait,
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{Response, IntoResponse},
@@ -24,7 +23,6 @@ pub struct AuthenticatedUser {
 
 /// Axum extractor for authenticated users
 /// Usage: `async fn handler(user: AuthenticatedUser, ...)`
-#[async_trait]
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
     S: Send + Sync,
