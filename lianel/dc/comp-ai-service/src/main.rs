@@ -63,9 +63,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Build the application router
     let app = Router::new()
+        // Public routes (no authentication required)
         .route("/health", get(health_check))
+        // Protected routes (authentication required)
         .route("/api/v1/process", axum::routing::post(process_request))
         .route("/api/v1/history", get(handlers::comp_ai::get_request_history))
+        // Swagger UI (public)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
         .layer(
             ServiceBuilder::new()
@@ -76,6 +79,8 @@ async fn main() -> anyhow::Result<()> {
                         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
+                // Add config to request extensions for AuthenticatedUser extractor
+                .layer(axum::Extension(config.clone()))
         )
         .with_state(config.clone());
 

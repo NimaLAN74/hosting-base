@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
 use crate::config::AppConfig;
-use crate::models::{CompAIRequest, CompAIResponse};
+use crate::models::{CompAIRequest, CompAIResponse, RequestHistoryQueryParams, RequestHistoryResponse};
+use crate::auth::AuthenticatedUser;
 
 
 #[utoipa::path(
@@ -23,10 +24,17 @@ use crate::models::{CompAIRequest, CompAIResponse};
     )
 )]
 pub async fn process_request(
+    user: AuthenticatedUser,
     State(config): State<Arc<AppConfig>>,
     Json(request): Json<CompAIRequest>,
 ) -> Result<Json<CompAIResponse>, (StatusCode, Json<serde_json::Value>)> {
     let start_time = std::time::Instant::now();
+    
+    tracing::info!(
+        "Processing request from user: {} ({})",
+        user.preferred_username.as_deref().unwrap_or("unknown"),
+        user.sub
+    );
     
     // TODO: Implement actual AI processing logic
     // For now, return a mock response
@@ -55,10 +63,17 @@ pub async fn process_request(
     )
 )]
 pub async fn get_request_history(
+    user: AuthenticatedUser,
     State(_config): State<Arc<AppConfig>>,
     Query(params): Query<RequestHistoryQueryParams>,
 ) -> Result<Json<RequestHistoryResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // TODO: Implement database query to get request history
+    tracing::info!(
+        "Getting request history for user: {} ({})",
+        user.preferred_username.as_deref().unwrap_or("unknown"),
+        user.sub
+    );
+    
+    // TODO: Implement database query to get request history filtered by user
     let limit = params.limit.unwrap_or(100);
     let offset = params.offset.unwrap_or(0);
 
