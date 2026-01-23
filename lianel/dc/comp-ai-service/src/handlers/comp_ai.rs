@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Query, State, HeaderMap},
-    http::StatusCode,
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
     response::Json,
 };
 use serde::{Deserialize, Serialize};
