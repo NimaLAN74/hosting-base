@@ -28,17 +28,33 @@ PGPASSWORD="${POSTGRES_PASSWORD}"
 # If PGPASSWORD is not set, try to get it from docker container or use docker exec
 if [ -z "$PGPASSWORD" ]; then
     echo "⚠️  POSTGRES_PASSWORD not in environment, trying docker exec method..."
-    USE_DOCKER=true
+    # Try to get password from airflow container env
+    PGPASSWORD=$(docker exec dc-airflow-apiserver-1 env | grep -i POSTGRES_PASSWORD | cut -d= -f2 | head -1)
+    if [ -z "$PGPASSWORD" ]; then
+        # Try postgres container directly
+        POSTGRES_CONTAINER=$(docker ps --filter "name=postgres" --format "{{.Names}}" | head -1)
+        if [ -n "$POSTGRES_CONTAINER" ]; then
+            echo "   Using postgres container: $POSTGRES_CONTAINER"
+            USE_DOCKER_POSTGRES=true
+            DB_HOST="localhost"
+        else
+            echo "   ERROR: Cannot find postgres container or password"
+            exit 1
+        fi
+    else
+        export PGPASSWORD
+        USE_DOCKER_POSTGRES=false
+    fi
 else
     export PGPASSWORD
-    USE_DOCKER=false
+    USE_DOCKER_POSTGRES=false
 fi
 
 # Function to run psql command
 run_psql() {
     local query="$1"
-    if [ "$USE_DOCKER" = true ]; then
-        docker exec dc-airflow-apiserver-1 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
+    if [ "$USE_DOCKER_POSTGRES" = true ]; then
+        docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
     else
         psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
     fi
@@ -47,8 +63,8 @@ run_psql() {
 # Function to get count (returns just the number)
 get_count() {
     local query="$1"
-    if [ "$USE_DOCKER" = true ]; then
-        docker exec dc-airflow-apiserver-1 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -t -c "$query" 2>&1 | tr -d ' \n'
+    if [ "$USE_DOCKER_POSTGRES" = true ]; then
+        docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -t -c "$query" 2>&1 | grep -v "Password" | tr -d ' \n'
     else
         psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "$query" 2>&1 | tr -d ' \n'
     fi
