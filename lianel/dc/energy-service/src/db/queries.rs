@@ -464,11 +464,11 @@ pub async fn get_geo_enrichment_records(
 
     if cntr_code.is_some() {
         bind_count += 1;
-        conditions.push(format!("cntr_code = ${}", bind_count));
+        conditions.push(format!("g.cntr_code = ${}", bind_count));
     }
     if year.is_some() {
         bind_count += 1;
-        conditions.push(format!("year = ${}", bind_count));
+        conditions.push(format!("g.year = ${}", bind_count));
     }
 
     let where_clause = if conditions.is_empty() {
@@ -478,7 +478,7 @@ pub async fn get_geo_enrichment_records(
     };
 
     // Count query
-    let count_query = format!("SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1 {}", where_clause);
+    let count_query = format!("SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1 g {}", where_clause);
     let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
     if let Some(cc) = cntr_code {
         count_q = count_q.bind(cc);
