@@ -101,12 +101,13 @@ echo "4. Sample records with OSM features (top 10)..."
 run_psql "
 SELECT 
     region_id,
-    country_code,
+    cntr_code,
     year,
     osm_feature_count,
-    total_final_energy_gwh,
-    electricity_consumption_gwh,
-    renewable_share_pct
+    total_energy_gwh,
+    pct_renewable,
+    power_plant_count,
+    industrial_area_km2
 FROM ml_dataset_geo_enrichment_v1
 WHERE osm_feature_count > 0
 ORDER BY osm_feature_count DESC
@@ -117,14 +118,14 @@ echo ""
 echo "5. Checking data by country..."
 run_psql "
 SELECT 
-    country_code,
+    cntr_code,
     COUNT(*) as total_records,
     COUNT(CASE WHEN osm_feature_count > 0 THEN 1 END) as records_with_osm,
     SUM(osm_feature_count) as total_osm_features,
     AVG(osm_feature_count) as avg_osm_features
 FROM ml_dataset_geo_enrichment_v1
-GROUP BY country_code
-ORDER BY country_code;
+GROUP BY cntr_code
+ORDER BY cntr_code;
 "
 echo ""
 
