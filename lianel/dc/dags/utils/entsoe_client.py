@@ -380,6 +380,8 @@ class ENTSOEClient:
         
         root = self._make_request(params)
         if root is None:
+            logger.warning(f"ENTSO-E API request failed for generation data ({country_code}, {start_date} to {end_date})")
+            print(f"⚠️  ENTSO-E API request failed for generation data ({country_code}, {start_date} to {end_date})")
             return []
         
         # Parse generation data from XML
