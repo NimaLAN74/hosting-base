@@ -290,13 +290,35 @@ jobs:
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           sleep 10
+          echo "Checking container status..."
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=30 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "docker exec lianel-comp-ai-service curl -f http://localhost:3002/health || docker logs lianel-comp-ai-service --tail 20 || exit 1" && echo "✅ Comp AI Service health check passed"
+            "docker ps --filter name=lianel-comp-ai-service --format '{{.Status}}'"
+          
+          echo "Running health check from inside container..."
+          if ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec lianel-comp-ai-service curl -f http://localhost:3002/health"; then
+            echo "✅ Comp AI Service health check passed"
+          else
+            echo "❌ Health check failed. Showing container logs:"
+            ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=30 \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "docker logs lianel-comp-ai-service --tail 30"
+            exit 1
+          fi
 
       - name: Deployment Summary
         run: |
