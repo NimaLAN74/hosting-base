@@ -67,17 +67,26 @@ function GeoEnrichmentMap() {
         const result = await response.json();
         const dataArray = result.data || [];
         console.log('Geo-enrichment data received:', dataArray.length, 'records');
-        console.log('Sample record:', dataArray[0]);
+        if (dataArray.length > 0) {
+          console.log('Sample record:', dataArray[0]);
+          console.log('Sample latitude:', dataArray[0].latitude, 'type:', typeof dataArray[0].latitude);
+          console.log('Sample longitude:', dataArray[0].longitude, 'type:', typeof dataArray[0].longitude);
+        }
         
         setData(dataArray);
         
         // Calculate map bounds from data with coordinates
-        const dataWithCoords = dataArray.filter(d => d.latitude && d.longitude);
-        console.log('Records with coordinates:', dataWithCoords.length);
+        // Check for both null/undefined and also ensure they're valid numbers
+        const dataWithCoords = dataArray.filter(d => {
+          const hasLat = d.latitude !== null && d.latitude !== undefined && !isNaN(d.latitude);
+          const hasLng = d.longitude !== null && d.longitude !== undefined && !isNaN(d.longitude);
+          return hasLat && hasLng;
+        });
+        console.log('Records with coordinates:', dataWithCoords.length, 'out of', dataArray.length);
         
         if (dataWithCoords.length > 0) {
-          const lats = dataWithCoords.map(d => d.latitude).filter(Boolean);
-          const lngs = dataWithCoords.map(d => d.longitude).filter(Boolean);
+          const lats = dataWithCoords.map(d => Number(d.latitude)).filter(n => !isNaN(n));
+          const lngs = dataWithCoords.map(d => Number(d.longitude)).filter(n => !isNaN(n));
           if (lats.length > 0 && lngs.length > 0) {
             const minLat = Math.min(...lats);
             const maxLat = Math.max(...lats);
@@ -87,10 +96,11 @@ function GeoEnrichmentMap() {
             setMapBounds([[minLat, minLng], [maxLat, maxLng]]);
           } else {
             // Default bounds for Europe
+            console.warn('Could not calculate bounds from coordinates');
             setMapBounds([[35, -10], [72, 40]]);
           }
         } else {
-          console.warn('No records with coordinates found');
+          console.warn('No records with coordinates found. Sample record:', dataArray[0]);
           setMapBounds([[35, -10], [72, 40]]);
         }
       } else {
@@ -232,9 +242,17 @@ function GeoEnrichmentMap() {
 
                 {/* Plot markers for regions with coordinates */}
                 {(() => {
-                  const dataWithCoords = data.filter(d => d.latitude && d.longitude);
+                  const dataWithCoords = data.filter(d => {
+                    const hasLat = d.latitude !== null && d.latitude !== undefined && !isNaN(d.latitude);
+                    const hasLng = d.longitude !== null && d.longitude !== undefined && !isNaN(d.longitude);
+                    return hasLat && hasLng;
+                  });
                   console.log('Rendering markers for', dataWithCoords.length, 'records with coordinates');
                   console.log('Selected metric:', selectedMetric, 'Max value:', maxValue);
+                  
+                  if (dataWithCoords.length === 0 && data.length > 0) {
+                    console.warn('No coordinates found. First record:', data[0]);
+                  }
                   
                   return dataWithCoords.map((record, idx) => {
                     const value = record[selectedMetric];
@@ -253,10 +271,18 @@ function GeoEnrichmentMap() {
                       });
                     }
                     
+                    const lat = Number(record.latitude);
+                    const lng = Number(record.longitude);
+                    
+                    if (isNaN(lat) || isNaN(lng)) {
+                      console.error('Invalid coordinates for record:', record.region_id, 'lat:', lat, 'lng:', lng);
+                      return null;
+                    }
+                    
                     return (
                       <CircleMarker
                         key={`${record.region_id}-${record.year}-${idx}`}
-                        center={[record.latitude, record.longitude]}
+                        center={[lat, lng]}
                         radius={radius}
                         pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 2 }}
                       >
@@ -278,11 +304,18 @@ function GeoEnrichmentMap() {
                 })()}
                 
                 {/* Show note if some regions don't have coordinates */}
-                {data.length > 0 && data.filter(d => !d.latitude || !d.longitude).length > 0 && (
-                  <div className="map-note">
-                    <p>⚠️ {data.filter(d => !d.latitude || !d.longitude).length} regions without coordinates (not shown on map)</p>
-                  </div>
-                )}
+                {(() => {
+                  const withoutCoords = data.filter(d => {
+                    const hasLat = d.latitude !== null && d.latitude !== undefined && !isNaN(d.latitude);
+                    const hasLng = d.longitude !== null && d.longitude !== undefined && !isNaN(d.longitude);
+                    return !hasLat || !hasLng;
+                  });
+                  return withoutCoords.length > 0 && (
+                    <div className="map-note">
+                      <p>⚠️ {withoutCoords.length} regions without coordinates (not shown on map)</p>
+                    </div>
+                  );
+                })()}
               </MapContainer>
             </div>
 
