@@ -46,6 +46,7 @@ pub struct ClusteringRecord {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GeoEnrichmentRecord {
+    pub region_id: String,
     pub cntr_code: String,
     pub year: i32,
     pub total_energy_gwh: Option<f64>,
@@ -54,6 +55,9 @@ pub struct GeoEnrichmentRecord {
     pub pct_renewable: Option<f64>,
     pub energy_density_gwh_per_km2: Option<f64>,
     pub area_km2: Option<f64>,
+    pub osm_feature_count: Option<i32>,
+    pub power_plant_count: Option<i32>,
+    pub industrial_area_km2: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

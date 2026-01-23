@@ -346,7 +346,7 @@ pub async fn get_forecasting_records(
             yoy_change_total_energy_pct: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
             yoy_change_renewable_pct: row.get::<Option<BigDecimal>, _>(8).and_then(|v| v.to_f64()),
             energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(9).and_then(|v| v.to_f64()),
-            area_km2: row.get::<Option<BigDecimal>, _>(10).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<f64>, _>(10), // DOUBLE PRECISION (FLOAT8) - use f64 directly
             year_index: row.get(11),
             lag_1_year_total_energy_gwh: row.get::<Option<BigDecimal>, _>(12).and_then(|v| v.to_f64()),
             lag_2_year_total_energy_gwh: row.get::<Option<BigDecimal>, _>(13).and_then(|v| v.to_f64()),
@@ -445,7 +445,7 @@ pub async fn get_clustering_records(
             pct_renewable: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
             pct_fossil: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
             energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
-            area_km2: row.get::<Option<BigDecimal>, _>(8).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<f64>, _>(8), // DOUBLE PRECISION (FLOAT8) - use f64 directly
         })
         .collect();
 
@@ -528,14 +528,18 @@ pub async fn get_geo_enrichment_records(
     let records: Vec<GeoEnrichmentRecord> = rows
         .iter()
         .map(|row| GeoEnrichmentRecord {
-            cntr_code: row.get(0),
-            year: row.get(1),
-            total_energy_gwh: row.get::<Option<BigDecimal>, _>(2).and_then(|v| v.to_f64()),
-            renewable_energy_gwh: row.get::<Option<BigDecimal>, _>(3).and_then(|v| v.to_f64()),
-            fossil_energy_gwh: row.get::<Option<BigDecimal>, _>(4).and_then(|v| v.to_f64()),
-            pct_renewable: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
-            energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
-            area_km2: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
+            region_id: row.get(0),
+            cntr_code: row.get(1),
+            year: row.get(2),
+            total_energy_gwh: row.get::<Option<BigDecimal>, _>(3).and_then(|v| v.to_f64()),
+            renewable_energy_gwh: row.get::<Option<BigDecimal>, _>(4).and_then(|v| v.to_f64()),
+            fossil_energy_gwh: row.get::<Option<BigDecimal>, _>(5).and_then(|v| v.to_f64()),
+            pct_renewable: row.get::<Option<BigDecimal>, _>(6).and_then(|v| v.to_f64()),
+            energy_density_gwh_per_km2: row.get::<Option<BigDecimal>, _>(7).and_then(|v| v.to_f64()),
+            area_km2: row.get::<Option<f64>, _>(8), // DOUBLE PRECISION (FLOAT8) - use f64 directly
+            osm_feature_count: row.get(9),
+            power_plant_count: row.get(10),
+            industrial_area_km2: row.get::<Option<BigDecimal>, _>(11).and_then(|v| v.to_f64()),
         })
         .collect();
 
