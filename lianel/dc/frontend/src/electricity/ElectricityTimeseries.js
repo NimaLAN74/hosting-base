@@ -389,7 +389,7 @@ function ElectricityTimeseries() {
                       return null;
                     }
                     return (
-                      <tr key={record.id || idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                      <tr key={record.id || idx}>
                         <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
                         <td>{record.country_code || 'N/A'}</td>
                         <td>{record.bidding_zone || 'N/A'}</td>
