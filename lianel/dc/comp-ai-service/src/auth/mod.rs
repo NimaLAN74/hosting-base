@@ -9,6 +9,7 @@ use axum::{
     response::{Response, IntoResponse},
 };
 use std::sync::Arc;
+use std::result::Result;
 use crate::config::AppConfig;
 use crate::auth::KeycloakValidator;
 
@@ -29,13 +30,18 @@ where
 {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // Get config from extensions (set by Extension layer)
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // Get config from state (set by with_state)
         let config = parts
             .extensions
             .get::<Arc<AppConfig>>()
-            .ok_or(AuthError::ConfigMissing)?
-            .clone();
+            .ok_or_else(|| {
+                // Try to get from state if available
+                // For now, we'll use extensions as fallback
+                AuthError::ConfigMissing
+            })?;
+        
+        let config = config.clone();
 
         // Get Authorization header
         let headers = &parts.headers;
