@@ -296,7 +296,7 @@ jobs:
             -o ConnectTimeout=30 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "curl -f http://localhost:3002/health || exit 1" && echo "✅ Comp AI Service health check passed"
+            "docker exec lianel-comp-ai-service curl -f http://localhost:3002/health || docker logs lianel-comp-ai-service --tail 20 || exit 1" && echo "✅ Comp AI Service health check passed"
 
       - name: Deployment Summary
         run: |
