@@ -230,12 +230,57 @@ function GeoEnrichmentMap() {
                 
                 {mapBounds && <FitBounds bounds={mapBounds} />}
 
-                {/* Note: We need region coordinates to plot markers */}
-                {/* For now, show a message that coordinates are needed */}
-                {data.length > 0 && (
+                {/* Plot markers for regions with coordinates */}
+                {(() => {
+                  const dataWithCoords = data.filter(d => d.latitude && d.longitude);
+                  console.log('Rendering markers for', dataWithCoords.length, 'records with coordinates');
+                  console.log('Selected metric:', selectedMetric, 'Max value:', maxValue);
+                  
+                  return dataWithCoords.map((record, idx) => {
+                    const value = record[selectedMetric];
+                    const numValue = value ? (typeof value === 'number' ? value : parseFloat(value)) : 0;
+                    const color = getColor(numValue, maxValue);
+                    const radius = getRadius(numValue, maxValue);
+                    
+                    if (idx < 3) {
+                      console.log(`Marker ${idx}:`, {
+                        region: record.region_id,
+                        lat: record.latitude,
+                        lng: record.longitude,
+                        value: numValue,
+                        color,
+                        radius
+                      });
+                    }
+                    
+                    return (
+                      <CircleMarker
+                        key={`${record.region_id}-${record.year}-${idx}`}
+                        center={[record.latitude, record.longitude]}
+                        radius={radius}
+                        pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 2 }}
+                      >
+                        <Popup>
+                          <div className="popup-content">
+                            <h4>{record.region_id}</h4>
+                            <p><strong>Country:</strong> {record.cntr_code}</p>
+                            <p><strong>Year:</strong> {record.year}</p>
+                            <p><strong>Total Energy:</strong> {record.total_energy_gwh ? record.total_energy_gwh.toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A'} GWh</p>
+                            <p><strong>Renewable:</strong> {record.pct_renewable ? `${record.pct_renewable.toFixed(2)}%` : 'N/A'}</p>
+                            <p><strong>OSM Features:</strong> {record.osm_feature_count || 'N/A'}</p>
+                            <p><strong>Power Plants:</strong> {record.power_plant_count || 'N/A'}</p>
+                            <p><strong>Industrial Area:</strong> {record.industrial_area_km2 ? `${record.industrial_area_km2.toFixed(2)} km²` : 'N/A'}</p>
+                          </div>
+                        </Popup>
+                      </CircleMarker>
+                    );
+                  });
+                })()}
+                
+                {/* Show note if some regions don't have coordinates */}
+                {data.length > 0 && data.filter(d => !d.latitude || !d.longitude).length > 0 && (
                   <div className="map-note">
-                    <p>⚠️ Map markers require region coordinates. Currently showing {data.length} regions with data.</p>
-                    <p>To enable map visualization, we need to join with dim_region table to get coordinates.</p>
+                    <p>⚠️ {data.filter(d => !d.latitude || !d.longitude).length} regions without coordinates (not shown on map)</p>
                   </div>
                 )}
               </MapContainer>
