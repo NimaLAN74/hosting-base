@@ -7,12 +7,16 @@ set -e
 echo "=== Geo-Enrichment Dataset Verification ==="
 echo ""
 
-# Load .env file if it exists
-if [ -f .env ]; then
-    set -a
-    source .env
-    set +a
-fi
+# Try to load .env file from multiple locations
+for env_file in .env ../.env ../../.env; do
+    if [ -f "$env_file" ]; then
+        set -a
+        source "$env_file"
+        set +a
+        echo "Loaded environment from: $env_file"
+        break
+    fi
+done
 
 # Database connection details (from environment or defaults)
 DB_HOST="${POSTGRES_HOST:-172.18.0.1}"
@@ -21,21 +25,42 @@ DB_USER="${POSTGRES_USER:-postgres}"
 DB_NAME="${POSTGRES_DB:-lianel_energy}"
 PGPASSWORD="${POSTGRES_PASSWORD}"
 
+# If PGPASSWORD is not set, try to get it from docker container or use docker exec
 if [ -z "$PGPASSWORD" ]; then
-    echo "ERROR: POSTGRES_PASSWORD not set"
-    echo "Please ensure .env file exists and contains POSTGRES_PASSWORD"
-    exit 1
+    echo "⚠️  POSTGRES_PASSWORD not in environment, trying docker exec method..."
+    USE_DOCKER=true
+else
+    export PGPASSWORD
+    USE_DOCKER=false
 fi
 
-export PGPASSWORD
+# Function to run psql command
+run_psql() {
+    local query="$1"
+    if [ "$USE_DOCKER" = true ]; then
+        docker exec dc-airflow-apiserver-1 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
+    else
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
+    fi
+}
+
+# Function to get count (returns just the number)
+get_count() {
+    local query="$1"
+    if [ "$USE_DOCKER" = true ]; then
+        docker exec dc-airflow-apiserver-1 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -t -c "$query" 2>&1 | tr -d ' \n'
+    else
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "$query" 2>&1 | tr -d ' \n'
+    fi
+}
 
 echo "1. Checking total records in ml_dataset_geo_enrichment_v1..."
-TOTAL_RECORDS=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1;" | tr -d ' ')
+TOTAL_RECORDS=$(get_count "SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1;")
 echo "   Total records: $TOTAL_RECORDS"
 echo ""
 
 echo "2. Checking records with OSM features..."
-OSM_RECORDS=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1 WHERE osm_feature_count > 0;" | tr -d ' ')
+OSM_RECORDS=$(get_count "SELECT COUNT(*) FROM ml_dataset_geo_enrichment_v1 WHERE osm_feature_count > 0;")
 echo "   Records with OSM features: $OSM_RECORDS"
 if [ "$TOTAL_RECORDS" -gt 0 ]; then
     OSM_PERCENTAGE=$(echo "scale=2; $OSM_RECORDS * 100 / $TOTAL_RECORDS" | bc)
@@ -44,7 +69,7 @@ fi
 echo ""
 
 echo "3. Checking OSM feature columns..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+run_psql "
 SELECT 
     COUNT(*) as total_records,
     COUNT(osm_feature_count) as records_with_feature_count,
@@ -62,7 +87,7 @@ FROM ml_dataset_geo_enrichment_v1;
 echo ""
 
 echo "4. Sample records with OSM features (top 10)..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+run_psql "
 SELECT 
     region_id,
     country_code,
@@ -81,7 +106,7 @@ LIMIT 10;
 echo ""
 
 echo "5. Checking data by country..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+run_psql "
 SELECT 
     country_code,
     COUNT(*) as total_records,
@@ -95,7 +120,7 @@ ORDER BY country_code;
 echo ""
 
 echo "6. Checking data by year..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+run_psql "
 SELECT 
     year,
     COUNT(*) as total_records,
@@ -108,7 +133,7 @@ ORDER BY year;
 echo ""
 
 echo "7. Verifying fact_geo_region_features table..."
-OSM_TABLE_COUNT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM fact_geo_region_features;" | tr -d ' ')
+OSM_TABLE_COUNT=$(get_count "SELECT COUNT(*) FROM fact_geo_region_features;")
 echo "   Records in fact_geo_region_features: $OSM_TABLE_COUNT"
 echo ""
 
