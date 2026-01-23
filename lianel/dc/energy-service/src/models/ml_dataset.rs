@@ -58,6 +58,8 @@ pub struct GeoEnrichmentRecord {
     pub osm_feature_count: Option<i32>,
     pub power_plant_count: Option<i32>,
     pub industrial_area_km2: Option<f64>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -91,6 +91,23 @@ function GeoFeatures() {
   return (
     <PageTemplate title="Geospatial Features (OSM)">
       <div className="geo-container">
+        <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0 }}>Geospatial Features (OSM)</h2>
+          <a 
+            href="/geo/map" 
+            style={{
+              padding: '10px 20px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              textDecoration: 'none',
+              borderRadius: '8px',
+              fontWeight: '600',
+              fontSize: '14px'
+            }}
+          >
+            View on Map →
+          </a>
+        </div>
         <p className="subtitle">OpenStreetMap features aggregated to NUTS2 regions</p>
 
       {/* Filters */}

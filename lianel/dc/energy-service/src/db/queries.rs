@@ -497,17 +497,30 @@ pub async fn get_geo_enrichment_records(
     let query_str = format!(
         r#"
         SELECT 
-            cntr_code,
-            year,
-            total_energy_gwh,
-            renewable_energy_gwh,
-            fossil_energy_gwh,
-            pct_renewable,
-            energy_density_gwh_per_km2,
-            area_km2
-        FROM ml_dataset_geo_enrichment_v1
+            g.region_id,
+            g.cntr_code,
+            g.year,
+            g.total_energy_gwh,
+            g.renewable_energy_gwh,
+            g.fossil_energy_gwh,
+            g.pct_renewable,
+            g.energy_density_gwh_per_km2,
+            g.area_km2,
+            g.osm_feature_count,
+            g.power_plant_count,
+            g.industrial_area_km2,
+            CASE 
+                WHEN r.geometry IS NOT NULL THEN ST_Y(ST_Transform(ST_Centroid(r.geometry), 4326))
+                ELSE NULL
+            END as latitude,
+            CASE 
+                WHEN r.geometry IS NOT NULL THEN ST_X(ST_Transform(ST_Centroid(r.geometry), 4326))
+                ELSE NULL
+            END as longitude
+        FROM ml_dataset_geo_enrichment_v1 g
+        LEFT JOIN dim_region r ON g.region_id = r.region_id
         {}
-        ORDER BY year DESC, cntr_code
+        ORDER BY g.year DESC, g.cntr_code
         LIMIT ${} OFFSET ${}
         "#,
         where_clause, limit_param, offset_param
@@ -540,6 +553,8 @@ pub async fn get_geo_enrichment_records(
             osm_feature_count: row.get(9),
             power_plant_count: row.get(10),
             industrial_area_km2: row.get::<Option<BigDecimal>, _>(11).and_then(|v| v.to_f64()),
+            latitude: row.get::<Option<f64>, _>(12), // From ST_Y(ST_Transform(ST_Centroid(...)))
+            longitude: row.get::<Option<f64>, _>(13), // From ST_X(ST_Transform(ST_Centroid(...)))
         })
         .collect();
 
