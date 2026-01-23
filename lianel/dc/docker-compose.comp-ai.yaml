@@ -1,0 +1,44 @@
+services:
+  comp-ai-service:
+    build:
+      context: ./comp-ai-service
+      dockerfile: Dockerfile
+    image: lianel-comp-ai-service:latest
+    container_name: lianel-comp-ai-service
+    env_file:
+      - .env
+    environment:
+      PORT: 3002
+      POSTGRES_HOST: ${POSTGRES_HOST:-172.18.0.1}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-lianel_energy}
+      KEYCLOAK_URL: https://auth.lianel.se
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      COMP_AI_KEYCLOAK_CLIENT_ID: ${COMP_AI_KEYCLOAK_CLIENT_ID:-comp-ai-service}
+      COMP_AI_KEYCLOAK_CLIENT_SECRET: ${COMP_AI_KEYCLOAK_CLIENT_SECRET}
+      COMP_AI_API_KEY: ${COMP_AI_API_KEY:-}
+      COMP_AI_MODEL_PATH: ${COMP_AI_MODEL_PATH:-/models}
+      COMP_AI_MAX_TOKENS: ${COMP_AI_MAX_TOKENS:-4096}
+      COMP_AI_TEMPERATURE: ${COMP_AI_TEMPERATURE:-0.7}
+      RUST_LOG: info
+    expose:
+      - "3002"
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    networks:
+      - lianel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  lianel-network:
+    external: true
