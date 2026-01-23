@@ -22,6 +22,13 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    pub fn database_url(&self) -> String {
+        format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            self.postgres_user, self.postgres_password, self.postgres_host, self.postgres_port, self.postgres_db
+        )
+    }
+
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             port: env::var("PORT")

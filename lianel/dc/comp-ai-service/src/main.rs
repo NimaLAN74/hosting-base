@@ -2,6 +2,7 @@ mod config;
 mod models;
 mod handlers;
 mod auth;
+mod db;
 
 use axum::{
     routing::get,
@@ -19,6 +20,8 @@ use utoipa_swagger_ui::SwaggerUi;
 use config::AppConfig;
 use handlers::health::health_check;
 use handlers::comp_ai::process_request;
+use db::create_pool;
+use sqlx::PgPool;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -60,6 +63,15 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting Comp AI Service");
     tracing::info!("Port: {}", config.port);
+    tracing::info!("Connecting to database...");
+
+    // Create database pool
+    let pool = create_pool(&config.database_url()).await?;
+    tracing::info!("Database connection established");
+
+    // Test connection
+    sqlx::query("SELECT 1").execute(&pool).await?;
+    tracing::info!("Database connection verified");
 
     // Build the application router
     let app = Router::new()
@@ -80,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
         )
-        .with_state(config.clone());
+        .with_state((config.clone(), pool));
 
     // Start the server
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
