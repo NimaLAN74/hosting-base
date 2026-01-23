@@ -3,8 +3,9 @@ FROM rust:1.83-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (minimal - no OpenSSL needed with rustls)
-RUN apk add --no-cache musl-dev pkgconfig
+# Install build dependencies
+# Note: sqlx postgres feature may need postgresql-dev even with rustls
+RUN apk add --no-cache musl-dev pkgconfig postgresql-dev
 
 # Install cross-compilation toolchain for x86_64-unknown-linux-musl
 RUN rustup target add x86_64-unknown-linux-musl
