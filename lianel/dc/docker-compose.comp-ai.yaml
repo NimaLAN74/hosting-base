@@ -1,9 +1,6 @@
 services:
   comp-ai-service:
-    build:
-      context: ./comp-ai-service
-      dockerfile: Dockerfile
-    image: lianel-comp-ai-service:latest
+    image: ghcr.io/nimalan74/hosting-base/lianel-comp-ai-service:latest
     container_name: lianel-comp-ai-service
     env_file:
       - .env

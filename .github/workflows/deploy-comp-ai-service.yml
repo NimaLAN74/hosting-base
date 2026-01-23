@@ -262,7 +262,7 @@ jobs:
               -o ServerAliveCountMax=3 \
               -p ${REMOTE_PORT} \
               ${REMOTE_USER}@${REMOTE_HOST} \
-              "cd /root/hosting-base && git pull origin master && cd lianel/dc && docker compose -f docker-compose.comp-ai.yaml pull && docker compose -f docker-compose.comp-ai.yaml up -d comp-ai-service && sleep 5 && docker compose -f docker-compose.comp-ai.yaml ps && docker logs lianel-comp-ai-service --tail 20"; then
+              "cd /root/hosting-base && git pull origin master && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml pull comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml ps comp-ai-service && docker logs lianel-comp-ai-service --tail 20"; then
               echo "✅ Deployment successful"
               exit 0
             else
