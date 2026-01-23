@@ -4,7 +4,7 @@ pub mod keycloak;
 pub use keycloak::*;
 
 use axum::{
-    extract::FromRequestParts,
+    extract::{FromRequestParts, State},
     http::{request::Parts, StatusCode},
     response::{Response, IntoResponse},
 };
@@ -26,22 +26,13 @@ pub struct AuthenticatedUser {
 /// Usage: `async fn handler(user: AuthenticatedUser, ...)`
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
-    S: Send + Sync,
+    S: AsRef<Arc<AppConfig>> + Send + Sync,
 {
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Get config from state (set by with_state)
-        let config = parts
-            .extensions
-            .get::<Arc<AppConfig>>()
-            .ok_or_else(|| {
-                // Try to get from state if available
-                // For now, we'll use extensions as fallback
-                AuthError::ConfigMissing
-            })?;
-        
-        let config = config.clone();
+        let config = state.as_ref().clone();
 
         // Get Authorization header
         let headers = &parts.headers;
