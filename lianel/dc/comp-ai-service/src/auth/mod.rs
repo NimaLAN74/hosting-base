@@ -4,7 +4,7 @@ pub mod keycloak;
 pub use keycloak::*;
 
 use axum::{
-    extract::{FromRequestParts, State},
+    extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{Response, IntoResponse},
 };
