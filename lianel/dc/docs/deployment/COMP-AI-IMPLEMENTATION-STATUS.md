@@ -38,13 +38,17 @@
 
 ## ⏳ Phase 2: Integration - IN PROGRESS
 
-### Next Steps Required
+### Completed
 
-1. **Keycloak Integration**
-   - [ ] Implement token validation in `src/auth/keycloak.rs`
-   - [ ] Add authentication middleware to routes
-   - [ ] Run Keycloak client setup script
-   - [ ] Test authentication flow
+1. **Keycloak Integration** ✅
+   - [x] Implement token validation in `src/auth/keycloak.rs`
+   - [x] Add authentication middleware/extractor to routes
+   - [x] Protect `/api/v1/process` and `/api/v1/history` routes
+   - [x] Update handlers to use authenticated user information
+   - [ ] Run Keycloak client setup script (pending deployment)
+   - [ ] Test authentication flow (pending deployment)
+
+### Next Steps Required
 
 2. **Database Setup**
    - [ ] Create database schema for request history
