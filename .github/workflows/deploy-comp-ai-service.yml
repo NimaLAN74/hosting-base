@@ -27,24 +27,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set lowercase image name
+        id: image-name
+        run: |
+          # Lowercase the repository name immediately to fix case sensitivity issues
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-comp-ai-service" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "✅ Image name set to: ${IMAGE_NAME_LC}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/comp-ai-service
+          images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}
           tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
+            # Only keep latest tag to save storage (removed branch and sha tags)
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -59,29 +69,242 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Make package public automatically
+        if: success()
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          echo "Making package public: $PACKAGE_NAME"
+          
+          # URL encode the package name (replace / with %2F)
+          PACKAGE_NAME_ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          echo "Encoded package name: $PACKAGE_NAME_ENCODED"
+          
+          # Use GitHub API to make package public
+          # Try user endpoint first (for personal accounts)
+          if gh api -X PATCH "/user/packages/container/${PACKAGE_NAME_ENCODED}" -f visibility=public 2>&1; then
+            echo "✅ Package made public via user endpoint"
+          else
+            echo "⚠️  User endpoint failed, trying org endpoint..."
+            # Try org endpoint (for organization accounts)
+            ORG_NAME=$(echo "$PACKAGE_NAME" | cut -d'/' -f1)
+            PACKAGE_PATH=$(echo "$PACKAGE_NAME" | cut -d'/' -f2-)
+            PACKAGE_PATH_ENCODED=$(echo "$PACKAGE_PATH" | sed 's/\//%2F/g')
+            if gh api -X PATCH "/orgs/${ORG_NAME}/packages/container/${PACKAGE_PATH_ENCODED}" -f visibility=public 2>&1; then
+              echo "✅ Package made public via org endpoint"
+            else
+              echo "⚠️  Warning: Failed to make package public automatically"
+              echo "💡 Please make it public manually: https://github.com/NimaLAN74?tab=packages"
+              echo "   Package: $PACKAGE_NAME"
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            echo "Please add REMOTE_USER secret in repository settings"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            echo "Please add SSH_PRIVATE_KEY secret in repository settings"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
       - name: Setup SSH Key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Write SSH key - handle multiline properly
+          # Use printf to ensure proper newline handling
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Verify key file exists and has content
+          if [ ! -s ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file is empty or missing"
+            echo "Please check that SSH_PRIVATE_KEY secret contains the complete private key"
+            exit 1
+          fi
+          
+          # Check file size (should be at least 100 bytes for a valid key)
+          KEY_SIZE=$(wc -c < ~/.ssh/deploy_key)
+          if [ "$KEY_SIZE" -lt 100 ]; then
+            echo "❌ Error: SSH key file is too small ($KEY_SIZE bytes)"
+            echo "Expected at least 100 bytes for a valid private key"
+            echo "First 100 chars: $(head -c 100 ~/.ssh/deploy_key)"
+            exit 1
+          fi
+          
+          # Verify key format (must start with -----BEGIN)
+          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
+          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
+            echo "❌ Error: SSH key format is incorrect"
+            echo "First line: '$FIRST_LINE'"
+            echo ""
+            echo "The SSH_PRIVATE_KEY secret should contain:"
+            echo "  - Complete private key starting with: -----BEGIN OPENSSH PRIVATE KEY-----"
+            echo "  - Ending with: -----END OPENSSH PRIVATE KEY-----"
+            echo "  - All lines in between"
+            echo ""
+            echo "Current key file preview (first 5 lines):"
+            head -5 ~/.ssh/deploy_key
+            echo ""
+            echo "If you see 'ssh-ed25519' as text, that's wrong - that's the key type, not the key itself"
+            exit 1
+          fi
+          
+          # Verify key ends with -----END
+          LAST_LINE=$(tail -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
+          if [[ ! "$LAST_LINE" =~ ^-----END ]]; then
+            echo "⚠️  Warning: SSH key might not end correctly"
+            echo "Last line: '$LAST_LINE'"
+          fi
+          
+          # Check for common mistakes
+          if grep -q "^ssh-ed25519 " ~/.ssh/deploy_key; then
+            echo "❌ Error: SSH key contains 'ssh-ed25519' as text"
+            echo "This looks like a public key, not a private key!"
+            echo "The SSH_PRIVATE_KEY secret should contain the PRIVATE key, not the public key"
+            echo ""
+            echo "To get the private key, run: cat ~/.ssh/id_ed25519_host"
+            echo "The private key starts with: -----BEGIN OPENSSH PRIVATE KEY-----"
+            exit 1
+          fi
+          
+          # Test key format with ssh-keygen (if available)
+          if command -v ssh-keygen >/dev/null 2>&1; then
+            if ! ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null 2>&1; then
+              echo "⚠️  Warning: ssh-keygen validation failed (key might be invalid)"
+              echo "But continuing anyway..."
+            fi
+          fi
+          
+          if [ -n "$REMOTE_HOST" ]; then
+            ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          
+          echo "✅ SSH key ready"
+          echo "Key file size: $KEY_SIZE bytes"
+          echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
+          
+          # Extract and display public key fingerprint for debugging
+          if command -v ssh-keygen >/dev/null 2>&1; then
+            PUBLIC_KEY_FINGERPRINT=$(ssh-keygen -y -f ~/.ssh/deploy_key 2>/dev/null | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' || echo "N/A")
+            echo "Public key fingerprint: $PUBLIC_KEY_FINGERPRINT"
+          fi
+
+      - name: Validate Remote Host Configuration
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        run: |
+          echo "Checking REMOTE_HOST configuration..."
+          if [ -z "$REMOTE_HOST" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            echo "Please add REMOTE_HOST secret in GitHub repository settings:"
+            echo "https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
+            exit 1
+          fi
+          
+          # Check for obviously wrong values (but don't fail - just warn)
+          if [[ "$REMOTE_HOST" == *"msn.com"* ]] || \
+             [[ "$REMOTE_HOST" == *"example.com"* ]] || \
+             [[ "$REMOTE_HOST" == *"localhost"* ]] || \
+             [[ "$REMOTE_HOST" == "127.0.0.1" ]] || \
+             [[ "$REMOTE_HOST" == "0.0.0.0" ]]; then
+            echo "⚠️  Warning: REMOTE_HOST appears to be incorrectly configured"
+            echo "Current value contains suspicious pattern: $REMOTE_HOST"
+            echo ""
+            echo "REMOTE_HOST should be your actual server IP address or hostname"
+            echo "Example: 72.60.80.84"
+            echo ""
+            echo "If this is incorrect, please update it at:"
+            echo "https://github.com/NimaLAN74/hosting-base/settings/secrets/actions"
+            echo ""
+            echo "Continuing anyway - connection will be tested next..."
+          else
+            echo "✅ REMOTE_HOST configured: $REMOTE_HOST"
+          fi
 
       - name: Deploy to Remote Host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ssh -F /dev/null -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@72.60.80.84 << 'EOF'
-            cd /root/hosting-base
-            git pull origin master
-            cd lianel/dc
-            docker compose -f docker-compose.comp-ai.yaml pull || true
-            docker compose -f docker-compose.comp-ai.yaml build comp-ai-service
-            docker compose -f docker-compose.comp-ai.yaml up -d comp-ai-service
-            sleep 5
-            docker compose -f docker-compose.comp-ai.yaml ps
-            docker logs lianel-comp-ai-service --tail 20
-          EOF
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          echo "Deploying: $IMAGE_TAG"
+          echo "Target: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
+          
+          # Retry SSH connection with exponential backoff
+          MAX_RETRIES=3
+          RETRY_DELAY=5
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i of $MAX_RETRIES..."
+            if ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=3 \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "cd /root/hosting-base && git pull origin master && cd lianel/dc && docker compose -f docker-compose.comp-ai.yaml pull && docker compose -f docker-compose.comp-ai.yaml up -d comp-ai-service && sleep 5 && docker compose -f docker-compose.comp-ai.yaml ps && docker logs lianel-comp-ai-service --tail 20"; then
+              echo "✅ Deployment successful"
+              exit 0
+            else
+              EXIT_CODE=$?
+              echo "⚠️  Attempt $i failed with exit code $EXIT_CODE"
+              if [ $i -lt $MAX_RETRIES ]; then
+                echo "Waiting ${RETRY_DELAY}s before retry..."
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            fi
+          done
+          
+          echo "❌ All $MAX_RETRIES connection attempts failed"
+          echo "This could be due to:"
+          echo "1. Network issues between GitHub Actions and remote host"
+          echo "2. Firewall blocking GitHub Actions IP ranges"
+          echo "3. SSH service issues on remote host"
+          exit 1
 
       - name: Verify Deployment
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          ssh -F /dev/null -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root@72.60.80.84 << 'EOF'
-            sleep 10
-            curl -f http://localhost:3002/health || exit 1
-            echo "✅ Comp AI Service health check passed"
-          EOF
+          sleep 10
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "curl -f http://localhost:3002/health || exit 1" && echo "✅ Comp AI Service health check passed"
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Comp AI Service Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Language**: Rust" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage Optimized**: ✅ No artifacts, direct registry pull" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
