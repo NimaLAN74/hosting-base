@@ -24,15 +24,12 @@ pub struct AuthenticatedUser {
 
 /// Axum extractor for authenticated users
 /// Usage: `async fn handler(user: AuthenticatedUser, ...)`
-impl<S> FromRequestParts<S> for AuthenticatedUser
-where
-    S: AsRef<Arc<AppConfig>> + Send + Sync,
-{
+impl FromRequestParts<Arc<AppConfig>> for AuthenticatedUser {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppConfig>) -> Result<Self, Self::Rejection> {
         // Get config from state (set by with_state)
-        let config = state.as_ref().clone();
+        let config = state.clone();
 
         // Get Authorization header
         let headers = &parts.headers;
