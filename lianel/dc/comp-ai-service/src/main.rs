@@ -79,8 +79,6 @@ async fn main() -> anyhow::Result<()> {
                         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
-                // Add config to request extensions for AuthenticatedUser extractor
-                .layer(tower_http::add_extension::AddExtensionLayer::new(config.clone()))
         )
         .with_state(config.clone());
 

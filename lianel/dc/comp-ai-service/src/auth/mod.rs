@@ -4,12 +4,10 @@ pub mod keycloak;
 pub use keycloak::*;
 
 use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{Response, IntoResponse},
 };
 use std::sync::Arc;
-use std::result::Result;
 use crate::config::AppConfig;
 use crate::auth::KeycloakValidator;
 
@@ -22,58 +20,45 @@ pub struct AuthenticatedUser {
     pub roles: Vec<String>,
 }
 
-/// Axum extractor for authenticated users
-/// Usage: `async fn handler(user: AuthenticatedUser, ...)`
-impl<S> FromRequestParts<S> for AuthenticatedUser
-where
-    S: Send + Sync,
-{
-    type Rejection = AuthError;
+/// Helper function to extract and validate user from Authorization header
+pub async fn extract_user(
+    headers: &HeaderMap,
+    config: Arc<AppConfig>,
+) -> Result<AuthenticatedUser, AuthError> {
+    // Get Authorization header
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(AuthError::MissingToken)?
+        .to_str()
+        .map_err(|_| AuthError::InvalidToken)?;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // Get config from extensions (set by Extension layer)
-        let config = parts
-            .extensions
-            .get::<Arc<AppConfig>>()
-            .ok_or(AuthError::ConfigMissing)?
-            .clone();
+    // Extract token from "Bearer <token>"
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(AuthError::InvalidToken)?;
 
-        // Get Authorization header
-        let headers = &parts.headers;
-        let auth_header = headers
-            .get("Authorization")
-            .ok_or(AuthError::MissingToken)?
-            .to_str()
-            .map_err(|_| AuthError::InvalidToken)?;
+    // Validate token
+    let validator = KeycloakValidator::new(config);
+    let claims = validator
+        .validate_token(token)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Token validation failed: {}", e);
+            AuthError::InvalidToken
+        })?;
 
-        // Extract token from "Bearer <token>"
-        let token = auth_header
-            .strip_prefix("Bearer ")
-            .ok_or(AuthError::InvalidToken)?;
+    // Extract roles
+    let roles = claims
+        .realm_access
+        .map(|ra| ra.roles)
+        .unwrap_or_default();
 
-        // Validate token
-        let validator = KeycloakValidator::new(config);
-        let claims = validator
-            .validate_token(token)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Token validation failed: {}", e);
-                AuthError::InvalidToken
-            })?;
-
-        // Extract roles
-        let roles = claims
-            .realm_access
-            .map(|ra| ra.roles)
-            .unwrap_or_default();
-
-        Ok(AuthenticatedUser {
-            sub: claims.sub,
-            email: claims.email,
-            preferred_username: claims.preferred_username,
-            roles,
-        })
-    }
+    Ok(AuthenticatedUser {
+        sub: claims.sub,
+        email: claims.email,
+        preferred_username: claims.preferred_username,
+        roles,
+    })
 }
 
 /// Authentication error type
@@ -81,7 +66,6 @@ where
 pub enum AuthError {
     MissingToken,
     InvalidToken,
-    ConfigMissing,
 }
 
 impl IntoResponse for AuthError {
@@ -94,10 +78,6 @@ impl IntoResponse for AuthError {
             AuthError::InvalidToken => (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or expired token".to_string(),
-            ),
-            AuthError::ConfigMissing => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Configuration missing".to_string(),
             ),
         };
 

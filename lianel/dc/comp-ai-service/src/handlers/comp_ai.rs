@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Query, State, HeaderMap},
     http::StatusCode,
     response::Json,
 };
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use utoipa::ToSchema;
 use crate::config::AppConfig;
 use crate::models::{CompAIRequest, CompAIResponse, RequestHistoryQueryParams, RequestHistoryResponse};
-use crate::auth::AuthenticatedUser;
+use crate::auth::{AuthenticatedUser, extract_user};
 
 
 #[utoipa::path(
@@ -24,10 +24,14 @@ use crate::auth::AuthenticatedUser;
     )
 )]
 pub async fn process_request(
-    user: AuthenticatedUser,
+    headers: HeaderMap,
     State(config): State<Arc<AppConfig>>,
     Json(request): Json<CompAIRequest>,
 ) -> Result<Json<CompAIResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Authenticate user
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
     let start_time = std::time::Instant::now();
     
     tracing::info!(
@@ -63,10 +67,14 @@ pub async fn process_request(
     )
 )]
 pub async fn get_request_history(
-    user: AuthenticatedUser,
-    State(_config): State<Arc<AppConfig>>,
+    headers: HeaderMap,
+    State(config): State<Arc<AppConfig>>,
     Query(params): Query<RequestHistoryQueryParams>,
 ) -> Result<Json<RequestHistoryResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Authenticate user
+    let user = extract_user(&headers, config)
+        .await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
     tracing::info!(
         "Getting request history for user: {} ({})",
         user.preferred_username.as_deref().unwrap_or("unknown"),
