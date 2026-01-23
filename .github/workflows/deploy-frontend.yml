@@ -69,6 +69,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            REACT_APP_KEYCLOAK_URL=https://auth.lianel.se
+            REACT_APP_KEYCLOAK_REALM=lianel
+            REACT_APP_KEYCLOAK_CLIENT_ID=frontend-client
+            REACT_APP_GRAFANA_URL=https://monitoring.lianel.se
+            REACT_APP_AIRFLOW_URL=https://airflow.lianel.se
+            REACT_APP_FRONTEND_URL=https://www.lianel.se
+            REACT_APP_DOMAIN_MAIN=www.lianel.se
+            REACT_APP_DOMAIN_ALT=lianel.se
+            REACT_APP_DOMAIN_AUTH=auth.lianel.se
+            REACT_APP_DOMAIN_MONITORING=monitoring.lianel.se
+            REACT_APP_DOMAIN_AIRFLOW=airflow.lianel.se
+            REACT_APP_OAUTH2_PROXY_CLIENT_ID=oauth2-proxy
 
       - name: Make package public automatically
         if: success()
