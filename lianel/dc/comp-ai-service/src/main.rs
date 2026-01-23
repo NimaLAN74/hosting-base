@@ -80,13 +80,7 @@ async fn main() -> anyhow::Result<()> {
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
                 // Add config to request extensions for AuthenticatedUser extractor
-                .layer(axum::middleware::from_fn_with_state(
-                    config.clone(),
-                    |req: axum::extract::Request, next: axum::middleware::Next| async move {
-                        req.extensions_mut().insert(config.clone());
-                        next.run(req).await
-                    },
-                ))
+                .layer(tower_http::add_extension::AddExtensionLayer::new(config.clone()))
         )
         .with_state(config.clone());
 
