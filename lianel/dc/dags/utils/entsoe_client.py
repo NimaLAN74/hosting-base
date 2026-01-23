@@ -248,6 +248,8 @@ class ENTSOEClient:
         
         root = self._make_request(params)
         if root is None:
+            logger.warning(f"ENTSO-E API request failed for load data ({country_code}, {start_date} to {end_date})")
+            print(f"⚠️  ENTSO-E API request failed for load data ({country_code}, {start_date} to {end_date})")
             return []
         
         # Parse load data from XML
