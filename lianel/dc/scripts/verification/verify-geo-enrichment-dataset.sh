@@ -89,15 +89,10 @@ run_psql "
 SELECT 
     COUNT(*) as total_records,
     COUNT(osm_feature_count) as records_with_feature_count,
-    COUNT(osm_power_plants) as records_with_power_plants,
-    COUNT(osm_industrial_areas) as records_with_industrial,
-    COUNT(osm_buildings) as records_with_buildings,
-    COUNT(osm_transport) as records_with_transport,
     SUM(osm_feature_count) as total_osm_features,
-    SUM(osm_power_plants) as total_power_plants,
-    SUM(osm_industrial_areas) as total_industrial,
-    SUM(osm_buildings) as total_buildings,
-    SUM(osm_transport) as total_transport
+    AVG(osm_feature_count) as avg_osm_features,
+    MAX(osm_feature_count) as max_osm_features,
+    MIN(osm_feature_count) as min_osm_features
 FROM ml_dataset_geo_enrichment_v1;
 "
 echo ""
@@ -109,11 +104,9 @@ SELECT
     country_code,
     year,
     osm_feature_count,
-    osm_power_plants,
-    osm_industrial_areas,
-    osm_buildings,
-    osm_transport,
-    total_final_energy_gwh
+    total_final_energy_gwh,
+    electricity_consumption_gwh,
+    renewable_share_pct
 FROM ml_dataset_geo_enrichment_v1
 WHERE osm_feature_count > 0
 ORDER BY osm_feature_count DESC
