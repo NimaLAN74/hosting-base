@@ -1,16 +1,16 @@
 # Build stage
-FROM rust:alpine AS builder
+FROM rust:1.83-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies including OpenSSL
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
+# Install build dependencies (minimal - no OpenSSL needed with rustls)
+RUN apk add --no-cache musl-dev pkgconfig
 
 # Install cross-compilation toolchain for x86_64-unknown-linux-musl
 RUN rustup target add x86_64-unknown-linux-musl
 
 # Copy Cargo files
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock* ./
 
 # Create a dummy source file to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
