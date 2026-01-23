@@ -138,9 +138,25 @@ class ENTSOEClient:
                         text = reason.find('.//{*}text')
                         if code is not None and code.text != '0':
                             error_msg = text.text if text is not None else 'Unknown error'
-                            logger.warning(f"ENTSO-E API error: {error_msg}")
-                            print(f"ENTSO-E API error: {error_msg}")
+                            error_code = code.text if code is not None else 'Unknown'
+                            logger.error(f"ENTSO-E API error (code {error_code}): {error_msg}")
+                            print(f"❌ ENTSO-E API error (code {error_code}): {error_msg}")
+                            # Log full response for debugging
+                            try:
+                                import xml.etree.ElementTree as ET
+                                response_str = ET.tostring(root, encoding='unicode')
+                                logger.debug(f"Full API error response: {response_str[:500]}")
+                                print(f"API error response preview: {response_str[:200]}...")
+                            except:
+                                pass
                             return None
+                
+                # Check if response has TimeSeries data
+                time_series = root.findall('.//{*}TimeSeries')
+                if not time_series:
+                    logger.warning(f"ENTSO-E API returned no TimeSeries data. Root tag: {root.tag}")
+                    print(f"⚠️  ENTSO-E API returned no TimeSeries data. Root tag: {root.tag}")
+                    # Don't return None here - let the caller handle empty data
                 
                 # Log success
                 logger.info(f"ENTSO-E API request successful, parsed XML root tag: {root.tag}")

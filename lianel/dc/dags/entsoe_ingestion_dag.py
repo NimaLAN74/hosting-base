@@ -189,7 +189,14 @@ def ingest_date_chunk(country_code: str, start_date: str, end_date: str, **conte
         print(f"Total records to insert: {len(all_records)}")
         
         if not all_records:
-            print(f"No data retrieved for {country_code}")
+            print(f"⚠️  No data retrieved for {country_code} ({start_date} to {end_date})")
+            print(f"   Load data: {len(load_data)} records")
+            print(f"   Generation data: {len(generation_data)} records")
+            print(f"   This could indicate:")
+            print(f"   - API rate limiting")
+            print(f"   - Invalid date range")
+            print(f"   - API token issues")
+            print(f"   - No data available for this country/date range")
             # Log no data
             log_sql = """
                 INSERT INTO meta_entsoe_ingestion_log (
