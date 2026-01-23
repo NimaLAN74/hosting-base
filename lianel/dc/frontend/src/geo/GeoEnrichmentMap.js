@@ -66,10 +66,15 @@ function GeoEnrichmentMap() {
       if (response.ok) {
         const result = await response.json();
         const dataArray = result.data || [];
+        console.log('Geo-enrichment data received:', dataArray.length, 'records');
+        console.log('Sample record:', dataArray[0]);
+        
         setData(dataArray);
         
         // Calculate map bounds from data with coordinates
         const dataWithCoords = dataArray.filter(d => d.latitude && d.longitude);
+        console.log('Records with coordinates:', dataWithCoords.length);
+        
         if (dataWithCoords.length > 0) {
           const lats = dataWithCoords.map(d => d.latitude).filter(Boolean);
           const lngs = dataWithCoords.map(d => d.longitude).filter(Boolean);
@@ -78,11 +83,15 @@ function GeoEnrichmentMap() {
             const maxLat = Math.max(...lats);
             const minLng = Math.min(...lngs);
             const maxLng = Math.max(...lngs);
+            console.log('Map bounds:', [[minLat, minLng], [maxLat, maxLng]]);
             setMapBounds([[minLat, minLng], [maxLat, maxLng]]);
           } else {
             // Default bounds for Europe
             setMapBounds([[35, -10], [72, 40]]);
           }
+        } else {
+          console.warn('No records with coordinates found');
+          setMapBounds([[35, -10], [72, 40]]);
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -193,6 +202,10 @@ function GeoEnrichmentMap() {
               <div className="stat-item">
                 <span className="stat-label">Total Regions:</span>
                 <span className="stat-value">{data.length}</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">With Coordinates:</span>
+                <span className="stat-value">{data.filter(d => d.latitude && d.longitude).length}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-label">Max {selectedMetric.replace('_', ' ')}:</span>
