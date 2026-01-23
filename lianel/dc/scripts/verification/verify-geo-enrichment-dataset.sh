@@ -7,6 +7,13 @@ set -e
 echo "=== Geo-Enrichment Dataset Verification ==="
 echo ""
 
+# Load .env file if it exists
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 # Database connection details (from environment or defaults)
 DB_HOST="${POSTGRES_HOST:-172.18.0.1}"
 DB_PORT="${POSTGRES_PORT:-5432}"
@@ -16,6 +23,7 @@ PGPASSWORD="${POSTGRES_PASSWORD}"
 
 if [ -z "$PGPASSWORD" ]; then
     echo "ERROR: POSTGRES_PASSWORD not set"
+    echo "Please ensure .env file exists and contains POSTGRES_PASSWORD"
     exit 1
 fi
 
