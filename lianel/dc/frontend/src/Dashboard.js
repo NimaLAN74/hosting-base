@@ -111,6 +111,15 @@ function Dashboard() {
       status: 'active',
       gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
       category: 'Monitoring'
+    },
+    {
+      name: 'Comp AI',
+      description: 'AI-powered analysis, insights, and request processing',
+      icon: '🤖',
+      url: '/comp-ai',
+      status: 'active',
+      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+      category: 'AI Services'
     }
   ];
 

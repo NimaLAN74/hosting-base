@@ -1,0 +1,60 @@
+import { authenticatedFetch } from '../keycloak.js';
+
+const buildQuery = (params = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      q.set(k, String(v));
+    }
+  });
+  const qs = q.toString();
+  return qs ? `?${qs}` : '';
+};
+
+export const compAiApi = {
+  async getHealth() {
+    const res = await authenticatedFetch('/api/v1/comp-ai/health');
+    if (!res.ok) throw new Error('Health check failed');
+    return res.json();
+  },
+
+  async processRequest(prompt) {
+    try {
+      const res = await authenticatedFetch('/api/v1/comp-ai/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to process request: ${res.status} ${res.statusText} - ${errorText}`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err.message.includes('Not authenticated') || err.message.includes('Unauthorized')) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      throw err;
+    }
+  },
+
+  async getRequestHistory({ limit = 50, offset = 0 } = {}) {
+    try {
+      const res = await authenticatedFetch(
+        `/api/v1/comp-ai/history${buildQuery({ limit, offset })}`
+      );
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to fetch request history: ${res.status} ${res.statusText} - ${errorText}`);
+      }
+      return res.json();
+    } catch (err) {
+      if (err.message.includes('Not authenticated') || err.message.includes('Unauthorized')) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      throw err;
+    }
+  }
+};
