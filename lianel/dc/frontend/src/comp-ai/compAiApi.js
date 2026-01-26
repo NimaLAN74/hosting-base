@@ -13,7 +13,8 @@ const buildQuery = (params = {}) => {
 
 export const compAiApi = {
   async getHealth() {
-    const res = await authenticatedFetch('/api/v1/comp-ai/health');
+    // Health endpoint is public, no auth required
+    const res = await fetch('/api/v1/comp-ai/health');
     if (!res.ok) throw new Error('Health check failed');
     return res.json();
   },
