@@ -1,5 +1,5 @@
 use sqlx::{PgPool, Row};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use crate::models::RequestHistory;
 
 /// Save a request to the database
@@ -79,7 +79,10 @@ pub async fn get_request_history(
 
     let mut history = Vec::new();
     for row in rows {
-        let created_at: DateTime<Utc> = row.get("created_at");
+        // TIMESTAMP WITHOUT TIME ZONE is read as NaiveDateTime, then convert to UTC
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        let created_at = created_at_naive.and_utc();
+        
         history.push(RequestHistory {
             id: row.get("id"),
             user_id: row.get("user_id"),
