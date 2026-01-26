@@ -81,7 +81,7 @@ pub async fn get_request_history(
     for row in rows {
         // TIMESTAMP WITHOUT TIME ZONE is read as NaiveDateTime, then convert to UTC
         let created_at_naive: NaiveDateTime = row.get("created_at");
-        let created_at = created_at_naive.and_utc();
+        let created_at = DateTime::<Utc>::from_utc(created_at_naive, Utc);
         
         history.push(RequestHistory {
             id: row.get("id"),
