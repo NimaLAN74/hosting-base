@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 use crate::config::AppConfig;
 use crate::models::{CompAIRequest, CompAIResponse, RequestHistoryQueryParams, RequestHistoryResponse};
 use crate::auth::{AuthenticatedUser, extract_user};
-use crate::db::queries::{save_request, get_request_history};
+use crate::db::queries::{save_request, get_request_history as get_request_history_from_db};
 
 
 #[utoipa::path(
@@ -108,7 +108,7 @@ pub async fn get_request_history(
     let offset = params.offset.unwrap_or(0);
 
     // Get request history from database
-    match get_request_history(&pool, &user.sub, limit, offset).await {
+    match get_request_history_from_db(&pool, &user.sub, limit, offset).await {
         Ok((data, total)) => {
             Ok(Json(RequestHistoryResponse {
                 data,
