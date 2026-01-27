@@ -10,6 +10,7 @@ on:
       - 'lianel/dc/docker-compose.frontend.yaml'
       - 'lianel/dc/docker-compose.yaml'
       - 'lianel/dc/scripts/deployment/deploy-frontend.sh'
+      - 'lianel/dc/nginx/**'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:  # Allow manual trigger
 
@@ -259,6 +260,27 @@ jobs:
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-frontend.sh '$IMAGE_TAG'"
+
+      - name: Sync nginx config to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Syncing nginx config to remote..."
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P ${REMOTE_PORT} \
+            lianel/dc/nginx/config/nginx.conf \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
+          echo "✅ Nginx config synced"
 
       - name: Deployment Summary
         run: |

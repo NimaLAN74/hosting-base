@@ -18,7 +18,22 @@ fi
 echo "=== Deploying Frontend ==="
 echo "Image: $IMAGE_TAG"
 
-cd /root/lianel/dc
+# Use DC_DIR if set, otherwise try common locations
+DC_DIR="${DC_DIR:-}"
+if [ -z "$DC_DIR" ]; then
+  for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
+    if [ -f "$d/docker-compose.yaml" ] || [ -f "$d/docker-compose.yml" ]; then
+      DC_DIR="$d"
+      break
+    fi
+  done
+fi
+if [ -z "$DC_DIR" ] || [ ! -d "$DC_DIR" ]; then
+  echo "❌ Error: Could not find compose directory (tried /root/lianel/dc, /root/hosting-base/lianel/dc). Set DC_DIR."
+  exit 1
+fi
+echo "Using directory: $DC_DIR"
+cd "$DC_DIR"
 
 # Remove old local tags to force fresh pull
 # This ensures we always get the latest image, not a cached version
@@ -125,17 +140,22 @@ if ! docker images "$LOCAL_TAG" --format "{{.Repository}}:{{.Tag}}" | grep -q "^
   exit 1
 fi
 
+# Pick compose file(s): try docker-compose.yaml, then infra+frontend
+COMPOSE_FILES=""
+if [ -f "docker-compose.yaml" ] && docker compose -f docker-compose.yaml config --services 2>/dev/null | grep -q "^${SERVICE_NAME}$"; then
+  COMPOSE_FILES="-f docker-compose.yaml"
+elif [ -f "docker-compose.infra.yaml" ] && [ -f "docker-compose.frontend.yaml" ]; then
+  COMPOSE_FILES="-f docker-compose.infra.yaml -f docker-compose.frontend.yaml"
+fi
+
 # Try docker compose first, fallback to docker-compose
 # We already pulled and tagged the image above, so just recreate the container
 # Use --no-deps to avoid recreating dependencies (keycloak, nginx, etc.)
 # Use --pull never since we already pulled and tagged the image
 echo "Starting container with docker compose..."
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  # First, verify the service exists in docker-compose.yaml
-  if ! docker compose -f docker-compose.yaml config --services | grep -q "^${SERVICE_NAME}$"; then
-    echo "⚠️  Warning: Service '$SERVICE_NAME' not found in docker-compose.yaml"
-    echo "Available services:"
-    docker compose -f docker-compose.yaml config --services
+  if [ -z "$COMPOSE_FILES" ]; then
+    echo "⚠️  Warning: Service '$SERVICE_NAME' not found in compose config"
     echo "Falling back to direct container start..."
     docker run -d \
       --name lianel-$SERVICE_NAME \
@@ -147,13 +167,12 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     }
   else
     # Use --pull never to use the image we just pulled and tagged
-    if docker compose -f docker-compose.yaml up -d --force-recreate --no-deps --pull never $SERVICE_NAME 2>&1; then
+    if docker compose $COMPOSE_FILES up -d --force-recreate --no-deps --pull never $SERVICE_NAME 2>&1; then
       echo "✅ Container started successfully with docker compose"
     else
       COMPOSE_EXIT=$?
       echo "❌ Error: docker compose failed (exit code: $COMPOSE_EXIT)"
       echo "Trying alternative approach..."
-      # Fallback: start container directly
       docker run -d \
         --name lianel-$SERVICE_NAME \
         --network lianel-network \
@@ -165,7 +184,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     fi
   fi
 elif command -v docker-compose >/dev/null 2>&1; then
-  if docker-compose -f docker-compose.yaml up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
+  COMPOSE_FILES="${COMPOSE_FILES:--f docker-compose.yaml}"
+  if docker-compose $COMPOSE_FILES up -d --force-recreate --no-deps $SERVICE_NAME 2>&1; then
     echo "✅ Container started successfully with docker-compose"
   else
     echo "❌ Error: docker-compose failed"
