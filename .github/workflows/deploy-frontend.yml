@@ -325,19 +325,21 @@ jobs:
             "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
           echo "✅ Nginx config synced"
 
-      - name: Apply Keycloak redirect fix on remote (KC_HOSTNAME + nginx Host)
+      - name: Apply Keycloak redirect fix on remote (ensure keycloak+nginx on same network)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Syncing docker-compose.infra.yaml and restarting Keycloak for redirect fix..."
+          echo "Syncing docker-compose.infra.yaml + nginx.conf, then starting full infra stack (keycloak + nginx) so both are on lianel-network..."
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
             lianel/dc/docker-compose.infra.yaml "${REMOTE_USER}@${REMOTE_HOST}:/tmp/docker-compose.infra.yaml"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1 || docker-compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1; echo 'Waiting for Keycloak to be ready...'; for i in 1 2 3 4 5 6; do docker ps --filter name=keycloak --filter status=running -q | grep -q . && break; sleep 5; done; sleep 10; docker ps --filter name=keycloak; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Keycloak+nginx redirect fix applied' || echo '⚠️ Keycloak/nginx step had warnings'"
-          echo "✅ Keycloak redirect fix applied on remote"
+            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && mkdir -p \"\$d/nginx/config\" && cp /tmp/nginx.conf \"\$d/nginx/config/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d 2>&1 || docker-compose -f docker-compose.infra.yaml up -d 2>&1; echo 'Waiting for Keycloak...'; for i in 1 2 3 4 5 6; do docker ps --filter name=keycloak --filter status=running -q | grep -q . && break; sleep 5; done; sleep 15; docker ps --filter name=keycloak; docker ps --filter name=nginx-proxy; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Infra stack (keycloak+nginx) on lianel-network' || echo '⚠️ Check keycloak/nginx on server'"
+          echo "✅ Keycloak+nginx infra applied on remote"
 
       - name: Run Keycloak redirect scripts on remote (frontendUrl + frontend-client rootUrl)
         env:
@@ -357,25 +359,37 @@ jobs:
             "export KEYCLOAK_ADMIN_PASSWORD='${KEYCLOAK_ADMIN_PASSWORD}'; export APP_FRONTEND_URL=https://www.lianel.se; cd /root/lianel/dc 2>/dev/null || cd /root/hosting-base/lianel/dc; bash /tmp/fix-keycloak-https.sh 2>&1; bash /tmp/update-keycloak-frontend-client.sh 2>&1"
         continue-on-error: true
 
-      - name: Verify deployment (monitor live process)
+      - name: Verify deployment (main page + auth URL)
         run: |
           URL="${FRONTEND_URL:-https://www.lianel.se}"
-          echo "[Monitor] Checking live site: $URL"
-          HTTP_CODE=$(curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "$URL/" 2>/dev/null || echo "000")
-          if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
-            echo "⚠️ Could not reach $URL (curl failed or timeout)"
-            echo "Deployment may have succeeded but site is unreachable from runner."
-            echo "Live check: ❌ unreachable" >> $GITHUB_STEP_SUMMARY
+          AUTH_URL="${URL}/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=${URL}/&response_type=code&scope=openid&prompt=login"
+          echo "[Monitor] Checking main page: $URL"
+          HTTP_MAIN=$(curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "$URL/" 2>/dev/null || echo "000")
+          echo "[Monitor] Checking auth URL (must not be 502): $URL/auth/..."
+          HTTP_AUTH=$(curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "$AUTH_URL" 2>/dev/null || echo "000")
+          if [ -z "$HTTP_MAIN" ] || [ "$HTTP_MAIN" = "000" ]; then
+            echo "❌ Main page unreachable"
+            echo "Live check: ❌ main unreachable" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
-            echo "✅ Live check passed: HTTP $HTTP_CODE"
-            echo "Frontend is up at $URL"
-            echo "Live check: ✅ HTTP $HTTP_CODE — $URL" >> $GITHUB_STEP_SUMMARY
+          if [ "$HTTP_MAIN" -ge 200 ] && [ "$HTTP_MAIN" -lt 400 ]; then
+            echo "✅ Main page: HTTP $HTTP_MAIN"
           else
-            echo "❌ Live check failed: HTTP $HTTP_CODE (expected 2xx/3xx)"
-            echo "Live check: ❌ HTTP $HTTP_CODE" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Main page: HTTP $HTTP_MAIN (expected 2xx/3xx)"
+            echo "Live check: ❌ main $HTTP_MAIN" >> $GITHUB_STEP_SUMMARY
             exit 1
+          fi
+          if [ "$HTTP_AUTH" = "502" ]; then
+            echo "❌ Auth URL returned 502 — nginx cannot reach Keycloak. Ensure keycloak and nginx are on same Docker network (lianel-network). See docs/fixes/LOGIN-ISSUE-ANALYSIS.md and LOGIN-REDIRECT-ANALYSIS.md runbook."
+            echo "Live check: ❌ auth 502 (Keycloak unreachable)" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          if [ "$HTTP_AUTH" -ge 200 ] && [ "$HTTP_AUTH" -lt 500 ]; then
+            echo "✅ Auth URL: HTTP $HTTP_AUTH (login page reachable)"
+            echo "Live check: ✅ main $HTTP_MAIN, auth $HTTP_AUTH" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Auth URL: HTTP $HTTP_AUTH (non-502)"
+            echo "Live check: ✅ main $HTTP_MAIN, auth $HTTP_AUTH" >> $GITHUB_STEP_SUMMARY
           fi
         env:
           FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
