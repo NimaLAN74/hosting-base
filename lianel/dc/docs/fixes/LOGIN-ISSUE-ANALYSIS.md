@@ -64,7 +64,19 @@
 2. **Ensure deployed frontend has login fix** (build/deploy): login() uses createLoginUrl + await, no .includes on URL; build with REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth.
 3. **Ensure redirect after login** (Keycloak): run fix-keycloak-https.sh + update-keycloak-frontend-client.sh so frontendUrl and baseUrl/rootUrl = https://www.lianel.se.
 
-## 8. Tests to run after each change
+## 8. Fix 502 on the server
+
+Run on the **server** (where Docker/Keycloak/nginx run):
+
+```bash
+bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh
+# or, if dc lives under hosting-base:
+bash /root/hosting-base/lianel/dc/scripts/fix-502-keycloak-on-server.sh
+```
+
+That script starts keycloak and nginx from `docker-compose.infra.yaml` so both use `lianel-network` and nginx can reach `keycloak:8080`. If nginx is currently run by another compose, you may need to stop that stack and use infra for both (or ensure that compose puts nginx on `lianel-network`).
+
+## 9. Tests to run after each change
 
 - **T1** – Open https://www.lianel.se/ → click Login → must get Keycloak login page (no 502, no JS error).
 - **T2** – Submit credentials → must land on https://www.lianel.se/ (or same path) with user logged in.

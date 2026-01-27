@@ -331,15 +331,14 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Syncing docker-compose.infra.yaml + nginx.conf, then starting full infra stack (keycloak + nginx) so both are on lianel-network..."
+          echo "Syncing docker-compose.infra.yaml + nginx.conf + fix-502 script..."
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
-            lianel/dc/docker-compose.infra.yaml "${REMOTE_USER}@${REMOTE_HOST}:/tmp/docker-compose.infra.yaml"
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
-            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
+            lianel/dc/docker-compose.infra.yaml lianel/dc/nginx/config/nginx.conf lianel/dc/scripts/fix-502-keycloak-on-server.sh \
+            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && mkdir -p \"\$d/nginx/config\" && cp /tmp/nginx.conf \"\$d/nginx/config/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d 2>&1 || docker-compose -f docker-compose.infra.yaml up -d 2>&1; echo 'Waiting for Keycloak...'; for i in 1 2 3 4 5 6; do docker ps --filter name=keycloak --filter status=running -q | grep -q . && break; sleep 5; done; sleep 15; docker ps --filter name=keycloak; docker ps --filter name=nginx-proxy; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Infra stack (keycloak+nginx) on lianel-network' || echo '⚠️ Check keycloak/nginx on server'"
-          echo "✅ Keycloak+nginx infra applied on remote"
+            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && mkdir -p \"\$d/nginx/config\" \"\$d/scripts\" && cp /tmp/nginx.conf \"\$d/nginx/config/\" && cp /tmp/fix-502-keycloak-on-server.sh \"\$d/scripts/\" && chmod +x \"\$d/scripts/fix-502-keycloak-on-server.sh\" && echo \"Updated \$d\"; done; bash /tmp/fix-502-keycloak-on-server.sh 2>&1"
+          echo "✅ Keycloak+nginx fix script applied on remote"
 
       - name: Run Keycloak redirect scripts on remote (frontendUrl + frontend-client rootUrl)
         env:
@@ -380,8 +379,10 @@ jobs:
             exit 1
           fi
           if [ "$HTTP_AUTH" = "502" ]; then
-            echo "❌ Auth URL returned 502 — nginx cannot reach Keycloak. Ensure keycloak and nginx are on same Docker network (lianel-network). See docs/fixes/LOGIN-ISSUE-ANALYSIS.md and LOGIN-REDIRECT-ANALYSIS.md runbook."
-            echo "Live check: ❌ auth 502 (Keycloak unreachable)" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Auth URL returned 502 — nginx cannot reach Keycloak."
+            echo "On the server, run: bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh (or same path under /root/hosting-base/lianel/dc)."
+            echo "See lianel/dc/docs/fixes/LOGIN-ISSUE-ANALYSIS.md and LOGIN-REDIRECT-ANALYSIS.md."
+            echo "Live check: ❌ auth 502 (run fix-502-keycloak-on-server.sh on server)" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           if [ "$HTTP_AUTH" -ge 200 ] && [ "$HTTP_AUTH" -lt 500 ]; then
