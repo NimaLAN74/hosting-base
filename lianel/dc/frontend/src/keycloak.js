@@ -1,9 +1,16 @@
 // Keycloak initialization and configuration
 import Keycloak from 'keycloak-js';
 
-// Get configuration from environment variables (REACT_APP_ prefix required)
+// Keycloak base URL: prefer same-origin /auth proxy to avoid CORS/NetworkError on init.
+// Build sets REACT_APP_KEYCLOAK_URL; runtime fallback uses origin + '/auth' when in browser.
+const getKeycloakUrl = () => {
+  if (process.env.REACT_APP_KEYCLOAK_URL) return process.env.REACT_APP_KEYCLOAK_URL;
+  if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin + '/auth';
+  return 'https://auth.lianel.se';
+};
+
 const keycloakConfig = {
-  url: process.env.REACT_APP_KEYCLOAK_URL || 'https://auth.lianel.se',
+  url: getKeycloakUrl(),
   realm: process.env.REACT_APP_KEYCLOAK_REALM || 'lianel',
   clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'frontend-client'
 };
