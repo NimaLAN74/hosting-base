@@ -53,37 +53,41 @@ fi
 
 echo "✓ Frontend client found: $FRONTEND_CLIENT_UUID"
 
-# Update frontend-client with comprehensive redirect URIs
-# IMPORTANT: Remove baseUrl and rootUrl to prevent Keycloak from redirecting to /login
-echo "Updating frontend-client redirect URIs and removing baseUrl/rootUrl..."
+# Update frontend-client with comprehensive redirect URIs and app as root
+# baseUrl/rootUrl must point to the APP (www.lianel.se), not auth.lianel.se, or Keycloak
+# redirects users to auth.lianel.se/admin/master/console/ after login instead of the app.
+# Variables DOMAIN_MAIN/DOMAIN_ALT must be expanded (do not use single-quoted JSON)
+APP_ROOT="https://${DOMAIN_MAIN}"
+echo "Updating frontend-client: redirectUris, webOrigins, baseUrl/rootUrl=$APP_ROOT..."
 curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$FRONTEND_CLIENT_UUID" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "redirectUris": [
-      "https://${DOMAIN_MAIN}/*",
-      "https://${DOMAIN_ALT}/*",
-      "https://${DOMAIN_MAIN}/monitoring",
-      "https://${DOMAIN_MAIN}/monitoring/*",
-      "https://${DOMAIN_ALT}/monitoring",
-      "https://${DOMAIN_ALT}/monitoring/*"
+  -d "{
+    \"redirectUris\": [
+      \"https://${DOMAIN_MAIN}\",
+      \"https://${DOMAIN_MAIN}/\",
+      \"https://${DOMAIN_MAIN}/*\",
+      \"https://${DOMAIN_ALT}\",
+      \"https://${DOMAIN_ALT}/\",
+      \"https://${DOMAIN_ALT}/*\",
+      \"https://${DOMAIN_MAIN}/monitoring\",
+      \"https://${DOMAIN_MAIN}/monitoring/*\",
+      \"https://${DOMAIN_ALT}/monitoring\",
+      \"https://${DOMAIN_ALT}/monitoring/*\"
     ],
-    "webOrigins": [
-      "https://${DOMAIN_MAIN}",
-      "https://${DOMAIN_ALT}"
+    \"webOrigins\": [
+      \"https://${DOMAIN_MAIN}\",
+      \"https://${DOMAIN_ALT}\",
+      \"*\"
     ],
-    "baseUrl": "",
-    "rootUrl": "",
-    "attributes": {
-      "post.logout.redirect.uris": "https://${DOMAIN_MAIN}\nhttps://${DOMAIN_ALT}\nhttps://${DOMAIN_MAIN}/monitoring\nhttps://${DOMAIN_ALT}/monitoring"
+    \"baseUrl\": \"${APP_ROOT}\",
+    \"rootUrl\": \"${APP_ROOT}\",
+    \"attributes\": {
+      \"post.logout.redirect.uris\": \"https://${DOMAIN_MAIN}\\nhttps://${DOMAIN_ALT}\\nhttps://${DOMAIN_MAIN}/monitoring\\nhttps://${DOMAIN_ALT}/monitoring\"
     }
-  }' > /dev/null
+  }" > /dev/null
 
-echo "✅ Frontend client updated with /monitoring redirect URIs"
+echo "✅ Frontend client updated: redirect URIs, webOrigins, baseUrl/rootUrl=$APP_ROOT"
 echo ""
-echo "Updated redirect URIs:"
-echo "  - https://${DOMAIN_MAIN}/*"
-echo "  - https://${DOMAIN_MAIN}/monitoring"
-echo "  - https://${DOMAIN_MAIN}/monitoring/*"
-echo ""
-echo "The login button should now work correctly and return to /monitoring after login."
+echo "Updated: redirectUris (incl. ${DOMAIN_MAIN}/*, /monitoring), baseUrl/rootUrl=$APP_ROOT"
+echo "Login should redirect back to the app (www.lianel.se), not auth.lianel.se/admin."

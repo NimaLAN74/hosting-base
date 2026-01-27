@@ -33,21 +33,24 @@ echo "2. Getting current realm configuration..."
 CURRENT_REALM=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}")
 
-# Update realm with HTTPS frontend URL
+# Update realm with app frontend URL (so post-login redirect goes to app, not auth.lianel.se/admin)
+# Using https://auth.lianel.se made users land on Keycloak admin console instead of the app.
+APP_FRONTEND_URL="${APP_FRONTEND_URL:-https://www.lianel.se}"
+export APP_FRONTEND_URL
 echo
-echo "3. Updating realm with HTTPS frontend URL..."
+echo "3. Updating realm frontendUrl to app URL: $APP_FRONTEND_URL..."
 curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "$(echo "$CURRENT_REALM" | python3 -c "
-import sys, json
+  -d "$(echo "$CURRENT_REALM" | python3 -c '
+import sys, os, json
 realm = json.load(sys.stdin)
-realm['attributes'] = realm.get('attributes', {})
-realm['attributes']['frontendUrl'] = 'https://auth.lianel.se'
+realm["attributes"] = realm.get("attributes", {})
+realm["attributes"]["frontendUrl"] = os.environ.get("APP_FRONTEND_URL", "https://www.lianel.se")
 print(json.dumps(realm))
-")" > /dev/null
+')" > /dev/null
 
-echo "✓ Realm updated with HTTPS frontend URL"
+echo "✓ Realm frontendUrl set to $APP_FRONTEND_URL (post-login redirect will go to app)"
 
 # Verify the update
 echo

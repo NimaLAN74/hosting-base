@@ -1,0 +1,112 @@
+# Fix Keycloak redirect: apply KC_HOSTNAME + nginx Host on remote via pipeline SSH
+# Run manually from Actions tab so login redirects back to www.lianel.se instead of auth.lianel.se
+
+name: Fix Keycloak Redirect (Remote)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-remote:
+    name: Apply redirect fix on remote host
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ REMOTE_HOST secret is not set"; exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ REMOTE_USER secret is not set"; exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ SSH_PRIVATE_KEY secret is not set"; exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          [ -s ~/.ssh/deploy_key ] || { echo "❌ SSH key empty"; exit 1; }
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Copy docker-compose.infra.yaml and nginx.conf to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          echo "Copying docker-compose.infra.yaml and nginx.conf to remote..."
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P "${REMOTE_PORT}" \
+            lianel/dc/docker-compose.infra.yaml \
+            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/docker-compose.infra.yaml"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf \
+            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
+          echo "✅ Files copied to /tmp on remote"
+
+      - name: Apply fix on remote (compose + nginx + restart Keycloak + reload nginx)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" '
+            set -e
+            echo "=== Fix Keycloak redirect on remote ==="
+            # Copy into compose dirs that exist
+            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
+              if [ -d "$d" ]; then
+                cp /tmp/docker-compose.infra.yaml "$d/" && echo "Updated $d/docker-compose.infra.yaml"
+                mkdir -p "$d/nginx/config"
+                cp /tmp/nginx.conf "$d/nginx/config/" && echo "Updated $d/nginx/config/nginx.conf"
+              fi
+            done
+            # Pick DC_DIR (same logic as deploy-frontend.sh)
+            DC_DIR=""
+            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
+              if [ -f "$d/docker-compose.yaml" ] || [ -f "$d/docker-compose.yml" ] || [ -f "$d/docker-compose.infra.yaml" ]; then
+                DC_DIR="$d"; break
+              fi
+            done
+            if [ -z "$DC_DIR" ]; then
+              echo "❌ No compose dir found"; exit 1
+            fi
+            echo "Using DC_DIR=$DC_DIR"
+            cd "$DC_DIR"
+            echo "Restarting Keycloak (KC_HOSTNAME=https://www.lianel.se/auth)..."
+            docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1 || \
+              docker-compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1
+            echo "Waiting for Keycloak to start..."
+            sleep 10
+            echo "Reloading nginx..."
+            docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload && echo "✅ Nginx reloaded" || echo "⚠️ Nginx reload failed"
+            echo "✅ Fix applied: Keycloak and nginx updated"
+          '
+          echo "✅ Remote fix completed"
+
+      - name: Summary
+        run: |
+          echo "## Keycloak redirect fix applied" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **KC_HOSTNAME**: \`https://www.lianel.se/auth\` (OAuth redirects use app URL)" >> $GITHUB_STEP_SUMMARY
+          echo "- **KC_HOSTNAME_ADMIN**: \`https://auth.lianel.se\` (admin console)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Nginx /auth**: \`Host \$host\` so Keycloak sees www.lianel.se" >> $GITHUB_STEP_SUMMARY
+          echo "- **Keycloak restarted**, **nginx reloaded** on \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY

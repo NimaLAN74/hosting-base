@@ -188,16 +188,21 @@ export const login = (redirectToCurrentPath = true) => {
     console.warn('Could not clear stored token before login:', e);
   }
   
-  // Preserve current path so user returns to the same page after login
-  const redirectUri = redirectToCurrentPath 
-    ? window.location.origin + window.location.pathname + window.location.search
-    : window.location.origin + '/';
-  
+  // Preserve current path so user returns to the same page after login.
+  // redirect_uri MUST be the app origin + path (never the Keycloak /auth path), or Keycloak
+  // will redirect back to the wrong place. Use origin + '/' if we're on a Keycloak path.
+  const origin = window.location.origin;
+  const pathname = window.location.pathname || '/';
+  const search = window.location.search || '';
+  const isKeycloakPath = pathname.startsWith('/auth');
+  const appPath = isKeycloakPath ? '/' : (pathname + search);
+  const redirectUri = redirectToCurrentPath ? (origin + appPath) : (origin + '/');
+
   console.log('=== LOGIN FUNCTION CALLED ===');
   console.log('Login: redirecting to Keycloak with redirectUri:', redirectUri);
-  console.log('Login: current pathname:', window.location.pathname);
-  console.log('Login: current origin:', window.location.origin);
-  console.log('Login: keycloakConfig:', keycloakConfig);
+  console.log('Login: current pathname:', pathname, '| isKeycloakPath:', isKeycloakPath);
+  console.log('Login: current origin:', origin);
+  console.log('Login: keycloakConfig.url:', keycloakConfig.url);
   console.log('Login: keycloak.authenticated:', keycloak.authenticated);
   console.log('Login: keycloak.token exists:', !!keycloak.token);
   
