@@ -1,4 +1,5 @@
 // Keycloak initialization and configuration
+// Redirect fix: KC_HOSTNAME + nginx Host $host applied via deploy-frontend pipeline
 import Keycloak from 'keycloak-js';
 
 // Keycloak base URL: prefer same-origin /auth proxy to avoid CORS/NetworkError on init.

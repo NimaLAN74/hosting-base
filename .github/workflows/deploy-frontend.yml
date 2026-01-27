@@ -9,6 +9,7 @@ on:
       - 'lianel/dc/frontend/**'
       - 'lianel/dc/docker-compose.frontend.yaml'
       - 'lianel/dc/docker-compose.yaml'
+      - 'lianel/dc/docker-compose.infra.yaml'
       - 'lianel/dc/scripts/deployment/deploy-frontend.sh'
       - 'lianel/dc/nginx/**'
       - '.github/workflows/deploy-frontend.yml'
@@ -323,6 +324,20 @@ jobs:
             ${REMOTE_USER}@${REMOTE_HOST} \
             "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
           echo "✅ Nginx config synced"
+
+      - name: Apply Keycloak redirect fix on remote (KC_HOSTNAME + nginx Host)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Syncing docker-compose.infra.yaml and restarting Keycloak for redirect fix..."
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/docker-compose.infra.yaml "${REMOTE_USER}@${REMOTE_HOST}:/tmp/docker-compose.infra.yaml"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1 || docker-compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1; sleep 8; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Keycloak+nginx redirect fix applied' || echo '⚠️ Keycloak/nginx step had warnings'"
+          echo "✅ Keycloak redirect fix applied on remote"
 
       - name: Verify deployment (monitor live process)
         run: |
