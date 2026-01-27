@@ -35,12 +35,15 @@ echo "2. Getting current realm configuration..."
 CURRENT_REALM=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}")
 
-# Update realm with app frontend URL (so post-login redirect goes to app, not auth.lianel.se/admin)
-# Using https://auth.lianel.se made users land on Keycloak admin console instead of the app.
-APP_FRONTEND_URL="${APP_FRONTEND_URL:-https://www.lianel.se}"
-export APP_FRONTEND_URL
+# Realm frontendUrl must be the Keycloak host (auth.lianel.se), not the app (www).
+# Keycloak uses it for the login form action and other frontend URLs. If set to www,
+# the form POSTs to www but cookies are set for auth → "Restart login cookie not found".
+# Post-login redirect is controlled by redirect_uri in the auth request (and client
+# redirect URIs), not by realm frontendUrl.
+KEYCLOAK_FRONTEND_URL="${KEYCLOAK_FRONTEND_URL:-https://auth.lianel.se}"
+export KEYCLOAK_FRONTEND_URL
 echo
-echo "3. Updating realm frontendUrl to app URL: $APP_FRONTEND_URL..."
+echo "3. Updating realm frontendUrl to Keycloak host: $KEYCLOAK_FRONTEND_URL..."
 curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
@@ -48,11 +51,11 @@ curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/lianel" \
 import sys, os, json
 realm = json.load(sys.stdin)
 realm["attributes"] = realm.get("attributes", {})
-realm["attributes"]["frontendUrl"] = os.environ.get("APP_FRONTEND_URL", "https://www.lianel.se")
+realm["attributes"]["frontendUrl"] = os.environ.get("KEYCLOAK_FRONTEND_URL", "https://auth.lianel.se")
 print(json.dumps(realm))
 ')" > /dev/null
 
-echo "✓ Realm frontendUrl set to $APP_FRONTEND_URL (post-login redirect will go to app)"
+echo "✓ Realm frontendUrl set to $KEYCLOAK_FRONTEND_URL (login form stays on auth; post-login uses redirect_uri)"
 
 # Verify the update
 echo
@@ -60,8 +63,8 @@ echo "4. Verifying update..."
 UPDATED_REALM=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}")
 
-FRONTEND_URL=$(echo "$UPDATED_REALM" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("attributes", {}).get("frontendUrl", "not set"))')
-echo "Frontend URL: ${FRONTEND_URL}"
+REALM_FRONTEND=$(echo "$UPDATED_REALM" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("attributes", {}).get("frontendUrl", "not set"))')
+echo "Realm frontendUrl: ${REALM_FRONTEND}"
 
 echo
 echo "=== Update Complete! ==="

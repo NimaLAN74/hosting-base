@@ -222,7 +222,13 @@ export const login = (redirectToCurrentPath = true) => {
   (async () => {
     try {
       const loginUrlOrPromise = keycloak.createLoginUrl({ redirectUri, prompt: 'login' });
-      const loginUrl = await Promise.resolve(loginUrlOrPromise);
+      let loginUrl = await Promise.resolve(loginUrlOrPromise);
+      // Force login page onto auth.lianel.se. If Keycloak or keycloak-js returns www (e.g. realm
+      // frontendUrl), the form action would be www → "Restart login cookie not found". Redirect
+      // to auth.lianel.se so the login page and form POST stay on auth and cookies work.
+      if (typeof loginUrl === 'string' && loginUrl.includes('www.lianel.se') && loginUrl.includes('/realms/')) {
+        loginUrl = loginUrl.replace(/https:\/\/www\.lianel\.se/g, 'https://auth.lianel.se');
+      }
       doRedirect(loginUrl);
     } catch (error) {
       console.error('Login error:', error);
