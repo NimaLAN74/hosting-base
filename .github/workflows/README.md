@@ -99,6 +99,32 @@ The workflow is instrumented so you can follow both the **pipeline** and the **d
 - Verify docker-compose.yaml is correct
 - Check container logs: `docker logs lianel-frontend`
 
+### Fix Keycloak Redirect (Remote)
+
+**File**: `fix-keycloak-redirect.yml`
+
+Applies the Keycloak redirect fix on the remote host via pipeline SSH: copies `docker-compose.infra.yaml` and `nginx.conf`, restarts Keycloak, reloads nginx.
+
+**Run with correct GH profile:**
+
+1. Log in to the GitHub account that has access to this repo (e.g. NimaLAN74):
+   ```bash
+   gh auth login --web --hostname github.com
+   ```
+   Complete the browser flow. If you have multiple accounts: `gh auth switch` and choose the correct one.
+
+2. Trigger the workflow:
+   ```bash
+   GH_TOKEN="$(gh auth token)" gh workflow run fix-keycloak-redirect.yml
+   ```
+   Or set `GH_TOKEN` to a Personal Access Token (repo + workflow scope) and run:
+   ```bash
+   export GH_TOKEN='your_token_here'
+   gh workflow run fix-keycloak-redirect.yml
+   ```
+
+3. Or run from the UI: **Actions** → **Fix Keycloak Redirect (Remote)** → **Run workflow**.
+
 ### Future Enhancements
 - [ ] Add rollback capability
 - [x] Add health checks after deployment (live curl of frontend URL)
