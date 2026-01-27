@@ -4,8 +4,15 @@
 import Keycloak from 'keycloak-js';
 
 const getKeycloakUrl = () => {
-  if (process.env.REACT_APP_KEYCLOAK_URL) return process.env.REACT_APP_KEYCLOAK_URL;
-  return 'https://auth.lianel.se';
+  const fromEnv = process.env.REACT_APP_KEYCLOAK_URL;
+  // Never use www.lianel.se for Keycloak: login must run on auth.lianel.se so cookies (KC_RESTART etc.)
+  // are set for auth.lianel.se and sent back when the form POSTs. If login runs on www (same-origin proxy),
+  // Keycloak sets cookies for auth.lianel.se (we send Host: auth.lianel.se) but the form posts to www
+  // → "Restart login cookie not found". Force auth.lianel.se when env points at www.
+  if (fromEnv && (fromEnv.includes('www.lianel.se') || fromEnv.includes('lianel.se/auth'))) {
+    return 'https://auth.lianel.se';
+  }
+  return fromEnv || 'https://auth.lianel.se';
 };
 
 const keycloakConfig = {
