@@ -4,8 +4,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # Keycloak: same-origin proxy URL so login/token/.well-known use www.lianel.se/auth (see docs/fixes/LOGIN-REDIRECT-ANALYSIS.md)
-        REACT_APP_KEYCLOAK_URL: ${REACT_APP_KEYCLOAK_URL:-https://www.lianel.se/auth}
+        # Keycloak: use auth.lianel.se like Grafana/Airflow (see docs/fixes/KEYCLOAK-PATTERN-GRAFANA-AIRFLOW-FRONTEND.md)
+        REACT_APP_KEYCLOAK_URL: ${REACT_APP_KEYCLOAK_URL:-https://auth.lianel.se}
         REACT_APP_KEYCLOAK_REALM: ${REACT_APP_KEYCLOAK_REALM:-lianel}
         REACT_APP_KEYCLOAK_CLIENT_ID: ${REACT_APP_KEYCLOAK_CLIENT_ID:-frontend-client}
         # Service URLs

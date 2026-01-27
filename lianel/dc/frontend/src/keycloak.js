@@ -1,13 +1,11 @@
 // Keycloak initialization and configuration
-// Redirect fix: KC_HOSTNAME + nginx Host $host applied via deploy-frontend pipeline
+// Use https://auth.lianel.se like Grafana and Airflow (see docs/fixes/KEYCLOAK-PATTERN-GRAFANA-AIRFLOW-FRONTEND.md).
+// The www.lianel.se/auth proxy was added for CORS and caused redirect-to-admin; revert to auth.lianel.se.
 import Keycloak from 'keycloak-js';
 
-// Keycloak base URL: prefer same-origin /auth proxy to avoid CORS/NetworkError on init.
-// Build must set REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth (same-origin proxy). Fallback: origin+'/auth' in browser.
 const getKeycloakUrl = () => {
   if (process.env.REACT_APP_KEYCLOAK_URL) return process.env.REACT_APP_KEYCLOAK_URL;
-  if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin + '/auth';
-  return 'https://www.lianel.se/auth';
+  return 'https://auth.lianel.se';
 };
 
 const keycloakConfig = {
@@ -23,8 +21,8 @@ const keycloak = new Keycloak(keycloakConfig);
 export { keycloak };
 
 // Keycloak initialization options
-// Note: check-sso with iframe won't work cross-domain (auth.lianel.se -> lianel.se)
-// X-Frame-Options blocks the iframe, so we disable it and use token-based persistence
+// Note: check-sso with iframe won't work cross-domain (auth.lianel.se -> lianel.se).
+// X-Frame-Options blocks the iframe, so we disable it and use token-based persistence.
 const initOptions = {
   checkLoginIframe: false,  // DISABLED: X-Frame-Options blocks cross-domain iframe
   enableLogging: true,

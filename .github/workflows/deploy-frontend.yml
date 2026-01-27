@@ -86,7 +86,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth
+            REACT_APP_KEYCLOAK_URL=https://auth.lianel.se
             REACT_APP_KEYCLOAK_REALM=lianel
             REACT_APP_KEYCLOAK_CLIENT_ID=frontend-client
             REACT_APP_GRAFANA_URL=https://monitoring.lianel.se
