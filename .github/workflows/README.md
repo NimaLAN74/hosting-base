@@ -69,10 +69,18 @@ You can manually trigger deployment:
 3. Click **Run workflow**
 4. Select branch and click **Run workflow**
 
-### Monitoring
-- Check workflow runs in the **Actions** tab
-- View logs for each step
-- Deployment summary is shown at the end of the workflow
+### Monitoring the pipe and process
+The workflow is instrumented so you can follow both the **pipeline** and the **deployed process**:
+
+| What | Where |
+|------|--------|
+| **Pipeline context** | First step prints Run ID, branch, workflow, and a direct link to the run. Check the step summary for the run URL. |
+| **SSH preflight** | Before copying the deploy script, a step tests SSH to the host. If this fails, fix `REMOTE_HOST`/`REMOTE_USER`/`REMOTE_PORT`, SSH key, or firewall before the Copy step. |
+| **Copy step** | Logs `[Monitor] Copy step — REMOTE_HOST=... REMOTE_USER=... REMOTE_PORT=...`, checks the local script exists, then runs `scp` and `ssh chmod` with clear pass/fail and exit-code messages. |
+| **Live process** | After deploy and nginx sync, a step curls the frontend URL (default `https://www.lianel.se`) and fails the job if the response is not 2xx/3xx. Override with repository variable `FRONTEND_URL` if needed. |
+
+- **Actions**: https://github.com/NimaLAN74/hosting-base/actions  
+- Use the run URL from the “Pipeline context” step to jump to that run’s logs.
 
 ### Troubleshooting
 
@@ -93,7 +101,7 @@ You can manually trigger deployment:
 
 ### Future Enhancements
 - [ ] Add rollback capability
-- [ ] Add health checks after deployment
+- [x] Add health checks after deployment (live curl of frontend URL)
 - [ ] Add notification (Slack, email) on deployment
 - [ ] Add deployment to staging environment
 - [ ] Add automated testing before deployment

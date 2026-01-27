@@ -29,6 +29,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Pipeline context (monitor run)
+        run: |
+          echo "## Pipeline context" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID | \`${{ github.run_id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run URL | https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | \`${{ github.workflow }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Actor | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "[Monitor] Run ${{ github.run_id }} | ${{ github.ref_name }} | ${{ github.workflow }}"
+
       - name: Set lowercase image name
         id: image-name
         run: |
@@ -218,28 +232,56 @@ jobs:
           echo "Key file size: $KEY_SIZE bytes"
           echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
+      - name: Test SSH connectivity (preflight)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "[Monitor] Testing SSH to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
+          if ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=15 \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "echo 'SSH OK'; hostname; whoami; echo 'Target user can write to /root:' \$([ -w /root ] && echo yes || echo no)"; then
+            echo "✅ SSH preflight passed"
+          else
+            echo "❌ SSH preflight failed — fix connectivity before Copy step"
+            echo "Check: REMOTE_HOST, REMOTE_USER, REMOTE_PORT, SSH key, firewall, sshd on host"
+            exit 1
+          fi
+
       - name: Copy Deployment Script to Remote Host
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Copying deployment script to remote host..."
+          set -e
+          echo "[Monitor] Copy step — REMOTE_HOST=$REMOTE_HOST REMOTE_USER=$REMOTE_USER REMOTE_PORT=$REMOTE_PORT"
+          SCRIPT_PATH="lianel/dc/scripts/deployment/deploy-frontend.sh"
+          if [ ! -f "$SCRIPT_PATH" ]; then
+            echo "❌ Local script missing: $SCRIPT_PATH"
+            exit 1
+          fi
+          echo "Running scp..."
           scp -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -P ${REMOTE_PORT} \
-            lianel/dc/scripts/deployment/deploy-frontend.sh \
-            ${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-frontend.sh
-          
-          echo "Setting execute permissions on remote script..."
+            -o ConnectTimeout=15 \
+            -P "${REMOTE_PORT}" \
+            "$SCRIPT_PATH" \
+            "${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-frontend.sh" || { echo "❌ scp failed (exit $?)"; exit 1; }
+          echo "✅ scp OK"
+          echo "Running ssh chmod..."
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "chmod +x /root/deploy-frontend.sh"
-          
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "chmod +x /root/deploy-frontend.sh && test -x /root/deploy-frontend.sh && echo 'script executable'" || { echo "❌ ssh chmod failed (exit $?)"; exit 1; }
           echo "✅ Deployment script copied and made executable"
 
       - name: Deploy to Remote Host
@@ -281,6 +323,29 @@ jobs:
             ${REMOTE_USER}@${REMOTE_HOST} \
             "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
           echo "✅ Nginx config synced"
+
+      - name: Verify deployment (monitor live process)
+        run: |
+          URL="${FRONTEND_URL:-https://www.lianel.se}"
+          echo "[Monitor] Checking live site: $URL"
+          HTTP_CODE=$(curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "$URL/" 2>/dev/null || echo "000")
+          if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
+            echo "⚠️ Could not reach $URL (curl failed or timeout)"
+            echo "Deployment may have succeeded but site is unreachable from runner."
+            echo "Live check: ❌ unreachable" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+            echo "✅ Live check passed: HTTP $HTTP_CODE"
+            echo "Frontend is up at $URL"
+            echo "Live check: ✅ HTTP $HTTP_CODE — $URL" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Live check failed: HTTP $HTTP_CODE (expected 2xx/3xx)"
+            echo "Live check: ❌ HTTP $HTTP_CODE" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+        env:
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
 
       - name: Deployment Summary
         run: |
