@@ -5,9 +5,11 @@
 
 set -e
 
-KEYCLOAK_URL="https://auth.lianel.se"
-ADMIN_USER="admin"
-ADMIN_PASS="D2eF5gH9jK3lM7nP1qR4sT8vW2xY6zA"
+# Allow .env or env (e.g. from GitHub Actions) to supply admin password
+[ -f ".env" ] && source .env
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://auth.lianel.se}"
+ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
+ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-D2eF5gH9jK3lM7nP1qR4sT8vW2xY6zA}"
 
 echo "=== Fixing Keycloak HTTPS Configuration ==="
 echo

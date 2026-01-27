@@ -3,11 +3,11 @@
 import Keycloak from 'keycloak-js';
 
 // Keycloak base URL: prefer same-origin /auth proxy to avoid CORS/NetworkError on init.
-// Build sets REACT_APP_KEYCLOAK_URL; runtime fallback uses origin + '/auth' when in browser.
+// Build must set REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth (same-origin proxy). Fallback: origin+'/auth' in browser.
 const getKeycloakUrl = () => {
   if (process.env.REACT_APP_KEYCLOAK_URL) return process.env.REACT_APP_KEYCLOAK_URL;
   if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin + '/auth';
-  return 'https://auth.lianel.se';
+  return 'https://www.lianel.se/auth';
 };
 
 const keycloakConfig = {
@@ -176,7 +176,9 @@ export const initKeycloak = () => {
 };
 
 /**
- * Login function - redirects to Keycloak login
+ * Login function - redirects to Keycloak login.
+ * Uses createLoginUrl() and awaits it so it works when keycloak-js returns a string or a Promise (keycloak-js 26.x).
+ * Avoids keycloak.login() which may pass a Promise to location.href when createLoginUrl is async.
  */
 export const login = (redirectToCurrentPath = true) => {
   // Clear any stored token to avoid using a stale session when switching users
@@ -188,10 +190,7 @@ export const login = (redirectToCurrentPath = true) => {
   } catch (e) {
     console.warn('Could not clear stored token before login:', e);
   }
-  
-  // Preserve current path so user returns to the same page after login.
-  // redirect_uri MUST be the app origin + path (never the Keycloak /auth path), or Keycloak
-  // will redirect back to the wrong place. Use origin + '/' if we're on a Keycloak path.
+
   const origin = window.location.origin;
   const pathname = window.location.pathname || '/';
   const search = window.location.search || '';
@@ -199,74 +198,32 @@ export const login = (redirectToCurrentPath = true) => {
   const appPath = isKeycloakPath ? '/' : (pathname + search);
   const redirectUri = redirectToCurrentPath ? (origin + appPath) : (origin + '/');
 
-  console.log('=== LOGIN FUNCTION CALLED ===');
-  console.log('Login: redirecting to Keycloak with redirectUri:', redirectUri);
-  console.log('Login: current pathname:', pathname, '| isKeycloakPath:', isKeycloakPath);
-  console.log('Login: current origin:', origin);
-  console.log('Login: keycloakConfig.url:', keycloakConfig.url);
-  console.log('Login: keycloak.authenticated:', keycloak.authenticated);
-  console.log('Login: keycloak.token exists:', !!keycloak.token);
-  
-  try {
-    // Use Keycloak's createLoginUrl to build the URL explicitly
-    // This ensures we always redirect to Keycloak, not /login
-    console.log('Login: Calling keycloak.createLoginUrl() with:', {
-      redirectUri: redirectUri,
+  const doRedirect = (url) => {
+    if (typeof url === 'string' && url) {
+      window.location.href = url;
+      return;
+    }
+    const keycloakUrl = `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/auth`;
+    const params = new URLSearchParams({
+      client_id: keycloakConfig.clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid profile email',
       prompt: 'login'
     });
-    
-    const loginUrl = keycloak.createLoginUrl({
-      redirectUri: redirectUri,
-      prompt: 'login'  // Force re-authentication
-    });
-    
-    console.log('Login: Keycloak login URL generated:', loginUrl);
-    console.log('Login: URL contains /login?', loginUrl.includes('/login'));
-    console.log('Login: URL contains auth.lianel.se?', loginUrl.includes('auth.lianel.se'));
-    console.log('Login: URL contains redirect_uri?', loginUrl.includes('redirect_uri'));
-    
-    // Verify the URL doesn't contain /login (except in Keycloak domain)
-    if (loginUrl.includes('/login') && !loginUrl.includes('auth.lianel.se')) {
-      console.error('❌ ERROR: Generated login URL contains /login outside Keycloak domain!');
-      console.error('URL:', loginUrl);
-      console.error('This should not happen. Falling back to manual URL construction.');
-      // Fall through to manual construction
-      throw new Error('Generated URL contains /login');
-    }
-    
-    // Check if redirect_uri is in the URL
-    if (!loginUrl.includes(encodeURIComponent(redirectUri)) && !loginUrl.includes(redirectUri)) {
-      console.warn('⚠️ WARNING: redirect_uri might not be in the generated URL!');
-      console.warn('Expected redirect_uri:', redirectUri);
-      console.warn('Generated URL:', loginUrl);
-    }
-    
-    // Explicitly redirect to Keycloak
-    console.log('Login: About to redirect to Keycloak:', loginUrl);
-    console.log('Login: Setting window.location.href...');
-    window.location.href = loginUrl;
-  } catch (error) {
-    console.error('Login error:', error);
-    // Fallback: try keycloak.login() if createLoginUrl fails
+    window.location.href = `${keycloakUrl}?${params.toString()}`;
+  };
+
+  (async () => {
     try {
-      keycloak.login({
-        redirectUri: redirectUri,
-        prompt: 'login'
-      });
-    } catch (fallbackError) {
-      console.error('Login fallback error:', fallbackError);
-      // Last resort: redirect to Keycloak manually
-      const keycloakUrl = `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/auth`;
-      const params = new URLSearchParams({
-        client_id: keycloakConfig.clientId,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: 'openid profile email',
-        prompt: 'login'
-      });
-      window.location.href = `${keycloakUrl}?${params.toString()}`;
+      const loginUrlOrPromise = keycloak.createLoginUrl({ redirectUri, prompt: 'login' });
+      const loginUrl = await Promise.resolve(loginUrlOrPromise);
+      doRedirect(loginUrl);
+    } catch (error) {
+      console.error('Login error:', error);
+      doRedirect(null);
     }
-  }
+  })();
 };
 
 /**

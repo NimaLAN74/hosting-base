@@ -36,6 +36,7 @@ Configure these secrets in your GitHub repository settings (Settings → Secrets
 | `REMOTE_USER` | SSH username | `root` |
 | `SSH_PRIVATE_KEY` | Private SSH key for authentication | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
 | `REMOTE_PORT` | SSH port (optional, defaults to 22) | `22` |
+| `KEYCLOAK_ADMIN_PASSWORD` | Keycloak admin password (optional). If set, the deploy runs `fix-keycloak-https.sh` and `update-keycloak-frontend-client.sh` on the remote so realm frontendUrl and frontend-client rootUrl point to https://www.lianel.se. | *(your Keycloak admin password)* |
 
 ### How to Set Up Secrets
 

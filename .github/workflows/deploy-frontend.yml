@@ -336,8 +336,26 @@ jobs:
             lianel/dc/docker-compose.infra.yaml "${REMOTE_USER}@${REMOTE_HOST}:/tmp/docker-compose.infra.yaml"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1 || docker-compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1; sleep 8; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Keycloak+nginx redirect fix applied' || echo '⚠️ Keycloak/nginx step had warnings'"
+            "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && echo \"Updated \$d\"; done; DC=\$( [ -f /root/lianel/dc/docker-compose.infra.yaml ] && echo /root/lianel/dc || echo /root/hosting-base/lianel/dc ); cd \"\$DC\" && docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1 || docker-compose -f docker-compose.infra.yaml up -d --force-recreate keycloak 2>&1; echo 'Waiting for Keycloak to be ready...'; for i in 1 2 3 4 5 6; do docker ps --filter name=keycloak --filter status=running -q | grep -q . && break; sleep 5; done; sleep 10; docker ps --filter name=keycloak; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Keycloak+nginx redirect fix applied' || echo '⚠️ Keycloak/nginx step had warnings'"
           echo "✅ Keycloak redirect fix applied on remote"
+
+      - name: Run Keycloak redirect scripts on remote (frontendUrl + frontend-client rootUrl)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+        run: |
+          echo "Copying Keycloak scripts to remote..."
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/scripts/keycloak-setup/fix-keycloak-https.sh \
+            lianel/dc/scripts/keycloak-setup/update-keycloak-frontend-client.sh \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          echo "Running Keycloak redirect scripts on remote (realm frontendUrl + frontend-client rootUrl)..."
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "export KEYCLOAK_ADMIN_PASSWORD='${KEYCLOAK_ADMIN_PASSWORD}'; export APP_FRONTEND_URL=https://www.lianel.se; cd /root/lianel/dc 2>/dev/null || cd /root/hosting-base/lianel/dc; bash /tmp/fix-keycloak-https.sh 2>&1; bash /tmp/update-keycloak-frontend-client.sh 2>&1"
+        continue-on-error: true
 
       - name: Verify deployment (monitor live process)
         run: |

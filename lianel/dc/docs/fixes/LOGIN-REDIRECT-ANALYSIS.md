@@ -38,7 +38,8 @@ The login redirect must send the user **back to the app** (e.g. `https://www.lia
 
 ### 1. Frontend (`keycloak.js` + build)
 
-- **Keycloak URL**: `REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth` (same-origin proxy).
+- **Keycloak URL**: `REACT_APP_KEYCLOAK_URL=https://www.lianel.se/auth` (same-origin proxy). Must **not** be `https://auth.lianel.se` — that makes token/.well-known cross-origin and can break redirect.
+- **Build/deploy**: `docker-compose.frontend.yaml` and `.env.example` set this to `https://www.lianel.se/auth` (or `https://${DOMAIN_MAIN}/auth`). Ensure your `.env` or build args do not override it with `KEYCLOAK_URL`/auth.lianel.se.
 - **redirect_uri in login()**: `origin + pathname + search`, or `origin + '/'` if path starts with `/auth`.
 
 ### 2. Keycloak client `frontend-client`
@@ -48,7 +49,7 @@ The login redirect must send the user **back to the app** (e.g. `https://www.lia
   - `https://lianel.se`, `https://lianel.se/`, `https://lianel.se/*`
   - plus any exact paths you use (e.g. `/monitoring`, `/monitoring/*`).
 - **Web Origins**: `https://www.lianel.se`, `https://lianel.se` (and optionally `*` if needed).
-- **baseUrl / rootUrl**: empty string `""`.
+- **baseUrl / rootUrl**: **https://www.lianel.se** (so Keycloak sends users back to the app after login, not to auth.lianel.se). Run `update-keycloak-frontend-client.sh` to set.
 
 ### 3. Nginx
 
@@ -73,6 +74,15 @@ Use this after any change to Keycloak client, frontend auth, or nginx.
   - After redirect, the URL must be the app URL (e.g. `https://www.lianel.se/comp-ai`) and must not contain `/auth` or `auth.lianel.se` as the main domain.
 - [ ] **Logout redirect**
   - Log out. You must land on `https://www.lianel.se/` (or configured post-logout URI), not on a Keycloak page.
+
+## Runbook: “502 Bad Gateway on https://www.lianel.se/auth/...”
+
+When `GET https://www.lianel.se/auth/realms/.../auth` returns **502 Bad Gateway**, nginx cannot reach Keycloak. On the **server**:
+
+1. **Keycloak container running**: `docker ps --filter name=keycloak`. If not running: from the dc dir run `docker compose -f docker-compose.infra.yaml up -d keycloak`.
+2. **Same Docker network**: nginx must resolve `keycloak:8080`. Check both are on `lianel-network`: `docker network inspect lianel-network --format '{{range .Containers}}{{.Name}} {{end}}'` should list keycloak and nginx-proxy.
+3. **Keycloak responding**: from a container on the same network, `curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/` should return 200 or 302.
+4. **Nginx upstream**: in `location /auth/`, `proxy_pass` must point at `http://keycloak:8080/`. Reload: `docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload`.
 
 ## Runbook: “Redirects to auth.lianel.se/admin/master/console/ and can’t get to landing”
 
