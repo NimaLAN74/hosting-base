@@ -66,7 +66,13 @@
 
 ## 8. Fix 502 on the server
 
-Run on the **server** (where Docker/Keycloak/nginx run):
+Run on the **server** (where Docker/Keycloak/nginx run). From your laptop, one-liner via SSH (replace `user@host` with your deploy user and host):
+
+```bash
+ssh user@host 'bash -s' < lianel/dc/scripts/fix-502-keycloak-on-server.sh
+```
+
+Or log in to the server and run:
 
 ```bash
 bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh
@@ -74,7 +80,7 @@ bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh
 bash /root/hosting-base/lianel/dc/scripts/fix-502-keycloak-on-server.sh
 ```
 
-That script starts keycloak and nginx from `docker-compose.infra.yaml` so both use `lianel-network` and nginx can reach `keycloak:8080`. If nginx is currently run by another compose, you may need to stop that stack and use infra for both (or ensure that compose puts nginx on `lianel-network`).
+That script starts keycloak and nginx from `docker-compose.infra.yaml` so both use `lianel-network` and nginx can reach `keycloak:8080`. If you see "port already in use", stop the other nginx (`docker stop nginx-proxy`) and run the script again.
 
 ## 9. Tests to run after each change
 
