@@ -71,6 +71,8 @@ x-airflow-common:
     AIRFLOW__CELERY__MAX_MEM_PER_CHILD: 150000
     AIRFLOW__WEBSERVER__BASE_URL: https://airflow.lianel.se
     AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
+    # FAB auth: load OAuth config from mounted config dir (default is AIRFLOW_HOME/webserver_config.py)
+    AIRFLOW__FAB__CONFIG_FILE: /opt/airflow/config/webserver_config.py
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES:-false}
