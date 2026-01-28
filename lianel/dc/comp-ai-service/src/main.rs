@@ -3,6 +3,7 @@ mod models;
 mod handlers;
 mod auth;
 mod db;
+mod inference;
 
 use axum::{
     routing::get,

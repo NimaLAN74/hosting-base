@@ -8,6 +8,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use utoipa::ToSchema;
 use crate::config::AppConfig;
+use crate::inference;
 use crate::models::{CompAIRequest, CompAIResponse, RequestHistoryQueryParams, RequestHistoryResponse};
 use crate::auth::{AuthenticatedUser, extract_user};
 use crate::db::queries::{save_request, get_request_history as get_request_history_from_db};
@@ -41,12 +42,39 @@ pub async fn process_request(
         user.preferred_username.as_deref().unwrap_or("unknown"),
         user.sub
     );
-    
-    // TODO: Implement actual AI processing logic
-    // For now, return a mock response
-    let response_text = format!("Mock response to: {}", request.prompt);
-    let model_used = "mock-model".to_string();
-    let tokens_used = Some(100);
+
+    let (response_text, model_used, tokens_used) = if let (Some(ref url), Some(ref model)) =
+        (&config.comp_ai_ollama_url, &config.comp_ai_ollama_model)
+    {
+        match inference::generate(
+            url,
+            model,
+            &request.prompt,
+            config.comp_ai_max_tokens,
+            config.comp_ai_temperature,
+        )
+        .await
+        {
+            Ok((text, count)) => (text, model.clone(), count),
+            Err(e) => {
+                tracing::error!("Ollama inference failed: {}", e);
+                return Err((
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": "Local model unavailable",
+                        "detail": e.to_string()
+                    })),
+                ));
+            }
+        }
+    } else {
+        // No Ollama configured: mock response
+        let response_text = format!("Mock response to: {}", request.prompt);
+        let model_used = "mock-model".to_string();
+        let tokens_used = Some(100);
+        (response_text, model_used, tokens_used)
+    };
+
     let processing_time_ms = start_time.elapsed().as_millis() as u64;
     
     let response = CompAIResponse {

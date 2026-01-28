@@ -17,6 +17,9 @@ pub struct AppConfig {
     pub postgres_db: String,
     pub comp_ai_api_key: Option<String>,
     pub comp_ai_model_path: Option<String>,
+    /// When set with comp_ai_ollama_model, use local Ollama instead of hosted API or mock.
+    pub comp_ai_ollama_url: Option<String>,
+    pub comp_ai_ollama_model: Option<String>,
     pub comp_ai_max_tokens: u32,
     pub comp_ai_temperature: f64,
 }
@@ -61,6 +64,8 @@ impl AppConfig {
                 .unwrap_or_else(|_| "lianel_energy".to_string()),
             comp_ai_api_key: env::var("COMP_AI_API_KEY").ok(),
             comp_ai_model_path: env::var("COMP_AI_MODEL_PATH").ok(),
+            comp_ai_ollama_url: env::var("COMP_AI_OLLAMA_URL").ok(),
+            comp_ai_ollama_model: env::var("COMP_AI_OLLAMA_MODEL").ok(),
             comp_ai_max_tokens: env::var("COMP_AI_MAX_TOKENS")
                 .unwrap_or_else(|_| "4096".to_string())
                 .parse()

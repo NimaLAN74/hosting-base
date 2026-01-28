@@ -1,3 +1,5 @@
+# Comp-AI stack. For same-host local model experiment, set COMP_AI_OLLAMA_URL and
+# COMP_AI_OLLAMA_MODEL in .env and start the ollama service; then pull a model on the remote host.
 services:
   comp-ai-service:
     image: ghcr.io/nimalan74/hosting-base/lianel-comp-ai-service:latest
@@ -19,6 +21,8 @@ services:
       COMP_AI_KEYCLOAK_CLIENT_SECRET: ${COMP_AI_KEYCLOAK_CLIENT_SECRET}
       COMP_AI_API_KEY: ${COMP_AI_API_KEY:-}
       COMP_AI_MODEL_PATH: ${COMP_AI_MODEL_PATH:-/models}
+      COMP_AI_OLLAMA_URL: ${COMP_AI_OLLAMA_URL:-}
+      COMP_AI_OLLAMA_MODEL: ${COMP_AI_OLLAMA_MODEL:-}
       COMP_AI_MAX_TOKENS: ${COMP_AI_MAX_TOKENS:-4096}
       COMP_AI_TEMPERATURE: ${COMP_AI_TEMPERATURE:-0.7}
       RUST_LOG: info
@@ -36,6 +40,24 @@ services:
       retries: 3
       start_period: 40s
 
+  # Optional: same-host local model (Ollama). Enable by setting COMP_AI_OLLAMA_URL=http://ollama:11434
+  # and COMP_AI_OLLAMA_MODEL=<name> in .env, then start this service and pull a model on the remote host.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lianel-ollama
+    expose:
+      - "11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - lianel-network
+    profiles:
+      - local-model
+
 networks:
   lianel-network:
     external: true
+
+volumes:
+  ollama-data:
