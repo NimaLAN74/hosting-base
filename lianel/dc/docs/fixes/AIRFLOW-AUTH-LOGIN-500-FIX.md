@@ -2,7 +2,7 @@
 
 **Date**: January 2026  
 **Issue**: https://airflow.lianel.se/auth/login/?next=https://airflow.lianel.se/ returns Internal Server Error  
-**Status**: Fix applied (requires deploy and restart on remote host)
+**Status**: Fix applied and deployed (Jan 2026). Airflow uses dedicated DB `airflow` via `POSTGRES_DB_AIRFLOW`.
 
 ---
 
@@ -21,6 +21,13 @@ In **`lianel/dc/docker-compose.airflow.yaml`** (under `x-airflow-common` → `en
 So the api-server (and any other FAB-using component) loads the existing `config/webserver_config.py` (Keycloak OAuth, callback `https://airflow.lianel.se/oauth-authorized/keycloak`).
 
 ---
+
+## Dedicated Airflow database (required)
+
+Airflow must use its **own** database, not `lianel_energy`. In `docker-compose.airflow.yaml` the DB is set via **`POSTGRES_DB_AIRFLOW`** (default `airflow`). On the host Postgres, create the DB and grant the Airflow user:
+
+- `CREATE DATABASE airflow OWNER airflow;` (or grant `airflow` user all on `airflow`).
+- Ensure `.env` has **`AIRFLOW_OAUTH_CLIENT_SECRET`** and does **not** override `POSTGRES_DB_AIRFLOW` with `lianel_energy` for Airflow (or set `POSTGRES_DB_AIRFLOW=airflow`).
 
 ## Deploy Steps (on remote host)
 
