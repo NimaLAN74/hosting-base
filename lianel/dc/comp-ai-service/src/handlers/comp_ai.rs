@@ -58,13 +58,21 @@ pub async fn process_request(
             Ok((text, count)) => (text, model.clone(), count),
             Err(e) => {
                 tracing::error!("Ollama inference failed: {}", e);
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({
-                        "error": "Local model unavailable",
-                        "detail": e.to_string()
-                    })),
-                ));
+                if config.comp_ai_ollama_fallback_to_mock {
+                    tracing::warn!("Falling back to mock (COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true)");
+                    let response_text = format!("Mock response to: {}", request.prompt);
+                    let model_used = "mock-model (Ollama unavailable)".to_string();
+                    let tokens_used = Some(100);
+                    (response_text, model_used, tokens_used)
+                } else {
+                    return Err((
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(serde_json::json!({
+                            "error": "Local model unavailable",
+                            "detail": e.to_string()
+                        })),
+                    ));
+                }
             }
         }
     } else {

@@ -5,9 +5,13 @@
 
 set -e
 
-KEYCLOAK_URL="https://auth.lianel.se"
-ADMIN_USER="admin"
-ADMIN_PASS="D2eF5gH9jK3lM7nP1qR4sT8vW2xY6zA"
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://auth.lianel.se}"
+ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
+ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-}"
+if [ -z "$ADMIN_PASS" ]; then
+  echo "ERROR: KEYCLOAK_ADMIN_PASSWORD not set. Export it or set in .env."
+  exit 1
+fi
 
 echo "=== Creating Airflow Keycloak Client ==="
 echo
@@ -51,7 +55,8 @@ if [ "$(echo "$EXISTING_CLIENT" | python3 -c 'import sys, json; print(len(json.l
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "redirectUris": [
-        "https://airflow.lianel.se/oauth-authorized/keycloak"
+        "https://airflow.lianel.se/oauth-authorized/keycloak",
+        "https://airflow.lianel.se/auth/oauth-authorized/keycloak"
       ],
       "webOrigins": [
         "https://airflow.lianel.se"
@@ -77,7 +82,8 @@ else
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "redirectUris": [
-        "https://airflow.lianel.se/oauth-authorized/keycloak"
+        "https://airflow.lianel.se/oauth-authorized/keycloak",
+        "https://airflow.lianel.se/auth/oauth-authorized/keycloak"
       ],
       "webOrigins": [
         "https://airflow.lianel.se"

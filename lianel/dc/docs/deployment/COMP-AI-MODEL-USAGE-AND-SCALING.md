@@ -50,7 +50,7 @@ To **try** hosting a small AI model on the same KVM2 and observe consequences an
      - `docker exec lianel-ollama ollama pull tinyllama`
    - Restart comp-ai-service so it picks up the new env (or redeploy).
 
-2. **Behaviour**: Comp-AI service will call Ollama’s `/api/generate` when both `COMP_AI_OLLAMA_URL` and `COMP_AI_OLLAMA_MODEL` are set; otherwise it falls back to mock (or hosted API when that is implemented).
+2. **Behaviour**: Comp-AI service will call Ollama’s `/api/generate` when both `COMP_AI_OLLAMA_URL` and `COMP_AI_OLLAMA_MODEL` are set; otherwise it falls back to mock (or hosted API when that is implemented). If Ollama is configured but the request fails (e.g. container not running, model not pulled), the service **falls back to mock** by default (`COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true`), so the API does not return 503. Set `COMP_AI_OLLAMA_FALLBACK_TO_MOCK=false` to return 503 when Ollama is unavailable.
 
 3. **What to monitor**: Host CPU and RAM (expect spikes during inference), Comp-AI latency (local inference can be slow on 2 vCPU), and impact on Keycloak/frontend. Use this to decide whether to move to KVM4 or a separate AI host.
 

@@ -20,6 +20,8 @@ pub struct AppConfig {
     /// When set with comp_ai_ollama_model, use local Ollama instead of hosted API or mock.
     pub comp_ai_ollama_url: Option<String>,
     pub comp_ai_ollama_model: Option<String>,
+    /// When true, if Ollama is configured but the request fails, return mock instead of 503.
+    pub comp_ai_ollama_fallback_to_mock: bool,
     pub comp_ai_max_tokens: u32,
     pub comp_ai_temperature: f64,
 }
@@ -66,6 +68,10 @@ impl AppConfig {
             comp_ai_model_path: env::var("COMP_AI_MODEL_PATH").ok(),
             comp_ai_ollama_url: env::var("COMP_AI_OLLAMA_URL").ok(),
             comp_ai_ollama_model: env::var("COMP_AI_OLLAMA_MODEL").ok(),
+            comp_ai_ollama_fallback_to_mock: env::var("COMP_AI_OLLAMA_FALLBACK_TO_MOCK")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
             comp_ai_max_tokens: env::var("COMP_AI_MAX_TOKENS")
                 .unwrap_or_else(|_| "4096".to_string())
                 .parse()
