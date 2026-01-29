@@ -13,9 +13,9 @@ PREFERRED_URL_SCHEME = "https"
 # Enable OAuth authentication
 AUTH_TYPE = AUTH_OAUTH
 AUTH_USER_REGISTRATION = True
-# User role allows triggering DAGs (can_edit on DAG, can create on DAG Run); Viewer is read-only and returns 403 on trigger.
-# Existing users already registered as Viewer must be updated in Airflow UI: Admin → List Users → edit → Role = User.
-AUTH_USER_REGISTRATION_ROLE = 'User'
+# Admin so Keycloak users can trigger DAGs and access Admin (List Users, edit roles). Keycloak admin has no Airflow permission until this user has Admin.
+# Existing OAuth users already in DB keep their old role; add Admin via: docker exec <apiserver> airflow users add-role -u <username> -r Admin (see scripts/maintenance/airflow-grant-admin-role.sh).
+AUTH_USER_REGISTRATION_ROLE = 'Admin'
 WTF_CSRF_ENABLED = False
 
 # OAuth providers configuration
