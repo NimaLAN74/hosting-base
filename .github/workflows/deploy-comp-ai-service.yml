@@ -262,7 +262,7 @@ jobs:
               -o ServerAliveCountMax=3 \
               -p ${REMOTE_PORT} \
               ${REMOTE_USER}@${REMOTE_HOST} \
-              "cd /root/hosting-base && git fetch origin && (git pull origin master || { echo 'Pull failed (e.g. local changes), updating only comp-ai files from origin/master'; git checkout origin/master -- lianel/dc/docker-compose.comp-ai.yaml; }) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml pull comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml ps comp-ai-service && docker logs lianel-comp-ai-service --tail 20"; then
+              "cd /root/hosting-base && git fetch origin && (git pull origin master || { echo 'Pull failed (e.g. local changes), updating only comp-ai files from origin/master'; git checkout origin/master -- lianel/dc/docker-compose.comp-ai.yaml; }) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml pull comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model pull ollama && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model up -d ollama && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml ps comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model ps ollama && docker logs lianel-comp-ai-service --tail 20 && docker ps --filter name=lianel-ollama --format 'table {{.Names}}\t{{.Status}}'"; then
               echo "✅ Deployment successful"
               exit 0
             else
@@ -290,16 +290,25 @@ jobs:
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           sleep 10
-          echo "Checking container status..."
+          echo "Checking Comp-AI service..."
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=30 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "docker ps --filter name=lianel-comp-ai-service --format '{{.Status}}'"
+            "docker ps --filter name=lianel-comp-ai-service --format '{{.Names}} {{.Status}}'"
           
-          echo "Running health check from inside container..."
+          echo "Checking Ollama container..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker ps --filter name=lianel-ollama --format '{{.Names}} {{.Status}}'"
+          
+          echo "Running Comp-AI health check..."
           if ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
@@ -309,7 +318,7 @@ jobs:
             "docker exec lianel-comp-ai-service curl -f http://localhost:3002/health"; then
             echo "✅ Comp AI Service health check passed"
           else
-            echo "❌ Health check failed. Showing container logs:"
+            echo "❌ Comp-AI health check failed. Showing container logs:"
             ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
@@ -318,6 +327,19 @@ jobs:
               ${REMOTE_USER}@${REMOTE_HOST} \
               "docker logs lianel-comp-ai-service --tail 30"
             exit 1
+          fi
+          
+          echo "Checking Ollama API..."
+          if ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec lianel-ollama curl -sf http://localhost:11434/api/tags >/dev/null || docker exec lianel-ollama curl -sf http://localhost:11434/"; then
+            echo "✅ Ollama container is up and responding"
+          else
+            echo "⚠️  Ollama container may still be starting (check docker logs lianel-ollama on server)"
           fi
 
       - name: Deployment Summary
