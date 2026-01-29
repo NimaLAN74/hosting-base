@@ -1,19 +1,18 @@
 """
 Airflow Service Health Check DAG
 
-Periodically verifies that core Airflow services and functions are healthy:
+Periodically verifies that core Airflow services are healthy:
 - API server (REST API /version)
 - Scheduler (internal health HTTP server)
-- Metadata database (SELECT 1 via config DB URL; works in worker)
 
-Used for monitoring and alerting when any component is down or slow.
+Metadata DB is not checked from tasks: Airflow 3 returns a placeholder URL in task context.
+Used for monitoring and alerting when API or Scheduler is down.
 Schedule: Every 10 minutes.
 """
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.operators.python import PythonOperator
 from airflow.exceptions import AirflowException
-from sqlalchemy import text
+from airflow.providers.standard.operators.python import PythonOperator
 
 default_args = {
     'owner': 'lianel',
@@ -29,7 +28,7 @@ default_args = {
 dag = DAG(
     'airflow_service_health_check',
     default_args=default_args,
-    description='Health check of Airflow API server, scheduler, and metadata DB',
+    description='Health check of Airflow API server and scheduler',
     schedule='*/10 * * * *',  # Every 10 minutes
     catchup=False,
     tags=['health-check', 'monitoring', 'airflow'],
@@ -67,21 +66,6 @@ def check_scheduler_health(**context):
         raise AirflowException(f"Scheduler health check failed: {e}") from e
 
 
-def check_database(**context):
-    """Verify metadata database is reachable (SELECT 1). Uses DB URL from config so it works in worker; avoids ORM/session (restricted in Airflow 3)."""
-    from airflow.configuration import conf
-    from sqlalchemy import create_engine
-
-    try:
-        uri = conf.get("database", "sql_alchemy_conn")
-        engine = create_engine(uri)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"status": "ok"}
-    except Exception as e:
-        raise AirflowException(f"Metadata database health check failed: {e}") from e
-
-
 # Task: API server health
 health_check_api_server = PythonOperator(
     task_id='health_check_api_server',
@@ -96,11 +80,4 @@ health_check_scheduler = PythonOperator(
     dag=dag,
 )
 
-# Task: Metadata database (SELECT 1 via config; works in worker, unlike airflow db check CLI)
-health_check_database = PythonOperator(
-    task_id='health_check_database',
-    python_callable=check_database,
-    dag=dag,
-)
-
-# All checks run in parallel (no dependencies); failure of any task fails the DAG run
+# API and Scheduler checks run in parallel (no DB check: Airflow 3 hides metadata DB URL in tasks)
