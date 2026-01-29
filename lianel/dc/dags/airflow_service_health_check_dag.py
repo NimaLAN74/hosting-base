@@ -4,7 +4,7 @@ Airflow Service Health Check DAG
 Periodically verifies that core Airflow services and functions are healthy:
 - API server (REST API /version)
 - Scheduler (internal health HTTP server)
-- Metadata database (airflow db check)
+- Metadata database (SELECT 1 via config DB URL; works in worker)
 
 Used for monitoring and alerting when any component is down or slow.
 Schedule: Every 10 minutes.
@@ -12,8 +12,8 @@ Schedule: Every 10 minutes.
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.bash import BashOperator
 from airflow.exceptions import AirflowException
+from sqlalchemy import text
 
 default_args = {
     'owner': 'lianel',
@@ -67,6 +67,21 @@ def check_scheduler_health(**context):
         raise AirflowException(f"Scheduler health check failed: {e}") from e
 
 
+def check_database(**context):
+    """Verify metadata database is reachable (SELECT 1). Uses DB URL from config so it works in worker; avoids ORM/session (restricted in Airflow 3)."""
+    from airflow.configuration import conf
+    from sqlalchemy import create_engine
+
+    try:
+        uri = conf.get("database", "sql_alchemy_conn")
+        engine = create_engine(uri)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception as e:
+        raise AirflowException(f"Metadata database health check failed: {e}") from e
+
+
 # Task: API server health
 health_check_api_server = PythonOperator(
     task_id='health_check_api_server',
@@ -81,10 +96,10 @@ health_check_scheduler = PythonOperator(
     dag=dag,
 )
 
-# Task: Metadata database (uses configured SQL Alchemy connection)
-health_check_database = BashOperator(
+# Task: Metadata database (SELECT 1 via config; works in worker, unlike airflow db check CLI)
+health_check_database = PythonOperator(
     task_id='health_check_database',
-    bash_command='airflow db check',
+    python_callable=check_database,
     dag=dag,
 )
 
