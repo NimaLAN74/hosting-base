@@ -283,6 +283,38 @@ jobs:
           echo "3. SSH service issues on remote host"
           exit 1
 
+      - name: Pull Ollama model (tinyllama)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        timeout-minutes: 6
+        run: |
+          echo "Ensuring Ollama has tinyllama model (idempotent)..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec lianel-ollama ollama pull tinyllama"
+          echo "✅ tinyllama ready"
+
+      - name: Restart Comp-AI to use Ollama
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service"
+          echo "✅ Comp-AI restarted with Ollama defaults"
+
       - name: Verify Deployment
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
