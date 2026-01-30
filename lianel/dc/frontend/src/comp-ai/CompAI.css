@@ -78,8 +78,10 @@
 
 .comp-ai-message-assistant {
   align-self: flex-start;
-  background: #f0f4ff;
-  border-left: 4px solid #667eea;
+  background: #fff;
+  border-left: 4px solid #4c51bf;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .comp-ai-message-role {
@@ -90,15 +92,27 @@
   opacity: 0.9;
 }
 
+.comp-ai-message-user .comp-ai-message-role {
+  color: rgba(255, 255, 255, 0.95);
+}
+
 .comp-ai-message-assistant .comp-ai-message-role {
-  color: #667eea;
+  color: #434190;
 }
 
 .comp-ai-message-content {
   white-space: pre-wrap;
   word-wrap: break-word;
-  line-height: 1.5;
+  line-height: 1.6;
   font-size: 14px;
+}
+
+.comp-ai-message-user .comp-ai-message-content {
+  color: #fff;
+}
+
+.comp-ai-message-assistant .comp-ai-message-content {
+  color: #111827;
 }
 
 .comp-ai-request-section,
