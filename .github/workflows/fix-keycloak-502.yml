@@ -1,0 +1,79 @@
+# Fix Keycloak 502 on auth.lianel.se (sync DB password + restart Keycloak).
+# Run manually from Actions when login returns 502 Bad Gateway.
+name: Fix Keycloak 502 on Remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-keycloak:
+    name: Fix Keycloak 502 on remote host
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set in repository secrets"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key ready"
+
+      - name: Fix Keycloak on remote (sync DB password + restart)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            'set -e
+             echo "Pulling latest repo..."
+             cd /root/hosting-base && git fetch origin && git pull origin master || true
+             echo "Syncing Keycloak DB user password from .env..."
+             bash /root/hosting-base/lianel/dc/scripts/maintenance/set-keycloak-db-password-on-server.sh || { echo "⚠️ set-keycloak-db-password failed (e.g. psql not installed); continuing with restart"; }
+             echo "Bringing up Keycloak..."
+             cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml up -d keycloak
+             echo "Waiting for Keycloak to start..."
+             sleep 25
+             echo "Reloading nginx..."
+             docker exec nginx-proxy nginx -s reload 2>/dev/null || true
+             docker ps --filter name=keycloak --format "table {{.Names}}\t{{.Status}}"
+             echo "✅ Keycloak fix steps completed"'
+
+      - name: Verify auth.lianel.se
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Checking Keycloak from remote host..."
+          HTTP=$(ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "curl -s -o /dev/null -w '%{http_code}' -k https://auth.lianel.se/realms/lianel/ 2>/dev/null || echo 000")
+          echo "auth.lianel.se/realms/lianel/ returned HTTP $HTTP"
+          if [ "$HTTP" = "502" ] || [ "$HTTP" = "000" ]; then
+            echo "❌ Keycloak still returning 502 or unreachable. Check docker logs keycloak on the server."
+            exit 1
+          fi
+          echo "✅ Keycloak responding (HTTP $HTTP)"

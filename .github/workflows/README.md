@@ -100,6 +100,22 @@ The workflow is instrumented so you can follow both the **pipeline** and the **d
 - Verify docker-compose.yaml is correct
 - Check container logs: `docker logs lianel-frontend`
 
+### Fix Keycloak 502 on Remote
+
+**File**: `fix-keycloak-502.yml`
+
+When **auth.lianel.se** returns **502 Bad Gateway** (e.g. after a deploy that recreated Keycloak), this workflow SSHs to the remote host and:
+
+1. Pulls the latest repo
+2. Runs `set-keycloak-db-password-on-server.sh` (syncs Postgres `keycloak` user password from `.env`)
+3. Brings up Keycloak (`docker compose -f docker-compose.infra.yaml up -d keycloak`)
+4. Reloads nginx
+5. Verifies auth.lianel.se responds (not 502)
+
+- **Trigger**: Manual only — **Actions → "Fix Keycloak 502 on Remote" → Run workflow**
+- **Secrets**: Same as other deploy workflows (`REMOTE_HOST`, `REMOTE_USER`, `SSH_PRIVATE_KEY`, optional `REMOTE_PORT`)
+- **Server**: Expects repo at `/root/hosting-base` and `.env` at `/root/hosting-base/lianel/dc/.env` with `POSTGRES_PASSWORD` and `KEYCLOAK_DB_PASSWORD`
+
 ### Fix Keycloak Redirect (Remote)
 
 **File**: `fix-keycloak-redirect.yml`
@@ -125,6 +141,18 @@ Applies the Keycloak redirect fix on the remote host via pipeline SSH: copies `d
    ```
 
 3. Or run from the UI: **Actions** → **Fix Keycloak Redirect (Remote)** → **Run workflow**.
+
+### Airflow Webserver Config Deployment
+
+**File**: `deploy-airflow-webserver-config.yml`
+
+Deploys `lianel/dc/config/webserver_config.py` to the remote host and restarts the Airflow apiserver. Uses the pipeline as much as possible; only the copy and restart run on the remote via SSH.
+
+- **Trigger**: Push to `master`/`main` when `lianel/dc/config/webserver_config.py` or this workflow changes; or `workflow_dispatch`.
+- **Steps**: Checkout → validate secrets → setup SSH → scp config to `/root/lianel/dc/config/` → ssh restart `airflow-apiserver` → optionally sync to `/root/hosting-base/lianel/dc/config` if present.
+- **Secrets**: Same as frontend (`REMOTE_HOST`, `REMOTE_USER`, `SSH_PRIVATE_KEY`, optional `REMOTE_PORT`).
+
+For manual deploy from your machine (when pipeline is not used): run `bash lianel/dc/scripts/deployment/deploy-airflow-webserver-config.sh` from repo root (uses `scripts/SSH-CONFIG.md`).
 
 ### Future Enhancements
 - [ ] Add rollback capability

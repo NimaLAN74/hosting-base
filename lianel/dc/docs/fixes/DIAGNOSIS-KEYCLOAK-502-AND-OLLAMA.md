@@ -42,7 +42,11 @@
 
 So the 502 is **not** caused by nginx or by our nginx/config changes. It is caused by **Keycloak failing to start** because of **Postgres authentication failure for user `keycloak`** after Keycloak was recreated.
 
-### What to do (no changes from me)
+### What to do
+
+- **Option 0 – Run the pipeline (recommended)**  
+  In GitHub: **Actions → "Fix Keycloak 502 on Remote" → Run workflow**.  
+  This SSHs to the server, runs `set-keycloak-db-password-on-server.sh` (syncs Postgres `keycloak` user password from `.env`), brings up Keycloak, reloads nginx, and verifies auth.lianel.se. Requires `REMOTE_HOST`, `REMOTE_USER`, `SSH_PRIVATE_KEY` (and optionally `REMOTE_PORT`) in repository secrets.
 
 - **Option A – Align Postgres with current .env**  
   On the server, ensure the Postgres user `keycloak` has the same password as in your `.env` (e.g. `KEYCLOAK_DB_PASSWORD`). If needed, reset the password:
