@@ -6,6 +6,7 @@ mod db;
 mod inference;
 mod rate_limit;
 mod frameworks;
+mod response_cache;
 
 use axum::{
     routing::get,
@@ -25,7 +26,9 @@ use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
+use response_cache::{create_cache, CachedResponse};
 use sqlx::PgPool;
+use std::sync::Arc;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -38,6 +41,7 @@ use sqlx::PgPool;
     components(schemas(
         models::CompAIRequest,
         models::CompAIResponse,
+        models::ChatMessage,
         models::FrameworkItemResponse,
         models::FrameworksListResponse,
         models::RequestHistory,
@@ -94,13 +98,26 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Response cache (optional; disabled when TTL = 0)
+    let response_cache = create_cache(
+        config.comp_ai_response_cache_ttl_secs,
+        config.comp_ai_response_cache_max_entries,
+    ).map(Arc::new);
+    if response_cache.is_some() {
+        tracing::info!(
+            "Response cache: TTL {}s, max {} entries",
+            config.comp_ai_response_cache_ttl_secs,
+            config.comp_ai_response_cache_max_entries,
+        );
+    }
+
     // Protected API routes (auth + rate limit)
     let api_routes = Router::new()
         .route("/api/v1/process", axum::routing::post(process_request))
         .route("/api/v1/history", get(get_request_history))
         .route("/api/v1/frameworks", get(get_frameworks))
         .layer(rate_limit_layer)
-        .with_state((config.clone(), pool));
+        .with_state((config.clone(), pool, response_cache));
 
     // Build the application router
     let app = Router::new()

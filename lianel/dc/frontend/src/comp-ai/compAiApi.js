@@ -25,11 +25,14 @@ export const compAiApi = {
     return res.json();
   },
 
-  async processRequest(prompt, framework = null) {
+  async processRequest(prompt, framework = null, messages = null) {
     try {
       const body = { prompt };
       if (framework && String(framework).trim() !== '') {
         body.framework = String(framework).trim();
+      }
+      if (messages && Array.isArray(messages) && messages.length > 0) {
+        body.messages = messages;
       }
       const res = await authenticatedFetch('/api/v1/comp-ai/process', {
         method: 'POST',

@@ -31,6 +31,23 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH key ready"
 
+      - name: Preflight SSH (retry on timeout)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in 1 2 3; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=25 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+              echo "✅ SSH reachable (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ SSH attempt $i failed (timeout or refused); retrying in 20s..."
+            [ $i -lt 3 ] && sleep 20
+          done
+          echo "❌ SSH to ${REMOTE_HOST} failed after 3 attempts. Check: host up, firewall allows GitHub Actions IPs, REMOTE_PORT correct."
+          exit 1
+
       - name: Fix Keycloak on remote (sync DB password + restart)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
@@ -51,7 +68,7 @@ jobs:
              echo "Bringing up Keycloak..."
              cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml up -d keycloak
              echo "Waiting for Keycloak to start..."
-             sleep 25
+             sleep 40
              echo "Reloading nginx..."
              docker exec nginx-proxy nginx -s reload 2>/dev/null || true
              docker ps --filter name=keycloak --format "table {{.Names}}\t{{.Status}}"
@@ -63,17 +80,32 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Checking Keycloak from remote host..."
-          HTTP=$(ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=30 \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "curl -s -o /dev/null -w '%{http_code}' -k https://auth.lianel.se/realms/lianel/ 2>/dev/null || echo 000")
-          echo "auth.lianel.se/realms/lianel/ returned HTTP $HTTP"
-          if [ "$HTTP" = "502" ] || [ "$HTTP" = "000" ]; then
-            echo "❌ Keycloak still returning 502 or unreachable. Check docker logs keycloak on the server."
-            exit 1
-          fi
-          echo "✅ Keycloak responding (HTTP $HTTP)"
+          echo "Checking Keycloak from remote host (retries with backoff)..."
+          for i in 1 2 3 4 5; do
+            HTTP=$(ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=30 \
+              -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} \
+              "curl -s -o /dev/null -w '%{http_code}' -k https://auth.lianel.se/realms/lianel/ 2>/dev/null || echo 000")
+            echo "  Attempt $i: HTTP $HTTP"
+            if [ "$HTTP" = "200" ] || [ "$HTTP" = "302" ]; then
+              echo "✅ Keycloak responding (HTTP $HTTP)"
+              exit 0
+            fi
+            [ $i -lt 5 ] && echo "  Waiting 15s before retry..." && sleep 15
+          done
+          echo "❌ Keycloak still returning $HTTP after 5 attempts. See 'Dump Keycloak logs' step below."
+          exit 1
+
+      - name: Dump Keycloak logs on failure
+        if: failure()
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "--- Keycloak container status ---"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=30 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker ps -a --filter name=keycloak --format 'table {{.Names}}\t{{.Status}}'; echo '--- Last 80 Keycloak log lines ---'; docker logs keycloak 2>&1 | tail -80"

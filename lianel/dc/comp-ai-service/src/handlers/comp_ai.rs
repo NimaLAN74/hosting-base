@@ -11,11 +11,14 @@ use crate::config::AppConfig;
 use crate::frameworks;
 use crate::inference;
 use crate::models::{
-    CompAIRequest, CompAIResponse, FrameworkItemResponse, FrameworksListResponse,
+    ChatMessage, CompAIRequest, CompAIResponse, FrameworkItemResponse, FrameworksListResponse,
     RequestHistoryQueryParams, RequestHistoryResponse,
 };
-use crate::auth::{extract_user};
+use crate::auth::extract_user;
 use crate::db::queries::{save_request, get_request_history as get_request_history_from_db};
+use crate::response_cache::{self, CachedResponse};
+
+type ResponseCache = Option<std::sync::Arc<moka::sync::Cache<String, CachedResponse>>>;
 
 
 #[utoipa::path(
@@ -33,7 +36,7 @@ use crate::db::queries::{save_request, get_request_history as get_request_histor
 )]
 pub async fn process_request(
     headers: HeaderMap,
-    State((config, pool)): State<(Arc<AppConfig>, PgPool)>,
+    State((config, pool, cache)): State<(Arc<AppConfig>, PgPool, ResponseCache)>,
     Json(request): Json<CompAIRequest>,
 ) -> Result<Json<CompAIResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Authenticate user
@@ -76,57 +79,143 @@ pub async fn process_request(
     }
     let prompt_prefix = framework_id.and_then(frameworks::prompt_prefix);
 
+    // Validate messages if present (for chat): roles user/assistant, non-empty content, total length
+    let messages: Option<Vec<ChatMessage>> = request.messages.as_ref().map(|msgs| {
+        msgs.iter()
+            .filter_map(|m| {
+                let role = m.role.trim().to_lowercase();
+                let content = m.content.trim();
+                if content.is_empty() || (!role.is_empty() && role != "user" && role != "assistant" && role != "system") {
+                    return None;
+                }
+                Some(ChatMessage {
+                    role: if role.is_empty() { "user".to_string() } else { role },
+                    content: content.to_string(),
+                })
+            })
+            .collect()
+    });
+    let use_chat = messages.as_ref().map_or(false, |m| !m.is_empty());
+    let messages_for_key: Option<Vec<ChatMessage>> = if use_chat {
+        let mut full = messages.clone().unwrap_or_default();
+        full.push(ChatMessage { role: "user".to_string(), content: prompt.to_string() });
+        Some(full)
+    } else {
+        None
+    };
+
+    // Cache key: for single-turn use (framework, prompt); for chat use (framework, full messages including new prompt)
+    let cache_key = response_cache::build_cache_key(
+        framework_id,
+        prompt,
+        messages_for_key.as_deref().filter(|_| use_chat),
+    );
+    if let Some(ref c) = cache {
+        if let Some(entry) = c.get(&cache_key) {
+            tracing::info!("Response cache hit for user {}", user.sub);
+            return Ok(Json(CompAIResponse {
+                response: entry.response,
+                model_used: entry.model_used,
+                tokens_used: entry.tokens_used,
+                processing_time_ms: 0,
+            }));
+        }
+    }
+
     let start_time = std::time::Instant::now();
-    
     tracing::info!(
-        "Processing request from user: {} ({})",
+        "Processing request from user: {} ({}) {}",
         user.preferred_username.as_deref().unwrap_or("unknown"),
-        user.sub
+        user.sub,
+        if use_chat { "(chat)" } else { "(single)" }
     );
 
     let (response_text, model_used, tokens_used) = if let (Some(ref url), Some(ref model)) =
         (&config.comp_ai_ollama_url, &config.comp_ai_ollama_model)
     {
-        match inference::generate(
-            url,
-            model,
-            prompt,
-            config.comp_ai_max_tokens,
-            config.comp_ai_temperature,
-            prompt_prefix,
-        )
-        .await
-        {
-            Ok((text, count)) => (text, model.clone(), count),
-            Err(e) => {
-                tracing::error!("Ollama inference failed: {}", e);
-                if config.comp_ai_ollama_fallback_to_mock {
-                    tracing::warn!("Falling back to mock (COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true)");
-                    let response_text = format!("Mock response to: {}", prompt);
-                    let model_used = "mock-model (Ollama unavailable)".to_string();
-                    let tokens_used = Some(100);
-                    (response_text, model_used, tokens_used)
-                } else {
-                    return Err((
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        Json(serde_json::json!({
-                            "error": "Local model unavailable",
-                            "detail": e.to_string()
-                        })),
-                    ));
+        if use_chat {
+            // Build (role, content) list: optional system from framework prefix, then history, then new user prompt
+            let mut ollama_messages: Vec<(String, String)> = Vec::new();
+            if let Some(prefix) = prompt_prefix {
+                ollama_messages.push(("system".to_string(), prefix.to_string()));
+            }
+            for m in messages.as_deref().unwrap_or(&[]) {
+                ollama_messages.push((m.role.clone(), m.content.clone()));
+            }
+            ollama_messages.push(("user".to_string(), prompt.to_string()));
+            match inference::chat(
+                url,
+                model,
+                &ollama_messages,
+                config.comp_ai_max_tokens,
+                config.comp_ai_temperature,
+            )
+            .await
+            {
+                Ok((text, count)) => (text, model.clone(), count),
+                Err(e) => {
+                    tracing::error!("Ollama chat failed: {}", e);
+                    if config.comp_ai_ollama_fallback_to_mock {
+                        let response_text = format!("Mock response to: {}", prompt);
+                        (response_text, "mock-model (Ollama unavailable)".to_string(), Some(100))
+                    } else {
+                        return Err((
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(serde_json::json!({
+                                "error": "Local model unavailable",
+                                "detail": e.to_string()
+                            })),
+                        ));
+                    }
+                }
+            }
+        } else {
+            match inference::generate(
+                url,
+                model,
+                prompt,
+                config.comp_ai_max_tokens,
+                config.comp_ai_temperature,
+                prompt_prefix,
+            )
+            .await
+            {
+                Ok((text, count)) => (text, model.clone(), count),
+                Err(e) => {
+                    tracing::error!("Ollama inference failed: {}", e);
+                    if config.comp_ai_ollama_fallback_to_mock {
+                        let response_text = format!("Mock response to: {}", prompt);
+                        (response_text, "mock-model (Ollama unavailable)".to_string(), Some(100))
+                    } else {
+                        return Err((
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(serde_json::json!({
+                                "error": "Local model unavailable",
+                                "detail": e.to_string()
+                            })),
+                        ));
+                    }
                 }
             }
         }
     } else {
-        // No Ollama configured: mock response
         let response_text = format!("Mock response to: {}", prompt);
-        let model_used = "mock-model".to_string();
-        let tokens_used = Some(100);
-        (response_text, model_used, tokens_used)
+        (response_text, "mock-model".to_string(), Some(100))
     };
 
     let processing_time_ms = start_time.elapsed().as_millis() as u64;
-    
+
+    if let Some(ref c) = cache {
+        c.insert(
+            cache_key,
+            CachedResponse {
+                response: response_text.clone(),
+                model_used: model_used.clone(),
+                tokens_used,
+            },
+        );
+    }
+
     let response = CompAIResponse {
         response: response_text.clone(),
         model_used: model_used.clone(),
@@ -134,7 +223,6 @@ pub async fn process_request(
         processing_time_ms,
     };
 
-    // Save request to database
     if let Err(e) = save_request(
         &pool,
         &user.sub,
@@ -145,9 +233,10 @@ pub async fn process_request(
         processing_time_ms as i64,
         "completed",
         None,
-    ).await {
+    )
+    .await
+    {
         tracing::error!("Failed to save request to database: {}", e);
-        // Continue anyway - don't fail the request if DB save fails
     }
 
     Ok(Json(response))
@@ -170,7 +259,7 @@ pub async fn process_request(
 )]
 pub async fn get_request_history(
     headers: HeaderMap,
-    State((config, pool)): State<(Arc<AppConfig>, PgPool)>,
+    State((config, pool, _cache)): State<(Arc<AppConfig>, PgPool, ResponseCache)>,
     Query(params): Query<RequestHistoryQueryParams>,
 ) -> Result<Json<RequestHistoryResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Authenticate user
@@ -214,7 +303,7 @@ pub async fn get_request_history(
         (status = 200, description = "List of supported compliance frameworks", body = FrameworksListResponse),
     )
 )]
-pub async fn get_frameworks(State(_state): State<(Arc<AppConfig>, PgPool)>) -> Json<FrameworksListResponse> {
+pub async fn get_frameworks(State((_config, _pool, _cache)): State<(Arc<AppConfig>, PgPool, ResponseCache)>) -> Json<FrameworksListResponse> {
     let frameworks = frameworks::list()
         .iter()
         .map(|f| FrameworkItemResponse {

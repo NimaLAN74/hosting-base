@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
 import './CompAI.css';
@@ -7,16 +7,30 @@ function CompAI() {
   const [prompt, setPrompt] = useState('');
   const [framework, setFramework] = useState('');
   const [frameworks, setFrameworks] = useState([]);
+  const [conversation, setConversation] = useState([]); // [{ userMessage, assistantResponse }, ...]
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [processingTime, setProcessingTime] = useState(null);
+  const threadEndRef = useRef(null);
 
   useEffect(() => {
     compAiApi.getFrameworks().then((data) => {
       setFrameworks(data.frameworks || []);
     }).catch(() => setFrameworks([]));
   }, []);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversation, response]);
+
+  const handleNewConversation = () => {
+    setConversation([]);
+    setResponse(null);
+    setError(null);
+    setProcessingTime(null);
+    setPrompt('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -31,12 +45,31 @@ function CompAI() {
     setProcessingTime(null);
 
     const startTime = Date.now();
+    const userMessage = prompt.trim();
+
+    // Build messages for API: previous turns only (backend appends current prompt as last user message)
+    const messagesForApi =
+      conversation.length > 0
+        ? conversation.flatMap(({ userMessage: u, assistantResponse: a }) => [
+            { role: 'user', content: u },
+            { role: 'assistant', content: a },
+          ])
+        : null;
 
     try {
-      const result = await compAiApi.processRequest(prompt, framework || null);
+      const result = await compAiApi.processRequest(
+        userMessage,
+        framework || null,
+        messagesForApi
+      );
       const endTime = Date.now();
       setProcessingTime(endTime - startTime);
       setResponse(result);
+      setConversation((prev) => [
+        ...prev,
+        { userMessage, assistantResponse: result.response || result.text || '' },
+      ]);
+      setPrompt('');
     } catch (err) {
       setError(err.message || 'Failed to process request');
     } finally {
@@ -48,8 +81,39 @@ function CompAI() {
     <PageTemplate title="Comp AI Service" subtitle="AI-powered analysis and insights">
       <div className="comp-ai-container">
         <div className="comp-ai-main">
+          {(conversation.length > 0 || response) && (
+            <div className="comp-ai-conversation-section">
+              <div className="comp-ai-conversation-header">
+                <h2>Conversation</h2>
+                <button
+                  type="button"
+                  onClick={handleNewConversation}
+                  disabled={loading}
+                  className="comp-ai-new-conversation-btn"
+                >
+                  New conversation
+                </button>
+              </div>
+              <div className="comp-ai-thread">
+                {conversation.map((turn, i) => (
+                  <React.Fragment key={i}>
+                    <div className="comp-ai-message comp-ai-message-user">
+                      <span className="comp-ai-message-role">You</span>
+                      <div className="comp-ai-message-content">{turn.userMessage}</div>
+                    </div>
+                    <div className="comp-ai-message comp-ai-message-assistant">
+                      <span className="comp-ai-message-role">Comp-AI</span>
+                      <div className="comp-ai-message-content">{turn.assistantResponse}</div>
+                    </div>
+                  </React.Fragment>
+                ))}
+                <div ref={threadEndRef} />
+              </div>
+            </div>
+          )}
+
           <div className="comp-ai-request-section">
-            <h2>Submit Request</h2>
+            <h2>{conversation.length > 0 ? 'Follow-up' : 'Submit Request'}</h2>
             <form onSubmit={handleSubmit} className="comp-ai-form">
               <div className="form-group">
                 <label htmlFor="framework">Compliance framework (optional):</label>
@@ -72,8 +136,12 @@ function CompAI() {
                   id="prompt"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="e.g., Analyze the energy consumption trends for Sweden in 2023..."
-                  rows={6}
+                  placeholder={
+                    conversation.length > 0
+                      ? 'Ask a follow-up...'
+                      : 'e.g., What does CC6.1 require for logical access?'
+                  }
+                  rows={4}
                   disabled={loading}
                   className="comp-ai-textarea"
                 />
@@ -83,7 +151,7 @@ function CompAI() {
                 disabled={loading || !prompt.trim()}
                 className="comp-ai-submit-btn"
               >
-                {loading ? 'Processing...' : 'Submit Request'}
+                {loading ? 'Processing...' : conversation.length > 0 ? 'Send' : 'Submit Request'}
               </button>
             </form>
 
@@ -93,29 +161,12 @@ function CompAI() {
               </div>
             )}
 
-            {processingTime && (
+            {processingTime != null && (
               <div className="comp-ai-meta">
                 Processing time: {processingTime}ms
               </div>
             )}
           </div>
-
-          {response && (
-            <div className="comp-ai-response-section">
-              <h2>Response</h2>
-              <div className="comp-ai-response">
-                <div className="comp-ai-response-content">
-                  {response.response || response.text || JSON.stringify(response, null, 2)}
-                </div>
-                {response.model_used && (
-                  <div className="comp-ai-response-meta">
-                    <span>Model: {response.model_used}</span>
-                    {response.tokens_used && <span>Tokens: {response.tokens_used}</span>}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="comp-ai-sidebar">

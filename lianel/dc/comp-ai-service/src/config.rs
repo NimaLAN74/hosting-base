@@ -30,6 +30,10 @@ pub struct AppConfig {
     pub comp_ai_rate_limit_window_secs: u64,
     /// Max prompt length in characters (0 = no limit).
     pub comp_ai_max_prompt_len: usize,
+    /// Response cache TTL in seconds (0 = cache disabled).
+    pub comp_ai_response_cache_ttl_secs: u64,
+    /// Response cache max entries (when cache enabled).
+    pub comp_ai_response_cache_max_entries: u64,
 }
 
 impl AppConfig {
@@ -98,6 +102,14 @@ impl AppConfig {
                 .unwrap_or_else(|_| "32768".to_string())
                 .parse()
                 .unwrap_or(32768),
+            comp_ai_response_cache_ttl_secs: env::var("COMP_AI_RESPONSE_CACHE_TTL_SECS")
+                .unwrap_or_else(|_| "300".to_string())
+                .parse()
+                .unwrap_or(300),
+            comp_ai_response_cache_max_entries: env::var("COMP_AI_RESPONSE_CACHE_MAX_ENTRIES")
+                .unwrap_or_else(|_| "1000".to_string())
+                .parse()
+                .unwrap_or(1000),
         })
     }
 }

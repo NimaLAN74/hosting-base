@@ -2,11 +2,20 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use chrono::{DateTime, Utc};
 
+/// One message in a conversation (for multi-turn chat).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatMessage {
+    pub role: String,   // "user" | "assistant"
+    pub content: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompAIRequest {
     pub prompt: String,
     /// Optional compliance framework id (e.g. soc2, iso27001, gdpr). Use GET /api/v1/frameworks for list.
     pub framework: Option<String>,
+    /// Optional conversation history. When present, backend uses Ollama /api/chat for multi-turn context. Chronological order; last item should be the new user message (or backend appends prompt).
+    pub messages: Option<Vec<ChatMessage>>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
     pub model: Option<String>,
