@@ -26,9 +26,8 @@ use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
-use response_cache::{create_cache, CachedResponse};
+use response_cache::create_cache;
 use sqlx::PgPool;
-use std::sync::Arc;
 
 #[derive(OpenApi)]
 #[openapi(
