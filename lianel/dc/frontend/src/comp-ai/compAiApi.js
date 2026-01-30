@@ -29,6 +29,11 @@ export const compAiApi = {
         body: JSON.stringify({ prompt }),
       });
       if (!res.ok) {
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          const secs = data.retry_after_secs || 60;
+          throw new Error(`Too many requests. Please try again in ${secs} seconds.`);
+        }
         const errorText = await res.text().catch(() => 'Unknown error');
         throw new Error(`Failed to process request: ${res.status} ${res.statusText} - ${errorText}`);
       }
@@ -47,6 +52,11 @@ export const compAiApi = {
         `/api/v1/comp-ai/history${buildQuery({ limit, offset })}`
       );
       if (!res.ok) {
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          const secs = data.retry_after_secs || 60;
+          throw new Error(`Too many requests. Please try again in ${secs} seconds.`);
+        }
         const errorText = await res.text().catch(() => 'Unknown error');
         throw new Error(`Failed to fetch request history: ${res.status} ${res.statusText} - ${errorText}`);
       }

@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
-**Date**: January 23, 2026  
-**Status**: ✅ **Phase 1 Complete**
+**Date**: January 2026  
+**Status**: ✅ **Phase 1 Complete** · ⏳ **Phase 2 (Core product) In Progress**
 
 ---
 
@@ -57,13 +57,19 @@
    - [x] Add database queries for history
    - [ ] Test database operations
 
-3. **AI Processing Implementation**
-   - [ ] Integrate actual AI model/API
-   - [ ] Implement request processing logic
-   - [ ] Add error handling
-   - [ ] Add rate limiting
+3. **AI Processing Implementation** ✅
+   - [x] Integrate Ollama (local model)
+   - [x] Implement request processing logic
+   - [x] Add error handling (fallback to mock when Ollama unavailable)
+   - [x] Add rate limiting (per-IP, configurable; see § Rate limiting below)
 
-4. **Testing & Deployment**
+4. **Rate limiting** ✅
+   - [x] In-memory per-IP rate limit (X-Real-IP / X-Forwarded-For)
+   - [x] Config: `COMP_AI_RATE_LIMIT_REQUESTS` (default 60), `COMP_AI_RATE_LIMIT_WINDOW_SECS` (default 60); set to 0 to disable
+   - [x] 429 response with `Retry-After` and JSON body
+   - [x] Frontend handles 429 with user-friendly message
+
+5. **Testing & Deployment**
    - [ ] Local testing
    - [ ] Build Docker image
    - [ ] Deploy to remote host

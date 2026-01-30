@@ -24,6 +24,10 @@ pub struct AppConfig {
     pub comp_ai_ollama_fallback_to_mock: bool,
     pub comp_ai_max_tokens: u32,
     pub comp_ai_temperature: f64,
+    /// Max requests per window for rate limiting (0 = disabled).
+    pub comp_ai_rate_limit_requests: u32,
+    /// Rate limit window in seconds.
+    pub comp_ai_rate_limit_window_secs: u64,
 }
 
 impl AppConfig {
@@ -80,6 +84,14 @@ impl AppConfig {
                 .unwrap_or_else(|_| "0.7".to_string())
                 .parse()
                 .unwrap_or(0.7),
+            comp_ai_rate_limit_requests: env::var("COMP_AI_RATE_LIMIT_REQUESTS")
+                .unwrap_or_else(|_| "60".to_string())
+                .parse()
+                .unwrap_or(60),
+            comp_ai_rate_limit_window_secs: env::var("COMP_AI_RATE_LIMIT_WINDOW_SECS")
+                .unwrap_or_else(|_| "60".to_string())
+                .parse()
+                .unwrap_or(60),
         })
     }
 }

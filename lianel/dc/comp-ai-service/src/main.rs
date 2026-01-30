@@ -4,6 +4,7 @@ mod handlers;
 mod auth;
 mod db;
 mod inference;
+mod rate_limit;
 
 use axum::{
     routing::get,
@@ -20,8 +21,9 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use config::AppConfig;
 use handlers::health::health_check;
-use handlers::comp_ai::process_request;
+use handlers::comp_ai::{get_request_history, process_request};
 use db::create_pool;
+use rate_limit::{RateLimitLayer, RateLimitState};
 use sqlx::PgPool;
 
 #[derive(OpenApi)]
@@ -74,15 +76,34 @@ async fn main() -> anyhow::Result<()> {
     sqlx::query("SELECT 1").execute(&pool).await?;
     tracing::info!("Database connection verified");
 
+    // Rate limiting for API routes (per-IP from X-Real-IP / X-Forwarded-For)
+    let rate_limit = RateLimitState::new(
+        config.comp_ai_rate_limit_requests,
+        config.comp_ai_rate_limit_window_secs,
+    );
+    let rate_limit_layer = RateLimitLayer::new(rate_limit);
+    if config.comp_ai_rate_limit_requests > 0 {
+        tracing::info!(
+            "Rate limit: {} requests per {} seconds (per client IP)",
+            config.comp_ai_rate_limit_requests,
+            config.comp_ai_rate_limit_window_secs,
+        );
+    }
+
+    // Protected API routes (auth + rate limit)
+    let api_routes = Router::new()
+        .route("/api/v1/process", axum::routing::post(process_request))
+        .route("/api/v1/history", get(get_request_history))
+        .layer(rate_limit_layer)
+        .with_state((config.clone(), pool));
+
     // Build the application router
     let app = Router::new()
         // Public routes (no authentication required)
         .route("/health", get(health_check))
-        // Protected routes (authentication required)
-        .route("/api/v1/process", axum::routing::post(process_request))
-        .route("/api/v1/history", get(handlers::comp_ai::get_request_history))
         // Swagger UI (public)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
+        .merge(api_routes)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -92,8 +113,7 @@ async fn main() -> anyhow::Result<()> {
                         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
-        )
-        .with_state((config.clone(), pool));
+        );
 
     // Start the server
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;

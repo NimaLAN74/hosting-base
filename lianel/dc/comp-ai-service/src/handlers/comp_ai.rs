@@ -23,6 +23,7 @@ use crate::db::queries::{save_request, get_request_history as get_request_histor
         (status = 200, description = "Request processed successfully", body = CompAIResponse),
         (status = 400, description = "Invalid request"),
         (status = 401, description = "Unauthorized"),
+        (status = 429, description = "Too many requests (rate limit)"),
         (status = 500, description = "Internal server error")
     )
 )]
@@ -122,6 +123,7 @@ pub async fn process_request(
     responses(
         (status = 200, description = "Request history retrieved successfully"),
         (status = 401, description = "Unauthorized"),
+        (status = 429, description = "Too many requests (rate limit)"),
         (status = 500, description = "Internal server error")
     )
 )]
