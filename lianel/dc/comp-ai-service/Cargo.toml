@@ -20,5 +20,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
-moka = "0.12"
+moka = { version = "0.12", features = ["sync"] }
 sha2 = "0.10"
