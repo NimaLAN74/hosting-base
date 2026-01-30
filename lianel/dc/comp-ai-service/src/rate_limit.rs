@@ -10,6 +10,7 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::RwLock;
