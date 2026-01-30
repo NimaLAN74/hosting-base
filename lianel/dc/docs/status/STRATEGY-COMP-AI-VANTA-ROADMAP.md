@@ -39,7 +39,7 @@ Current Comp-AI service is the foundation: auth (Keycloak), request history (DB)
 | Phase | Focus | Status |
 |-------|--------|--------|
 | **1. Foundation** | Service, Keycloak, DB, AI (Ollama/mock), API, deploy | ✅ Done |
-| **2. Core product** | Rate limiting ✅, history UI, API stability | ⏳ In progress |
+| **2. Core product** | Rate limiting ✅, stable AI doc ✅, history verification ✅, API hardening ✅ | ✅ Done |
 | **3. Compliance features** | Compliance-oriented prompts, control/evidence concepts, first “compliance assistant” flows | Planned |
 | **4. Integrations & evidence** | Tool integrations, evidence collection, policy/control mapping (Vanta-like) | Future |
 | **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | Future |
@@ -70,11 +70,11 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 **Immediate next step**: **Phase 2 – Core product**
 
 1. **Rate limiting** ✅ – Per-IP rate limit on `/api/v1/process` and `/api/v1/history` (configurable; 429 + Retry-After).  
-2. **Stable AI behavior** – Ensure Ollama (or hosted) is default in production; document model choice and fallback.  
-3. **History & UX** – Verify request history API and frontend (CompAI history view) work end-to-end; fix gaps.  
-4. **API hardening** – Error handling, validation, optional retries; keep OpenAPI/Swagger up to date.
+2. **Stable AI behavior** ✅ – Ollama/tinyllama default (compose); documented in `COMP-AI-MODEL-USAGE-AND-SCALING.md` §0; fallback to mock when Ollama fails.  
+3. **History & UX** ✅ – History API and frontend verified; doc and script `scripts/monitoring/verify-comp-ai-history.sh` for remote verification.  
+4. **API hardening** ✅ – Prompt validation (required, max length 32768); consistent error JSON `{"error": "..."}`.
 
-After Phase 2, move to **Phase 3** (compliance-oriented prompts and first control/evidence concepts).
+**Phase 2 complete.** Next: **Phase 3** (compliance-oriented prompts and first control/evidence concepts).
 
 ---
 

@@ -36,6 +36,26 @@ pub async fn process_request(
     let user = extract_user(&headers, config.clone())
         .await
         .map_err(|e| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    // Validate prompt
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Prompt is required and cannot be empty"})),
+        ));
+    }
+    if config.comp_ai_max_prompt_len > 0 && prompt.len() > config.comp_ai_max_prompt_len {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Prompt too long",
+                "max_length": config.comp_ai_max_prompt_len,
+                "received": prompt.len()
+            })),
+        ));
+    }
+
     let start_time = std::time::Instant::now();
     
     tracing::info!(
@@ -50,7 +70,7 @@ pub async fn process_request(
         match inference::generate(
             url,
             model,
-            &request.prompt,
+            prompt,
             config.comp_ai_max_tokens,
             config.comp_ai_temperature,
         )
@@ -61,7 +81,7 @@ pub async fn process_request(
                 tracing::error!("Ollama inference failed: {}", e);
                 if config.comp_ai_ollama_fallback_to_mock {
                     tracing::warn!("Falling back to mock (COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true)");
-                    let response_text = format!("Mock response to: {}", request.prompt);
+                    let response_text = format!("Mock response to: {}", prompt);
                     let model_used = "mock-model (Ollama unavailable)".to_string();
                     let tokens_used = Some(100);
                     (response_text, model_used, tokens_used)
@@ -78,7 +98,7 @@ pub async fn process_request(
         }
     } else {
         // No Ollama configured: mock response
-        let response_text = format!("Mock response to: {}", request.prompt);
+        let response_text = format!("Mock response to: {}", prompt);
         let model_used = "mock-model".to_string();
         let tokens_used = Some(100);
         (response_text, model_used, tokens_used)
@@ -97,7 +117,7 @@ pub async fn process_request(
     if let Err(e) = save_request(
         &pool,
         &user.sub,
-        &request.prompt,
+        prompt,
         Some(&response_text),
         Some(&model_used),
         tokens_used.map(|t| t as i32),

@@ -6,6 +6,18 @@
 
 ---
 
+## 0. Stable AI (current default – pipeline)
+
+**What the pipeline deploys today:**
+
+- **Default model**: Ollama with **tinyllama**. Compose defaults: `COMP_AI_OLLAMA_URL=http://ollama:11434`, `COMP_AI_OLLAMA_MODEL=tinyllama` (no `.env` needed).
+- **Fallback**: If Ollama is configured but the request fails (container down, model not pulled), the API returns a **mock response** instead of 503 (`COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true`). Set to `false` to return 503 when Ollama is unavailable.
+- **Pipeline**: Deploy workflow pulls and starts Ollama (`--profile local-model`), runs `ollama pull tinyllama`, then restarts Comp-AI so it uses Ollama by default.
+
+**Summary:** After a successful deploy, Comp-AI uses Ollama/tinyllama when the container and model are available; otherwise it falls back to mock. Override with `COMP_AI_OLLAMA_URL` / `COMP_AI_OLLAMA_MODEL` in `.env` if needed.
+
+---
+
 ## 1. Strategy Summary
 
 - **Start**: Single KVM2 VPS; Comp-AI uses a **hosted API** (OpenAI or Azure). No local model on the host.

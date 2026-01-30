@@ -69,12 +69,23 @@
    - [x] 429 response with `Retry-After` and JSON body
    - [x] Frontend handles 429 with user-friendly message
 
-5. **Testing & Deployment**
-   - [ ] Local testing
-   - [ ] Build Docker image
-   - [ ] Deploy to remote host
-   - [ ] Verify service health
-   - [ ] Test API endpoints
+5. **Stable AI (defaults)** ✅
+   - [x] Ollama is default (compose: `COMP_AI_OLLAMA_URL=http://ollama:11434`, `COMP_AI_OLLAMA_MODEL=tinyllama`)
+   - [x] Fallback to mock when Ollama fails (`COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true`); see `COMP-AI-MODEL-USAGE-AND-SCALING.md` §0
+
+6. **History & UX verification**
+   - [x] History API: `GET /api/v1/history?limit=&offset=` (auth required); frontend: Comp AI → History
+   - **How to verify on remote**: Log in to www.lianel.se, open Comp AI, submit a prompt, then open Comp AI → History and confirm the request appears with response and model.
+
+7. **API hardening** ✅
+   - [x] Prompt validation: required (non-empty after trim), max length `COMP_AI_MAX_PROMPT_LEN` (default 32768); 400 with `{"error": "..."}` or `{"error": "Prompt too long", "max_length": N, "received": M}`
+   - [x] Consistent error JSON: `{"error": "..."}` (optional `detail` for 503)
+
+8. **Testing & Deployment**
+   - [ ] Build Docker image (pipeline)
+   - [ ] Deploy to remote host (pipeline)
+   - [ ] Verify service health (pipeline)
+   - [ ] Test API endpoints (manual or E2E)
 
 ---
 

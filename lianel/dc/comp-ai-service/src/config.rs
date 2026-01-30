@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub comp_ai_rate_limit_requests: u32,
     /// Rate limit window in seconds.
     pub comp_ai_rate_limit_window_secs: u64,
+    /// Max prompt length in characters (0 = no limit).
+    pub comp_ai_max_prompt_len: usize,
 }
 
 impl AppConfig {
@@ -92,6 +94,10 @@ impl AppConfig {
                 .unwrap_or_else(|_| "60".to_string())
                 .parse()
                 .unwrap_or(60),
+            comp_ai_max_prompt_len: env::var("COMP_AI_MAX_PROMPT_LEN")
+                .unwrap_or_else(|_| "32768".to_string())
+                .parse()
+                .unwrap_or(32768),
         })
     }
 }
