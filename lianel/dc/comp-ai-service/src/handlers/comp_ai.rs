@@ -8,9 +8,13 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use utoipa::ToSchema;
 use crate::config::AppConfig;
+use crate::frameworks;
 use crate::inference;
-use crate::models::{CompAIRequest, CompAIResponse, RequestHistoryQueryParams, RequestHistoryResponse};
-use crate::auth::{AuthenticatedUser, extract_user};
+use crate::models::{
+    CompAIRequest, CompAIResponse, FrameworkItemResponse, FrameworksListResponse,
+    RequestHistoryQueryParams, RequestHistoryResponse,
+};
+use crate::auth::{extract_user};
 use crate::db::queries::{save_request, get_request_history as get_request_history_from_db};
 
 
@@ -56,6 +60,22 @@ pub async fn process_request(
         ));
     }
 
+    // Validate framework (optional; if set must be in allowlist)
+    let framework_id = request.framework.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let Some(fid) = framework_id {
+        if !frameworks::is_supported(fid) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Unsupported framework",
+                    "framework": fid,
+                    "supported": frameworks::list().iter().map(|f| f.id).collect::<Vec<_>>()
+                })),
+            ));
+        }
+    }
+    let prompt_prefix = framework_id.and_then(frameworks::prompt_prefix);
+
     let start_time = std::time::Instant::now();
     
     tracing::info!(
@@ -73,6 +93,7 @@ pub async fn process_request(
             prompt,
             config.comp_ai_max_tokens,
             config.comp_ai_temperature,
+            prompt_prefix,
         )
         .await
         {
@@ -183,4 +204,24 @@ pub async fn get_request_history(
             ))
         }
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/frameworks",
+    tag = "comp-ai",
+    responses(
+        (status = 200, description = "List of supported compliance frameworks", body = FrameworksListResponse),
+    )
+)]
+pub async fn get_frameworks(State(_state): State<(Arc<AppConfig>, PgPool)>) -> Json<FrameworksListResponse> {
+    let frameworks = frameworks::list()
+        .iter()
+        .map(|f| FrameworkItemResponse {
+            id: f.id.to_string(),
+            name: f.name.to_string(),
+            description: f.description.to_string(),
+        })
+        .collect();
+    Json(FrameworksListResponse { frameworks })
 }

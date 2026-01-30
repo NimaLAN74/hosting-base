@@ -5,9 +5,24 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompAIRequest {
     pub prompt: String,
+    /// Optional compliance framework id (e.g. soc2, iso27001, gdpr). Use GET /api/v1/frameworks for list.
+    pub framework: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
     pub model: Option<String>,
+}
+
+/// One framework in the list returned by GET /api/v1/frameworks.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FrameworkItemResponse {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FrameworksListResponse {
+    pub frameworks: Vec<FrameworkItemResponse>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

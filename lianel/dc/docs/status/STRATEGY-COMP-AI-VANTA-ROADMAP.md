@@ -40,7 +40,7 @@ Current Comp-AI service is the foundation: auth (Keycloak), request history (DB)
 |-------|--------|--------|
 | **1. Foundation** | Service, Keycloak, DB, AI (Ollama/mock), API, deploy | ✅ Done |
 | **2. Core product** | Rate limiting ✅, stable AI doc ✅, history verification ✅, API hardening ✅ | ✅ Done |
-| **3. Compliance features** | Compliance-oriented prompts, control/evidence concepts, first “compliance assistant” flows | Planned |
+| **3. Compliance features** | Framework-aware prompts, GET /api/v1/frameworks, frontend selector | Done (first) |
 | **4. Integrations & evidence** | Tool integrations, evidence collection, policy/control mapping (Vanta-like) | Future |
 | **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | Future |
 

@@ -1,14 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
 import './CompAI.css';
 
 function CompAI() {
   const [prompt, setPrompt] = useState('');
+  const [framework, setFramework] = useState('');
+  const [frameworks, setFrameworks] = useState([]);
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [processingTime, setProcessingTime] = useState(null);
+
+  useEffect(() => {
+    compAiApi.getFrameworks().then((data) => {
+      setFrameworks(data.frameworks || []);
+    }).catch(() => setFrameworks([]));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,7 +33,7 @@ function CompAI() {
     const startTime = Date.now();
 
     try {
-      const result = await compAiApi.processRequest(prompt);
+      const result = await compAiApi.processRequest(prompt, framework || null);
       const endTime = Date.now();
       setProcessingTime(endTime - startTime);
       setResponse(result);
@@ -43,6 +51,21 @@ function CompAI() {
           <div className="comp-ai-request-section">
             <h2>Submit Request</h2>
             <form onSubmit={handleSubmit} className="comp-ai-form">
+              <div className="form-group">
+                <label htmlFor="framework">Compliance framework (optional):</label>
+                <select
+                  id="framework"
+                  value={framework}
+                  onChange={(e) => setFramework(e.target.value)}
+                  disabled={loading}
+                  className="comp-ai-select"
+                >
+                  <option value="">General (no framework)</option>
+                  {(frameworks || []).map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="form-group">
                 <label htmlFor="prompt">Enter your prompt or question:</label>
                 <textarea

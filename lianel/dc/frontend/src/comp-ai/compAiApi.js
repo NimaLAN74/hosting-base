@@ -19,14 +19,24 @@ export const compAiApi = {
     return res.json();
   },
 
-  async processRequest(prompt) {
+  async getFrameworks() {
+    const res = await fetch('/api/v1/comp-ai/frameworks');
+    if (!res.ok) throw new Error('Failed to fetch frameworks');
+    return res.json();
+  },
+
+  async processRequest(prompt, framework = null) {
     try {
+      const body = { prompt };
+      if (framework && String(framework).trim() !== '') {
+        body.framework = String(framework).trim();
+      }
       const res = await authenticatedFetch('/api/v1/comp-ai/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         if (res.status === 429) {

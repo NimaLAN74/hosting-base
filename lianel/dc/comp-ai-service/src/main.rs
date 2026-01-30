@@ -5,6 +5,7 @@ mod auth;
 mod db;
 mod inference;
 mod rate_limit;
+mod frameworks;
 
 use axum::{
     routing::get,
@@ -21,7 +22,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use config::AppConfig;
 use handlers::health::health_check;
-use handlers::comp_ai::{get_request_history, process_request};
+use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
 use sqlx::PgPool;
@@ -32,10 +33,13 @@ use sqlx::PgPool;
         handlers::health::health_check,
         handlers::comp_ai::process_request,
         handlers::comp_ai::get_request_history,
+        handlers::comp_ai::get_frameworks,
     ),
     components(schemas(
         models::CompAIRequest,
         models::CompAIResponse,
+        models::FrameworkItemResponse,
+        models::FrameworksListResponse,
         models::RequestHistory,
         models::RequestHistoryResponse,
         models::RequestHistoryQueryParams,
@@ -94,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
     let api_routes = Router::new()
         .route("/api/v1/process", axum::routing::post(process_request))
         .route("/api/v1/history", get(get_request_history))
+        .route("/api/v1/frameworks", get(get_frameworks))
         .layer(rate_limit_layer)
         .with_state((config.clone(), pool));
 

@@ -27,17 +27,23 @@ struct GenerateResponse {
 }
 
 /// Call Ollama /api/generate. Returns (response_text, token_count).
+/// If `prompt_prefix` is Some, it is prepended to the user prompt (e.g. compliance context).
 pub async fn generate(
     base_url: &str,
     model: &str,
     prompt: &str,
     max_tokens: u32,
     temperature: f64,
+    prompt_prefix: Option<&str>,
 ) -> Result<(String, Option<u32>)> {
+    let full_prompt = match prompt_prefix {
+        Some(prefix) => format!("{}\n\nUser question: {}", prefix, prompt),
+        None => prompt.to_string(),
+    };
     let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
     let body = GenerateRequest {
         model: model.to_string(),
-        prompt: prompt.to_string(),
+        prompt: full_prompt,
         stream: false,
         options: GenerateOptions {
             num_predict: max_tokens,

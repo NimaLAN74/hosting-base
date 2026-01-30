@@ -81,7 +81,13 @@
    - [x] Prompt validation: required (non-empty after trim), max length `COMP_AI_MAX_PROMPT_LEN` (default 32768); 400 with `{"error": "..."}` or `{"error": "Prompt too long", "max_length": N, "received": M}`
    - [x] Consistent error JSON: `{"error": "..."}` (optional `detail` for 503)
 
-8. **Testing & Deployment**
+8. **Phase 3: Compliance features (first)** ✅
+   - [x] Optional `framework` in POST /api/v1/process (soc2, iso27001, gdpr, hipaa, pci_dss, nist_csf)
+   - [x] GET /api/v1/frameworks returns list of supported frameworks (id, name, description)
+   - [x] Inference: compliance context prefix prepended to prompt when framework is set
+   - [x] Frontend: framework dropdown (General + list from API), sent in request body
+
+9. **Testing & Deployment**
    - [ ] Build Docker image (pipeline)
    - [ ] Deploy to remote host (pipeline)
    - [ ] Verify service health (pipeline)
