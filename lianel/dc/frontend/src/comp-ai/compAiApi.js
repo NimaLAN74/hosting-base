@@ -80,5 +80,52 @@ export const compAiApi = {
       }
       throw err;
     }
-  }
+  },
+
+  // Phase 4: Controls & Evidence
+  async getControls() {
+    const res = await authenticatedFetch('/api/v1/controls');
+    if (!res.ok) throw new Error('Failed to fetch controls');
+    return res.json();
+  },
+
+  async getControl(id) {
+    const res = await authenticatedFetch(`/api/v1/controls/${id}`);
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Control not found');
+      throw new Error('Failed to fetch control');
+    }
+    return res.json();
+  },
+
+  async getEvidence({ control_id, limit = 50, offset = 0 } = {}) {
+    const res = await authenticatedFetch(
+      `/api/v1/evidence${buildQuery({ control_id, limit, offset })}`
+    );
+    if (!res.ok) throw new Error('Failed to fetch evidence');
+    return res.json();
+  },
+
+  async postEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('Failed to add evidence');
+    return res.json();
+  },
+
+  async postGitHubEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/github/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect GitHub evidence');
+    }
+    return res.json();
+  },
 };

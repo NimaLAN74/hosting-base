@@ -12,6 +12,7 @@ import Services from './services/Services';
 import CompAI from './comp-ai/CompAI';
 import CompAIHistory from './comp-ai/CompAIHistory';
 import CompAIMonitoring from './comp-ai/CompAIMonitoring';
+import CompAIControls from './comp-ai/CompAIControls';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -45,6 +46,7 @@ function App() {
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/services" element={<Services />} />
             <Route path="/comp-ai" element={<CompAI />} />
+            <Route path="/comp-ai/controls" element={<CompAIControls />} />
             <Route path="/comp-ai/history" element={<CompAIHistory />} />
             <Route path="/comp-ai/monitoring" element={<CompAIMonitoring />} />
             <Route

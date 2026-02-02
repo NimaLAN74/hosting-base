@@ -237,6 +237,15 @@
   margin-top: 15px;
 }
 
+.comp-ai-success {
+  background: #efe;
+  border: 1px solid #cfc;
+  color: #363;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+
 .comp-ai-meta {
   margin-top: 10px;
   font-size: 14px;
@@ -525,6 +534,175 @@
 
 .comp-ai-monitoring-info li {
   margin: 8px 0;
+}
+
+/* Controls & Evidence (Phase 4) */
+.comp-ai-controls-container .comp-ai-controls-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.comp-ai-controls-section {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.comp-ai-controls-section h2 {
+  margin: 0 0 15px 0;
+  color: #333;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 8px;
+}
+
+.comp-ai-controls-section h3 {
+  margin: 15px 0 10px 0;
+  color: #555;
+  font-size: 1rem;
+}
+
+.comp-ai-controls-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comp-ai-control-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.comp-ai-control-item:hover {
+  border-color: #667eea;
+  background: #f0f2ff;
+}
+
+.comp-ai-control-item.selected {
+  border-color: #667eea;
+  background: #e8ebff;
+}
+
+.comp-ai-control-id {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 12px;
+}
+
+.comp-ai-control-name {
+  color: #333;
+  margin-top: 4px;
+}
+
+.comp-ai-control-detail p,
+.comp-ai-control-desc {
+  color: #666;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.comp-ai-requirements ul {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #555;
+}
+
+.comp-ai-requirements li {
+  margin: 4px 0;
+}
+
+.comp-ai-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comp-ai-evidence-item {
+  background: #f8f9fa;
+  border-left: 4px solid #667eea;
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.comp-ai-evidence-type {
+  font-weight: 600;
+  color: #333;
+}
+
+.comp-ai-evidence-desc {
+  margin: 6px 0 0 0;
+  color: #666;
+  font-size: 13px;
+}
+
+.comp-ai-evidence-link {
+  margin-left: 8px;
+  color: #667eea;
+}
+
+.comp-ai-evidence-date {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #888;
+}
+
+.comp-ai-forms {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.comp-ai-evidence-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.comp-ai-evidence-form .form-group input,
+.comp-ai-evidence-form .form-group textarea,
+.comp-ai-evidence-form .form-group select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.comp-ai-form-hint {
+  font-size: 13px;
+  color: #666;
+  margin: 0 0 8px 0;
+}
+
+.comp-ai-info-card a {
+  color: #667eea;
+}
+
+.comp-ai-info-card a:hover {
+  text-decoration: underline;
 }
 
 /* Responsive Design */

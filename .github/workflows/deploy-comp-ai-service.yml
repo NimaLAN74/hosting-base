@@ -369,6 +369,21 @@ jobs:
             "cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service"
           echo "✅ Comp-AI restarted with Ollama defaults"
 
+      - name: Run comp_ai migrations on production DB
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base/lianel/dc && bash scripts/deployment/run-comp-ai-migrations.sh"
+          echo "✅ comp_ai migrations (009, 010, 011) applied"
+
       - name: Verify Deployment
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}

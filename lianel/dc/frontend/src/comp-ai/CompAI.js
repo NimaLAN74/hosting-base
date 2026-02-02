@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
 import './CompAI.css';
@@ -185,6 +186,7 @@ function CompAI() {
               <li>Include relevant context</li>
               <li>Ask clear, focused questions</li>
               <li>Check request history for past queries</li>
+              <li><Link to="/comp-ai/controls">Controls &amp; Evidence</Link> — map controls and attach evidence</li>
             </ul>
           </div>
         </div>
