@@ -55,12 +55,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lianel/dc/comp-ai-service
+
       - name: Prepare sqlx query cache
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           set -e
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          # Postgres client + build deps for sqlx-cli and comp-ai-service (libpq, openssl)
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client libpq-dev pkg-config build-essential libssl-dev
           echo "Waiting for Postgres..."
           for i in $(seq 1 30); do
             if PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1" -q 2>/dev/null; then
