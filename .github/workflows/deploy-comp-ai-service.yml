@@ -60,23 +60,18 @@ jobs:
         with:
           workspaces: lianel/dc/comp-ai-service
 
-      - name: Prepare sqlx query cache
+      - name: Run comp_ai migrations
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           set -e
-          # Postgres client + build deps for sqlx-cli and comp-ai-service (libpq, openssl)
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client libpq-dev pkg-config build-essential libssl-dev
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
           echo "Waiting for Postgres..."
           for i in $(seq 1 30); do
             if PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1" -q 2>/dev/null; then
-              echo "Postgres ready"
-              break
+              echo "Postgres ready"; break
             fi
-            if [ "$i" -eq 30 ]; then
-              echo "Postgres did not become ready"
-              exit 1
-            fi
+            [ "$i" -eq 30 ] && { echo "Postgres did not become ready"; exit 1; }
             sleep 1
           done
           for f in lianel/dc/database/migrations/009_create_comp_ai_schema.sql \
@@ -85,11 +80,15 @@ jobs:
             echo "Running $f"
             PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
           done
-          # Pin sqlx-cli to 0.7.x to match sqlx 0.7 in Cargo.toml (metadata format must match)
-          cargo install sqlx-cli --version 0.7.4 --no-default-features --features postgres
-          cd lianel/dc/comp-ai-service && cargo sqlx prepare -- --bin lianel-comp-ai-service
-          ls -la .sqlx
-          echo "✅ .sqlx cache created"
+          echo "✅ Migrations done"
+
+      - name: Build binary (sqlx checks against Postgres on runner)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          cd lianel/dc/comp-ai-service && cargo build --release
+          cp target/release/lianel-comp-ai-service .
+          echo "✅ Binary built"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

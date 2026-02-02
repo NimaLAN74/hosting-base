@@ -1,43 +1,12 @@
-# Build stage
-FROM rust:alpine AS builder
-
-WORKDIR /app
-
-# sqlx compile-time check uses .sqlx cache (generated in CI before docker build)
-ENV SQLX_OFFLINE=true
-
-# Install build dependencies including OpenSSL
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
-
-# Install cross-compilation toolchain for x86_64-unknown-linux-musl
-RUN rustup target add x86_64-unknown-linux-musl
-
-# Copy Cargo files
-COPY Cargo.toml ./
-
-# Create a dummy source file to build dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# Build dependencies for the target platform (this layer will be cached)
-RUN cargo build --release --target x86_64-unknown-linux-musl && rm -rf src
-
-# Copy source code and sqlx query cache (must exist; CI runs cargo sqlx prepare first)
-COPY src ./src
-COPY .sqlx ./.sqlx
-
-# Build the application for the target platform
-RUN touch src/main.rs && cargo build --release --target x86_64-unknown-linux-musl
-
-# Runtime stage
+# Runtime-only image: binary is built on the runner (with Postgres for sqlx compile-time check).
+# No Rust, no .sqlx, no sqlx-cli in CI.
 FROM alpine:latest
 
 WORKDIR /app
 
-# Install runtime dependencies
 RUN apk add --no-cache ca-certificates curl
 
-# Copy the binary from builder (using the target directory)
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/lianel-comp-ai-service /app/lianel-comp-ai-service
+COPY lianel-comp-ai-service /app/lianel-comp-ai-service
 
 EXPOSE 3002
 
