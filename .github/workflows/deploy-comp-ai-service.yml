@@ -11,6 +11,7 @@ on:
       - 'lianel/dc/scripts/deployment/run-comp-ai-migrations.sh'
       - 'lianel/dc/docker-compose.comp-ai.yaml'
       - 'lianel/dc/docker-compose.yaml'
+      - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/deploy-comp-ai-service.yml'
       - '.github/scripts/watch-deploy-comp-ai.sh'
   workflow_dispatch:  # Allow manual trigger
@@ -318,7 +319,7 @@ jobs:
               -o ServerAliveCountMax=3 \
               -p ${REMOTE_PORT} \
               ${REMOTE_USER}@${REMOTE_HOST} \
-              "cd /root/hosting-base && git fetch origin && (git pull origin master || { echo 'Pull failed (e.g. local changes), updating only comp-ai files from origin/master'; git checkout origin/master -- lianel/dc/docker-compose.comp-ai.yaml; }) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml pull comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model pull ollama && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model up -d ollama && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml ps comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model ps ollama && docker logs lianel-comp-ai-service --tail 20 && docker ps --filter name=lianel-ollama --format 'table {{.Names}}\t{{.Status}}'"; then
+              "cd /root/hosting-base && git fetch origin && (git pull origin master || { echo 'Pull failed (e.g. local changes), updating comp-ai and nginx files from origin/master'; git checkout origin/master -- lianel/dc/docker-compose.comp-ai.yaml lianel/dc/nginx/config/nginx.conf; }) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml pull comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model pull ollama && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model up -d ollama && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml ps comp-ai-service && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml --profile local-model ps ollama && docker logs lianel-comp-ai-service --tail 20 && docker ps --filter name=lianel-ollama --format 'table {{.Names}}\t{{.Status}}'"; then
               echo "✅ Deployment successful"
               exit 0
             else
@@ -370,6 +371,21 @@ jobs:
             ${REMOTE_USER}@${REMOTE_HOST} \
             "cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service"
           echo "✅ Comp-AI restarted with Ollama defaults"
+
+      - name: Reload nginx config
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec lianel-nginx nginx -s reload || docker restart lianel-nginx"
+          echo "✅ nginx reloaded"
 
       - name: Run comp_ai migrations on production DB
         continue-on-error: true
