@@ -32,13 +32,14 @@ type AppState = (Arc<AppConfig>, PgPool, ResponseCache);
 )]
 pub async fn get_controls(
     headers: axum::http::HeaderMap,
-    State((config, pool, _)): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<Control>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
     let _user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
 
-    let controls = list_controls(&pool)
+    let controls = list_controls(pool)
         .await
         .map_err(|e| {
             tracing::error!("list_controls failed: {}", e);
@@ -65,14 +66,15 @@ pub async fn get_controls(
 )]
 pub async fn get_control(
     headers: axum::http::HeaderMap,
-    State((config, pool, _)): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ControlWithRequirements>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
     let _user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
 
-    let control = get_control_with_requirements(&pool, id)
+    let control = get_control_with_requirements(pool, id)
         .await
         .map_err(|e| {
             tracing::error!("get_control_with_requirements failed: {}", e);
@@ -116,9 +118,10 @@ pub struct EvidenceQuery {
 )]
 pub async fn get_evidence(
     headers: axum::http::HeaderMap,
-    State((config, pool, _)): State<AppState>,
+    State(state): State<AppState>,
     Query(q): Query<EvidenceQuery>,
 ) -> Result<Json<Vec<EvidenceItem>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
     let _user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
@@ -126,7 +129,7 @@ pub async fn get_evidence(
     let limit = q.limit.unwrap_or(50);
     let offset = q.offset.unwrap_or(0);
 
-    let evidence = list_evidence(&pool, q.control_id, limit, offset)
+    let evidence = list_evidence(pool, q.control_id, limit, offset)
         .await
         .map_err(|e| {
             tracing::error!("list_evidence failed: {}", e);
@@ -153,9 +156,10 @@ pub async fn get_evidence(
 )]
 pub async fn post_evidence(
     headers: axum::http::HeaderMap,
-    State((config, pool, _)): State<AppState>,
+    State(state): State<AppState>,
     Json(body): Json<CreateEvidenceRequest>,
 ) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
     let user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
@@ -169,7 +173,7 @@ pub async fn post_evidence(
     }
 
     let id = create_evidence(
-        &pool,
+        pool,
         body.control_id,
         type_trim,
         body.source.as_deref(),
@@ -210,9 +214,10 @@ pub async fn post_evidence(
 )]
 pub async fn post_github_evidence(
     headers: axum::http::HeaderMap,
-    State((config, pool, _)): State<AppState>,
+    State(state): State<AppState>,
     Json(body): Json<GitHubEvidenceRequest>,
 ) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
     let user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
@@ -267,7 +272,7 @@ pub async fn post_github_evidence(
     };
 
     let id = create_evidence(
-        &pool,
+        pool,
         body.control_id,
         &evidence.evidence_type,
         Some(&evidence.source),
