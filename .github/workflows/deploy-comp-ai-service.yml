@@ -59,14 +59,30 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
+          set -e
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          echo "Waiting for Postgres..."
+          for i in $(seq 1 30); do
+            if PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1" -q 2>/dev/null; then
+              echo "Postgres ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Postgres did not become ready"
+              exit 1
+            fi
+            sleep 1
+          done
           for f in lianel/dc/database/migrations/009_create_comp_ai_schema.sql \
                    lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql \
                    lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql; do
+            echo "Running $f"
             PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
           done
-          cargo install sqlx-cli --no-default-features --features postgres
-          cd lianel/dc/comp-ai-service && cargo sqlx prepare
+          # Pin sqlx-cli to 0.7.x to match sqlx 0.7 in Cargo.toml (metadata format must match)
+          cargo install sqlx-cli --version 0.7.4 --no-default-features --features postgres
+          cd lianel/dc/comp-ai-service && cargo sqlx prepare -- --bin lianel-comp-ai-service
+          ls -la .sqlx
           echo "✅ .sqlx cache created"
 
       - name: Set up Docker Buildx
