@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Monitor GitHub Actions for "Deploy Comp AI Service" after a push.
-# Usage: from repo root, after `git push`:
-#   bash .github/scripts/watch-deploy-comp-ai.sh
-#   bash .github/scripts/watch-deploy-comp-ai.sh --wait   # poll until run completes
+# After each push that triggers this workflow, run: bash .github/scripts/watch-deploy-comp-ai.sh --wait
+# Usage: from repo root:
+#   bash .github/scripts/watch-deploy-comp-ai.sh          # show latest run status
+#   bash .github/scripts/watch-deploy-comp-ai.sh --wait  # follow pipeline until completion (picks run for current commit)
 #
 # Requires: gh CLI (brew install gh / apt install gh) and `gh auth status` OK.
 
@@ -24,7 +25,18 @@ fi
 echo "Listing latest run for workflow: $WORKFLOW"
 gh run list --workflow="$WORKFLOW" --limit 3
 
-RUN_ID=$(gh run list --workflow="$WORKFLOW" --limit 1 --json databaseId --jq '.[0].databaseId')
+# When --wait, prefer the run for the current HEAD (the run we just triggered with push)
+if [[ -n "$WAIT" ]]; then
+  HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$HEAD_SHA" ]]; then
+    echo "Waiting a few seconds for the new run to appear..."
+    sleep 5
+    RUN_ID=$(gh run list --workflow="$WORKFLOW" --limit 15 --json databaseId,headSha --jq ".[] | select(.headSha == \"$HEAD_SHA\") | .databaseId" 2>/dev/null | head -1)
+  fi
+fi
+if [[ -z "$RUN_ID" ]]; then
+  RUN_ID=$(gh run list --workflow="$WORKFLOW" --limit 1 --json databaseId --jq '.[0].databaseId')
+fi
 if [[ -z "$RUN_ID" ]]; then
   echo "No runs found."
   exit 0
