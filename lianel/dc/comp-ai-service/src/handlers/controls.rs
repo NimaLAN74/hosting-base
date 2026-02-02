@@ -175,7 +175,7 @@ pub async fn post_evidence(
         body.source.as_deref(),
         body.description.as_deref(),
         body.link_url.as_deref(),
-        user.sub.as_deref(),
+        Some(user.sub.as_str()),
     )
     .await
     .map_err(|e| {
@@ -273,7 +273,7 @@ pub async fn post_github_evidence(
         Some(&evidence.source),
         Some(&evidence.description),
         evidence.link_url.as_deref(),
-        user.sub.as_deref(),
+        Some(user.sub.as_str()),
     )
     .await
     .map_err(|e| {

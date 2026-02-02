@@ -18,7 +18,8 @@ use crate::auth::extract_user;
 use crate::db::queries::{save_request, get_request_history as get_request_history_from_db};
 use crate::response_cache::{self, CachedResponse};
 
-pub(crate) type ResponseCache = Option<std::sync::Arc<moka::sync::Cache<String, CachedResponse>>>;
+/// Shared response cache type (used by comp_ai and controls handlers for AppState).
+pub type ResponseCache = Option<std::sync::Arc<moka::sync::Cache<String, CachedResponse>>>;
 
 
 #[utoipa::path(
