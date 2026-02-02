@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'lianel/dc/comp-ai-service/**'
+      - 'lianel/dc/database/migrations/**'
       - 'lianel/dc/docker-compose.comp-ai.yaml'
       - 'lianel/dc/docker-compose.yaml'
       - '.github/workflows/deploy-comp-ai-service.yml'
@@ -23,6 +24,21 @@ jobs:
       contents: read
       packages: write
 
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,6 +51,23 @@ jobs:
           echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
           echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
           echo "✅ Image name set to: ${IMAGE_NAME_LC}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare sqlx query cache
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          for f in lianel/dc/database/migrations/009_create_comp_ai_schema.sql \
+                   lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql \
+                   lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql; do
+            PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
+          done
+          cargo install sqlx-cli --no-default-features --features postgres
+          cd lianel/dc/comp-ai-service && cargo sqlx prepare
+          echo "✅ .sqlx cache created"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

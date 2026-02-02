@@ -3,6 +3,9 @@ FROM rust:alpine AS builder
 
 WORKDIR /app
 
+# sqlx compile-time check uses .sqlx cache (generated in CI before docker build)
+ENV SQLX_OFFLINE=true
+
 # Install build dependencies including OpenSSL
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
@@ -18,8 +21,9 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs
 # Build dependencies for the target platform (this layer will be cached)
 RUN cargo build --release --target x86_64-unknown-linux-musl && rm -rf src
 
-# Copy source code
+# Copy source code and sqlx query cache (must exist; CI runs cargo sqlx prepare first)
 COPY src ./src
+COPY .sqlx ./.sqlx
 
 # Build the application for the target platform
 RUN touch src/main.rs && cargo build --release --target x86_64-unknown-linux-musl
