@@ -83,6 +83,19 @@ The workflow is instrumented so you can follow both the **pipeline** and the **d
 - **Actions**: https://github.com/NimaLAN74/hosting-base/actions  
 - Use the run URL from the “Pipeline context” step to jump to that run’s logs.
 
+### Monitor GH Actions after push / CD
+
+After pushing (e.g. to `master`), follow and monitor the relevant workflow:
+
+1. **Deploy Comp AI Service** (`deploy-comp-ai-service.yml`): from repo root:
+   ```bash
+   bash .github/scripts/watch-deploy-comp-ai.sh          # show latest run status
+   bash .github/scripts/watch-deploy-comp-ai.sh --wait   # wait until run completes, then show success or failed logs
+   ```
+   Requires [GitHub CLI](https://cli.github.com/) and `gh auth login`.
+
+2. **Other workflows**: open **Actions** → select the workflow → open the latest run, or use `gh run list --workflow=<filename>` and `gh run watch <run-id>`.
+
 ### Troubleshooting
 
 #### SSH Connection Failed
