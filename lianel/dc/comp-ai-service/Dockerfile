@@ -1,10 +1,10 @@
-# Runtime-only image: binary is built on the runner (with Postgres for sqlx compile-time check).
-# No Rust, no .sqlx, no sqlx-cli in CI.
-FROM alpine:latest
+# Runtime-only image: binary is built on the runner (glibc/linux-gnu).
+# Use glibc base (debian) so the runner-built binary runs; Alpine (musl) would fail.
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates curl
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 COPY lianel-comp-ai-service /app/lianel-comp-ai-service
 
