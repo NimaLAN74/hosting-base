@@ -34,6 +34,8 @@ pub struct AppConfig {
     pub comp_ai_response_cache_ttl_secs: u64,
     /// Response cache max entries (when cache enabled).
     pub comp_ai_response_cache_max_entries: u64,
+    /// Optional GitHub token for integrations (evidence collection).
+    pub github_token: Option<String>,
 }
 
 impl AppConfig {
@@ -110,6 +112,7 @@ impl AppConfig {
                 .unwrap_or_else(|_| "1000".to_string())
                 .parse()
                 .unwrap_or(1000),
+            github_token: env::var("GITHUB_TOKEN").ok(),
         })
     }
 }

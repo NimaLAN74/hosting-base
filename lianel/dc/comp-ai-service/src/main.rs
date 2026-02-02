@@ -7,6 +7,7 @@ mod inference;
 mod rate_limit;
 mod frameworks;
 mod response_cache;
+mod integrations;
 
 use axum::{
     routing::get,
@@ -24,6 +25,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use config::AppConfig;
 use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
+use handlers::controls::{get_controls, get_control, get_evidence, post_evidence, post_github_evidence};
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
 use response_cache::create_cache;
@@ -36,6 +38,11 @@ use sqlx::PgPool;
         handlers::comp_ai::process_request,
         handlers::comp_ai::get_request_history,
         handlers::comp_ai::get_frameworks,
+        handlers::controls::get_controls,
+        handlers::controls::get_control,
+        handlers::controls::get_evidence,
+        handlers::controls::post_evidence,
+        handlers::controls::post_github_evidence,
     ),
     components(schemas(
         models::CompAIRequest,
@@ -46,10 +53,18 @@ use sqlx::PgPool;
         models::RequestHistory,
         models::RequestHistoryResponse,
         models::RequestHistoryQueryParams,
+        models::Control,
+        models::ControlWithRequirements,
+        models::RequirementRef,
+        models::EvidenceItem,
+        models::CreateEvidenceRequest,
+        models::CreateEvidenceResponse,
+        models::GitHubEvidenceRequest,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
         (name = "comp-ai", description = "Comp AI service endpoints"),
+        (name = "controls", description = "Phase 4: controls and evidence"),
     ),
     servers(
         (url = "https://www.lianel.se", description = "Production server")
@@ -115,6 +130,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/process", axum::routing::post(process_request))
         .route("/api/v1/history", get(get_request_history))
         .route("/api/v1/frameworks", get(get_frameworks))
+        .route("/api/v1/controls", get(get_controls))
+        .route("/api/v1/controls/:id", get(get_control))
+        .route("/api/v1/evidence", get(get_evidence).post(post_evidence))
+        .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
         .layer(rate_limit_layer)
         .with_state((config.clone(), pool, response_cache));
 
