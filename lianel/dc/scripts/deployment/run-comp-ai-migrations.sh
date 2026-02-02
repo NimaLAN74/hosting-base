@@ -2,6 +2,10 @@
 # Run Phase 4 comp_ai migrations (009, 010, 011) on the DB used by comp-ai-service.
 # Run from lianel/dc (where .env and database/migrations live).
 # Usage: from lianel/dc: bash scripts/deployment/run-comp-ai-migrations.sh
+#
+# On the server, the DB user must have permission to create schema and objects in
+# POSTGRES_DB. Set COMP_AI_MIGRATION_USER (and optionally COMP_AI_MIGRATION_PASSWORD)
+# in .env to use a DDL-capable user (e.g. postgres); otherwise POSTGRES_USER is used.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,9 +20,11 @@ fi
 
 export PGHOST="${POSTGRES_HOST:-172.18.0.1}"
 export PGPORT="${POSTGRES_PORT:-5432}"
-export PGUSER="${POSTGRES_USER:-airflow}"
+# Use COMP_AI_MIGRATION_USER if set (e.g. postgres), else POSTGRES_USER (must have DDL on DB)
+export PGUSER="${COMP_AI_MIGRATION_USER:-${POSTGRES_USER:-airflow}}"
 export PGDATABASE="${POSTGRES_DB:-lianel_energy}"
-export PGPASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set}"
+# For migration user, prefer COMP_AI_MIGRATION_PASSWORD if set, else POSTGRES_PASSWORD
+export PGPASSWORD="${COMP_AI_MIGRATION_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set}}"
 
 MIGRATIONS_DIR="database/migrations"
 for f in "$MIGRATIONS_DIR/009_create_comp_ai_schema.sql" \
