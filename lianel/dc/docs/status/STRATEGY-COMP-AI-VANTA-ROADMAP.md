@@ -27,7 +27,7 @@
 
 - **AI-assisted compliance**: Use LLMs (Ollama/hosted) for natural-language queries, policy summarization, gap explanations, and remediation suggestions.
 - **Multiframework support**: SOC 2, ISO 27001, GDPR, HIPAA, PCI DSS, NIST CSF, and 15+ other frameworks (see §6 below); one control/evidence model, cross-mapping so one control satisfies many framework requirements.
-- **Evidence & controls**: (Roadmap) Integrations and workflows to collect evidence, map controls, and prepare audit-ready artifacts.
+- **Evidence & controls**: Controls, evidence, GitHub integration, and /comp-ai/controls UI are in place (Phase 4).
 - **Transparency**: Open source, self-hosted option, no vendor lock-in.
 
 Current Comp-AI service is the foundation: auth (Keycloak), request history (DB), and AI processing (Ollama/hosted). Next steps extend toward compliance use cases, multiframework control/evidence model, and AI prompts per framework.
@@ -40,9 +40,9 @@ Current Comp-AI service is the foundation: auth (Keycloak), request history (DB)
 |-------|--------|--------|
 | **1. Foundation** | Service, Keycloak, DB, AI (Ollama/mock), API, deploy | ✅ Done |
 | **2. Core product** | Rate limiting ✅, stable AI doc ✅, history verification ✅, API hardening ✅ | ✅ Done |
-| **3. Compliance features** | Framework-aware prompts, GET /api/v1/frameworks, frontend selector | Done (first) |
-| **4. Integrations & evidence** | Tool integrations, evidence collection, policy/control mapping (Vanta-like) | Future |
-| **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | Future |
+| **3. Compliance features** | Framework-aware prompts, GET /api/v1/frameworks, frontend selector | ✅ Done |
+| **4. Integrations & evidence** | Controls, evidence, GitHub integration, frontend /comp-ai/controls | ✅ Done |
+| **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | **Next** |
 
 ---
 
@@ -67,14 +67,11 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ## 5. Next step (from this roadmap)
 
-**Immediate next step**: **Phase 2 – Core product**
+**Immediate next step**: **Phase 5 – Frameworks & audit**
 
-1. **Rate limiting** ✅ – Per-IP rate limit on `/api/v1/process` and `/api/v1/history` (configurable; 429 + Retry-After).  
-2. **Stable AI behavior** ✅ – Ollama/tinyllama default (compose); documented in `COMP-AI-MODEL-USAGE-AND-SCALING.md` §0; fallback to mock when Ollama fails.  
-3. **History & UX** ✅ – History API and frontend verified; doc and script `scripts/monitoring/verify-comp-ai-history.sh` for remote verification.  
-4. **API hardening** ✅ – Prompt validation (required, max length 32768); consistent error JSON `{"error": "..."}`.
-
-**Phase 2 complete.** Next: **Phase 3** (compliance-oriented prompts and first control/evidence concepts).
+1. **Multiframework mapping** – Seed a second framework (e.g. ISO 27001); map existing controls to its requirements so one control satisfies SOC 2 and ISO 27001 (migration 013).
+2. **Audit-ready export** (optional) – API or UI to export controls + evidence + mappings (JSON/CSV/PDF) for auditors.
+3. **Remediation / gaps** (optional) – View controls with no evidence or missing mappings; simple remediation workflow.
 
 ---
 
@@ -88,4 +85,4 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ---
 
-**Next action**: Proceed with Phase 2 – Core product (rate limiting, history/UX verification, API hardening). Then implement multiframework data model and seed one framework (e.g. SOC 2) per COMP-AI-MULTIFRAMEWORK-SUPPORT.md.
+**Next action**: Phase 5 – Add ISO 27001 (and more frameworks) to the seed; map existing controls cross-framework. Then audit export and remediation workflows per COMP-AI-MULTIFRAMEWORK-SUPPORT.md.

@@ -80,7 +80,8 @@ jobs:
           for f in lianel/dc/database/migrations/009_create_comp_ai_schema.sql \
                    lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql \
                    lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql \
-                   lianel/dc/database/migrations/012_comp_ai_grants.sql; do
+                   lianel/dc/database/migrations/012_comp_ai_grants.sql \
+                   lianel/dc/database/migrations/013_comp_ai_seed_iso27001.sql; do
             echo "Running $f"
             PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
           done
@@ -402,8 +403,8 @@ jobs:
             -o ConnectTimeout=30 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/scripts/deployment/run-comp-ai-migrations.sh lianel/dc/database/migrations/009_create_comp_ai_schema.sql lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql lianel/dc/database/migrations/012_comp_ai_grants.sql && cd lianel/dc && COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh"
-          echo "✅ comp_ai migrations (009, 010, 011, 012) applied"
+            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/scripts/deployment/run-comp-ai-migrations.sh lianel/dc/database/migrations/009_create_comp_ai_schema.sql lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql lianel/dc/database/migrations/012_comp_ai_grants.sql lianel/dc/database/migrations/013_comp_ai_seed_iso27001.sql && cd lianel/dc && COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh"
+          echo "✅ comp_ai migrations (009–013) applied"
 
       - name: Verify Deployment
         env:
