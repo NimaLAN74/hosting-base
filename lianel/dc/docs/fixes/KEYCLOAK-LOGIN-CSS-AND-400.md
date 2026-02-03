@@ -1,5 +1,9 @@
 # Keycloak login: CSS MIME type text/html and 400 on authenticate
 
+**Quick fix (recommended):** Run the GitHub Actions workflow **"Fix Keycloak Login (realm + frontend client)"** (Actions → Fix Keycloak Login → Run workflow). It sets realm frontendUrl to `https://www.lianel.se/auth` so login page, theme CSS, and form POST are same-origin (www), and re-applies frontend-client redirect URIs. Then open https://www.lianel.se in a fresh tab and log in again.
+
+---
+
 ## 1. Stylesheet MIME type "text/html" (not "text/css")
 
 **Symptom:** Browser reports that `/resources/.../patternfly.min.css` (and other Keycloak theme CSS) was not loaded because its MIME type is "text/html", not "text/css".

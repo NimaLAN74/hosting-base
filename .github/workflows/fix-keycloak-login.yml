@@ -1,0 +1,63 @@
+# Fix Keycloak login: realm frontendUrl (www.lianel.se/auth) + frontend-client redirect URIs.
+# Run manually when login shows CSS MIME type or 400 on login-actions/authenticate.
+name: Fix Keycloak Login (realm + frontend client)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-login:
+    name: Apply realm frontendUrl + frontend-client on remote
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Checkout repo (for latest scripts)
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key ready"
+
+      - name: Copy and run fix-keycloak-https + update-keycloak-frontend-client
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          DC="lianel/dc"
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base && git fetch origin && git pull origin master || true
+             for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/scripts/keycloak-setup/fix-keycloak-https.sh\" ] && cd \"\$d\" && break; done
+             export KEYCLOAK_URL=https://auth.lianel.se
+             echo '=== Running fix-keycloak-https.sh (realm frontendUrl = www.lianel.se/auth) ==='
+             bash scripts/keycloak-setup/fix-keycloak-https.sh
+             echo '=== Running update-keycloak-frontend-client.sh ==='
+             bash scripts/keycloak-setup/update-keycloak-frontend-client.sh
+             echo '✅ Keycloak login fix applied'"
+          echo "✅ Realm frontendUrl + frontend-client updated on remote"
+
+      - name: Remind user
+        run: |
+          echo "Next: open https://www.lianel.se and log in again (use a fresh tab or clear site data for login)."
+          echo "Theme CSS and POST to login-actions/authenticate should now go via www.lianel.se/auth (same-origin)."

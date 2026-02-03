@@ -35,12 +35,10 @@ echo "2. Getting current realm configuration..."
 CURRENT_REALM=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel" \
   -H "Authorization: Bearer ${TOKEN}")
 
-# Realm frontendUrl must be the Keycloak host (auth.lianel.se), not the app (www).
-# Keycloak uses it for the login form action and other frontend URLs. If set to www,
-# the form POSTs to www but cookies are set for auth → "Restart login cookie not found".
-# Post-login redirect is controlled by redirect_uri in the auth request (and client
-# redirect URIs), not by realm frontendUrl.
-KEYCLOAK_FRONTEND_URL="${KEYCLOAK_FRONTEND_URL:-https://auth.lianel.se}"
+# Realm frontendUrl: use app proxy (www.lianel.se/auth) so login page + theme + form POST
+# are same-origin (www). Theme CSS and login-actions/authenticate then go via www's nginx
+# to Keycloak, avoiding MIME type and 400 issues when Keycloak host was auth.lianel.se.
+KEYCLOAK_FRONTEND_URL="${KEYCLOAK_FRONTEND_URL:-https://www.lianel.se/auth}"
 export KEYCLOAK_FRONTEND_URL
 echo
 echo "3. Updating realm frontendUrl to Keycloak host: $KEYCLOAK_FRONTEND_URL..."
@@ -55,7 +53,7 @@ realm["attributes"]["frontendUrl"] = os.environ.get("KEYCLOAK_FRONTEND_URL", "ht
 print(json.dumps(realm))
 ')" > /dev/null
 
-echo "✓ Realm frontendUrl set to $KEYCLOAK_FRONTEND_URL (login form stays on auth; post-login uses redirect_uri)"
+echo "✓ Realm frontendUrl set to $KEYCLOAK_FRONTEND_URL (login + theme + POST via www same-origin)"
 
 # Verify the update
 echo
