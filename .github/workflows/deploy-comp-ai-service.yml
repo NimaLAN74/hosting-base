@@ -391,6 +391,21 @@ jobs:
             "docker exec nginx-proxy nginx -s reload || docker restart nginx-proxy"
           echo "✅ nginx reloaded"
 
+      - name: Ensure Keycloak is running (avoid 502 on /auth)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml up -d keycloak && sleep 15 && (docker exec nginx-proxy nginx -s reload 2>/dev/null || true)"
+          echo "✅ Keycloak ensured up (auth should not 502)"
+
       - name: Run comp_ai migrations on production DB
         continue-on-error: true
         env:
