@@ -1,8 +1,8 @@
 //! Models for Phase 4: controls, requirements, evidence (COMP-AI-MULTIFRAMEWORK-SUPPORT).
 
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Control {
@@ -118,7 +118,8 @@ pub struct RemediationTask {
     pub id: i64,
     pub control_id: i64,
     pub assigned_to: Option<String>,
-    pub due_date: Option<chrono::NaiveDate>,
+    #[serde(with = "crate::utils::serde_eu_date::option")]
+    pub due_date: Option<NaiveDate>,
     pub status: String,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -129,6 +130,7 @@ pub struct RemediationTask {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpsertRemediationRequest {
     pub assigned_to: Option<String>,
+    #[schema(example = "31/12/2026")]
     pub due_date: Option<String>,
     pub status: Option<String>,
     pub notes: Option<String>,

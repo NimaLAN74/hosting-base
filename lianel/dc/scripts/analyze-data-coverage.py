@@ -259,7 +259,7 @@ def generate_report(analysis_results: Dict[str, Any]) -> str:
     report.append("=" * 80)
     report.append("DATA COVERAGE ANALYSIS REPORT")
     report.append("=" * 80)
-    report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append(f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     report.append("")
     
     # Summary
@@ -366,13 +366,13 @@ def main():
         print("\n" + report)
         
         # Save JSON output
-        output_file = f"coverage_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        output_file = f"coverage_analysis_{datetime.now().strftime('%d-%m-%Y_%H%M%S')}.json"
         with open(output_file, 'w') as f:
             json.dump(results, f, indent=2, default=str)
         print(f"\nDetailed results saved to: {output_file}")
         
         # Save report
-        report_file = f"coverage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        report_file = f"coverage_report_{datetime.now().strftime('%d-%m-%Y_%H%M%S')}.txt"
         with open(report_file, 'w') as f:
             f.write(report)
         print(f"Report saved to: {report_file}")

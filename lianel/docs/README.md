@@ -275,8 +275,8 @@ docker logs grafana --tail 50
 
 ### Backup Database
 ```bash
-sudo -u postgres pg_dump airflow > /backup/airflow_$(date +%Y%m%d).sql
-sudo -u postgres pg_dump keycloak > /backup/keycloak_$(date +%Y%m%d).sql
+sudo -u postgres pg_dump airflow > /backup/airflow_$(date +%d-%m-%Y).sql
+sudo -u postgres pg_dump keycloak > /backup/keycloak_$(date +%d-%m-%Y).sql
 ```
 
 ### Restart Service

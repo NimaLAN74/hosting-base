@@ -201,7 +201,7 @@ export POSTGRES_PASSWORD=$(grep POSTGRES_PASSWORD .env | cut -d'=' -f2)
 
 # Create backup directory
 mkdir -p /root/backups/database
-BACKUP_FILE="/root/backups/database/lianel_energy_$(date +%Y%m%d_%H%M%S).sql"
+BACKUP_FILE="/root/backups/database/lianel_energy_$(date +%d-%m-%Y_%H%M%S).sql"
 
 # Full backup
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy -F c -f ${BACKUP_FILE}
@@ -247,7 +247,7 @@ mkdir -p ${BACKUP_DIR}
 find ${BACKUP_DIR} -name "*.sql.gz" -mtime +7 -delete
 
 # Create backup
-BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%Y%m%d_%H%M%S).sql"
+BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%d-%m-%Y_%H%M%S).sql"
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy -F c -f ${BACKUP_FILE}
 
 # Compress

@@ -208,7 +208,10 @@ class ENTSOEClient:
         # ENTSO-E API requires YYYYMMDDHHMM format (12 digits)
         # Convert date strings to proper format
         def format_date_for_api(date_str: str, is_end: bool = False) -> str:
-            """Format date string to ENTSO-E API format YYYYMMDDHHMM."""
+            """Format date string to ENTSO-E API format YYYYMMDDHHMM.
+
+            NOTE: ENTSO-E explicitly requires ISO-style numeric ordering; do not
+            switch to DD/MM/YYYY here (see docs/CONVENTIONS-DATE-FORMAT.md)."""
             try:
                 # Parse the date string
                 if 'T' in date_str:

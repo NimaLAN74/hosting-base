@@ -312,7 +312,7 @@ docker-compose -f docker-compose.yaml up -d
 ./scripts/backup-database.sh
 
 # Backup configuration
-tar -czf backup-$(date +%Y%m%d).tar.gz .env docker-compose*.yaml
+tar -czf backup-$(date +%d-%m-%Y).tar.gz .env docker-compose*.yaml
 ```
 
 ### Monitoring

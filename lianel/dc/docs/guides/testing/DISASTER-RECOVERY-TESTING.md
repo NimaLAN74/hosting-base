@@ -47,7 +47,7 @@ Disaster recovery testing validates that the system can recover from catastrophi
 ```bash
 # 1. Backup current state
 ./scripts/backup-database.sh
-tar -czf backup-$(date +%Y%m%d).tar.gz .env docker-compose*.yaml
+tar -czf backup-$(date +%d-%m-%Y).tar.gz .env docker-compose*.yaml
 
 # 2. Simulate complete failure
 # Stop all services
@@ -230,7 +230,7 @@ docker-compose -f docker-compose.airflow.yaml restart
 **Test Procedure**:
 ```bash
 # 1. Backup current configuration
-tar -czf config-backup-$(date +%Y%m%d).tar.gz .env docker-compose*.yaml
+tar -czf config-backup-$(date +%d-%m-%Y).tar.gz .env docker-compose*.yaml
 
 # 2. Simulate configuration loss
 rm .env docker-compose*.yaml

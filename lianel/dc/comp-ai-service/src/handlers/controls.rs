@@ -19,7 +19,7 @@ use crate::db::queries::{
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
     upsert_remediation, list_requirements,
 };
-use chrono::NaiveDate;
+use crate::utils::{format_eu_date, parse_eu_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use chrono::Utc;
 use crate::handlers::comp_ai::ResponseCache;
@@ -272,7 +272,8 @@ pub async fn get_controls_export(
                 escape_csv(&ev_types),
             ));
         }
-        let filename = format!("comp-ai-audit-export-{}.csv", export.exported_at.format("%Y-%m-%d"));
+        let filename_date = format_eu_date(export.exported_at.date_naive()).replace('/', "-");
+        let filename = format!("comp-ai-audit-export-{}.csv", filename_date);
         let body = axum::body::Body::from(csv);
         let res = Response::builder()
             .status(StatusCode::OK)
@@ -426,7 +427,7 @@ pub async fn put_control_remediation(
     let due_date = body
         .due_date
         .as_deref()
-        .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok());
+        .and_then(parse_eu_date);
     let status = body
         .status
         .as_deref()

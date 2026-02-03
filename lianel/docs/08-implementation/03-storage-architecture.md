@@ -352,7 +352,7 @@ CREATE INDEX idx_country_code ON dim_country(country_code);
 ```bash
 #!/bin/bash
 # Backup PostgreSQL database
-DATE=$(date +%Y%m%d_%H%M%S)
+DATE=$(date +%d-%m-%Y_%H%M%S)
 BACKUP_DIR="/backup/postgresql"
 pg_dump -U postgres -Fc lianel_energy > "$BACKUP_DIR/lianel_energy_$DATE.dump"
 ```

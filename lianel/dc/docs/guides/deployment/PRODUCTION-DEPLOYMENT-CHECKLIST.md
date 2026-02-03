@@ -158,7 +158,7 @@
   ```
 - [ ] Backup configuration files
   ```bash
-  tar -czf backup-$(date +%Y%m%d).tar.gz .env docker-compose*.yaml
+  tar -czf backup-$(date +%d-%m-%Y).tar.gz .env docker-compose*.yaml
   ```
 - [ ] Document current version/commit
   ```bash

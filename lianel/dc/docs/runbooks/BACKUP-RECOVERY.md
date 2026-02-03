@@ -67,8 +67,8 @@ mkdir -p ${BACKUP_DIR}
 # Keep only last 7 days of backups
 find ${BACKUP_DIR} -name "*.sql.gz" -mtime +7 -delete
 
-# Create backup
-BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%Y%m%d_%H%M%S).sql"
+# Create backup (day-first)
+BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%d-%m-%Y_%H%M%S).sql"
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy -F c -f ${BACKUP_FILE}
 
 # Compress
@@ -107,7 +107,7 @@ export POSTGRES_PASSWORD=$(grep POSTGRES_PASSWORD .env | cut -d'=' -f2)
 
 BACKUP_DIR="/root/backups/database"
 mkdir -p ${BACKUP_DIR}
-BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%Y%m%d_%H%M%S).sql"
+BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%d-%m-%Y_%H%M%S).sql"
 
 # Full backup
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy -F c -f ${BACKUP_FILE}
@@ -121,13 +121,13 @@ ls -lh ${BACKUP_FILE}.gz
 
 #### Schema-Only Backup
 ```bash
-SCHEMA_FILE="${BACKUP_DIR}/schema_$(date +%Y%m%d_%H%M%S).sql"
+SCHEMA_FILE="${BACKUP_DIR}/schema_$(date +%d-%m-%Y_%H%M%S).sql"
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy --schema-only -f ${SCHEMA_FILE}
 ```
 
 #### Data-Only Backup
 ```bash
-DATA_FILE="${BACKUP_DIR}/data_$(date +%Y%m%d_%H%M%S).dump"
+DATA_FILE="${BACKUP_DIR}/data_$(date +%d-%m-%Y_%H%M%S).dump"
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d lianel_energy --data-only -F c -f ${DATA_FILE}
 ```
 
@@ -172,7 +172,7 @@ PGPASSWORD=${POSTGRES_PASSWORD} dropdb -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -
 ```bash
 BACKUP_DIR="/root/backups/config"
 mkdir -p ${BACKUP_DIR}
-CONFIG_BACKUP="${BACKUP_DIR}/config_$(date +%Y%m%d_%H%M%S).tar.gz"
+CONFIG_BACKUP="${BACKUP_DIR}/config_$(date +%d-%m-%Y_%H%M%S).tar.gz"
 
 # Backup configuration
 tar -czf ${CONFIG_BACKUP} \
@@ -202,7 +202,7 @@ ls -lh ${CONFIG_BACKUP}
 # Backup .env file (careful with secrets!)
 BACKUP_DIR="/root/backups/config"
 mkdir -p ${BACKUP_DIR}
-cp /root/lianel/dc/.env ${BACKUP_DIR}/.env.$(date +%Y%m%d_%H%M%S)
+cp /root/lianel/dc/.env ${BACKUP_DIR}/.env.$(date +%d-%m-%Y_%H%M%S)
 
 # Keep only last 30 days
 find ${BACKUP_DIR} -name ".env.*" -mtime +30 -delete
@@ -218,7 +218,7 @@ find ${BACKUP_DIR} -name ".env.*" -mtime +30 -delete
 ```bash
 BACKUP_DIR="/root/backups/volumes"
 mkdir -p ${BACKUP_DIR}
-VOLUME_BACKUP="${BACKUP_DIR}/volumes_$(date +%Y%m%d_%H%M%S).tar.gz"
+VOLUME_BACKUP="${BACKUP_DIR}/volumes_$(date +%d-%m-%Y_%H%M%S).tar.gz"
 
 # List volumes
 docker volume ls | grep lianel
@@ -227,7 +227,7 @@ docker volume ls | grep lianel
 docker run --rm \
     -v lianel_grafana_data:/data \
     -v ${BACKUP_DIR}:/backup \
-    alpine tar -czf /backup/grafana_data_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+    alpine tar -czf /backup/grafana_data_$(date +%d-%m-%Y_%H%M%S).tar.gz -C /data .
 ```
 
 ---

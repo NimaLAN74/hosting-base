@@ -54,6 +54,7 @@ echo ""
 
 # Option 1: Delete old artifacts (older than 7 days)
 echo "1️⃣  Deleting old artifacts (older than 7 days)..."
+# GitHub API comparisons must remain ISO (lexicographic) to function correctly.
 ARTIFACTS=$(gh api repos/${REPO}/actions/artifacts --jq '.artifacts[] | select(.created_at < (now - 604800 | strftime("%Y-%m-%d"))) | .id')
 if [ -z "$ARTIFACTS" ]; then
     echo "   ✅ No old artifacts to delete"

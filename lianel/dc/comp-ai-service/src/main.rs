@@ -8,6 +8,7 @@ mod rate_limit;
 mod frameworks;
 mod response_cache;
 mod integrations;
+mod utils;
 
 use axum::{
     routing::get,

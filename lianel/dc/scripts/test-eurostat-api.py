@@ -184,7 +184,7 @@ def main():
     """Main function to run all tests."""
     print("="*60)
     print("Eurostat API Testing Script")
-    print(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     print("="*60)
     
     results = {}

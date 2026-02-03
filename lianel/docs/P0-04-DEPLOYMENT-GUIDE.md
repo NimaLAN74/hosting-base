@@ -421,10 +421,10 @@ docker image prune -a
 ### Backup Database
 ```bash
 # Backup Airflow database
-sudo -u postgres pg_dump airflow > /backup/airflow_$(date +%Y%m%d).sql
+sudo -u postgres pg_dump airflow > /backup/airflow_$(date +%d-%m-%Y).sql
 
 # Backup Keycloak database
-sudo -u postgres pg_dump keycloak > /backup/keycloak_$(date +%Y%m%d).sql
+sudo -u postgres pg_dump keycloak > /backup/keycloak_$(date +%d-%m-%Y).sql
 
 # Backup to remote location
 scp /backup/*.sql user@backup-server:/backups/

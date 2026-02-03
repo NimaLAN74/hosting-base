@@ -22,8 +22,9 @@ mkdir -p ${BACKUP_DIR}
 # Keep only last 7 days of backups
 find ${BACKUP_DIR} -name "*.sql.gz" -mtime +7 -delete
 
-# Create backup
-BACKUP_FILE="${BACKUP_DIR}/lianel_energy_$(date +%Y%m%d_%H%M%S).sql"
+# Create backup (EU day-first notation; replace slashes for filename safety)
+STAMP="$(date +%d-%m-%Y_%H%M%S)"
+BACKUP_FILE="${BACKUP_DIR}/lianel_energy_${STAMP}.sql"
 PGPASSWORD=${POSTGRES_PASSWORD} pg_dump -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U ${POSTGRES_USER} -d ${POSTGRES_DB} -F c -f ${BACKUP_FILE}
 
 # Compress
@@ -32,7 +33,7 @@ gzip ${BACKUP_FILE}
 # Verify backup
 if [ -f "${BACKUP_FILE}.gz" ]; then
     BACKUP_SIZE=$(du -h "${BACKUP_FILE}.gz" | cut -f1)
-    echo "$(date): Backup created successfully: ${BACKUP_FILE}.gz (${BACKUP_SIZE})"
+    echo "$(date +'%d/%m/%Y %H:%M:%S'): Backup created successfully: ${BACKUP_FILE}.gz (${BACKUP_SIZE})"
     exit 0
 else
     echo "$(date): ERROR: Backup failed!" >&2
