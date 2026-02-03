@@ -82,8 +82,14 @@ jobs:
             echo "  Dir: $KEYCLOAK_DIR"
             cd "$KEYCLOAK_DIR"
             docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
-            echo "=== 5. Wait 50s, reload nginx ==="
+            echo "=== 5. Wait 50s for Keycloak ==="
             sleep 50
+            echo "=== 6. Set realm frontendUrl (form action) via Admin API ==="
+            for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
+              [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
+              (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) && break
+            done
+            echo "=== 7. Reload nginx ==="
             docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
             echo "✅ Remote apply done"
           '
@@ -108,9 +114,18 @@ jobs:
 
       - name: Run E2E login flow test (must pass)
         run: |
-          echo "Running E2E test: www login flow (PKCE, form action, theme CSS)..."
-          bash lianel/dc/scripts/monitoring/e2e-test-www-login-flow.sh
-          echo "✅ E2E login flow passed"
+          echo "Waiting 20s for Keycloak to serve new hostname..."
+          sleep 20
+          for attempt in 1 2 3; do
+            echo "E2E attempt $attempt..."
+            if bash lianel/dc/scripts/monitoring/e2e-test-www-login-flow.sh; then
+              echo "✅ E2E login flow passed"
+              exit 0
+            fi
+            [ $attempt -lt 3 ] && echo "Retry in 15s..." && sleep 15
+          done
+          echo "❌ E2E failed after 3 attempts"
+          exit 1
 
       - name: Summary
         run: |
