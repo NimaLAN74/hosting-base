@@ -34,25 +34,7 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH ready"
 
-      - name: Copy nginx.conf and docker-compose.infra.yaml to remote
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-        run: |
-          set -e
-          echo "Copying nginx.conf and docker-compose.infra.yaml to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=30 \
-            -P "${REMOTE_PORT}" \
-            lianel/dc/nginx/config/nginx.conf \
-            lianel/dc/docker-compose.infra.yaml \
-            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/"
-          echo "✅ Copied to /tmp on remote"
-
-      - name: Apply config, force KC_HOSTNAME on server, restart Keycloak, reload nginx
+      - name: Apply on remote (git pull, force KC_HOSTNAME, recreate Keycloak, reload nginx)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -66,34 +48,46 @@ jobs:
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" '
             set -e
-            echo "=== 1. Nginx config ==="
-            mkdir -p /root/lianel/dc/nginx/config
-            cp /tmp/nginx.conf /root/lianel/dc/nginx/config/nginx.conf
-            echo "=== 2. Compose: copy and force KC_HOSTNAME on server ==="
-            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
-              if [ -d "$d" ]; then
-                cp /tmp/docker-compose.infra.yaml "$d/"
-                sed -i "s|KC_HOSTNAME:.*|KC_HOSTNAME: https://www.lianel.se/auth|" "$d/docker-compose.infra.yaml"
-                sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
-                echo "  Patched $d/docker-compose.infra.yaml"
-                grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" || true
-              fi
+            echo "=== 1. Get latest from git on server ==="
+            REPO=""
+            for base in /root/hosting-base /root /opt; do
+              [ -f "$base/lianel/dc/docker-compose.infra.yaml" ] && REPO="$base" && break
+              [ -f "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" ] && REPO="$base/hosting-base" && break
             done
-            echo "=== 3. Find compose project that owns keycloak and recreate there ==="
-            KEYCLOAK_DIR=$(docker inspect keycloak --format "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}" 2>/dev/null || true)
-            if [ -z "$KEYCLOAK_DIR" ] || [ ! -d "$KEYCLOAK_DIR" ]; then
-              KEYCLOAK_DIR="/root/hosting-base/lianel/dc"
-              [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/lianel/dc"
+            if [ -n "$REPO" ]; then
+              cd "$REPO" && git fetch origin 2>/dev/null; git checkout origin/master -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml 2>/dev/null || git checkout origin/main -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml 2>/dev/null || true
+              echo "  Repo: $REPO"
             fi
-            echo "  Using compose dir: $KEYCLOAK_DIR"
+            echo "=== 2. Nginx + compose into /root/lianel/dc ==="
+            mkdir -p /root/lianel/dc/nginx/config
+            for base in /root/hosting-base /root; do
+              [ -f "$base/lianel/dc/nginx/config/nginx.conf" ] && cp "$base/lianel/dc/nginx/config/nginx.conf" /root/lianel/dc/nginx/config/ && break
+              [ -f "$base/hosting-base/lianel/dc/nginx/config/nginx.conf" ] && cp "$base/hosting-base/lianel/dc/nginx/config/nginx.conf" /root/lianel/dc/nginx/config/ && break
+            done
+            for base in /root/hosting-base /root; do
+              [ -f "$base/lianel/dc/docker-compose.infra.yaml" ] && cp "$base/lianel/dc/docker-compose.infra.yaml" /root/lianel/dc/ && break
+              [ -f "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" ] && cp "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" /root/lianel/dc/ && break
+            done
+            echo "=== 3. Force KC_HOSTNAME in all compose copies ==="
+            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
+              [ -f "$d/docker-compose.infra.yaml" ] || continue
+              sed -i "s|KC_HOSTNAME:.*|KC_HOSTNAME: https://www.lianel.se/auth|" "$d/docker-compose.infra.yaml"
+              sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
+              grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" | head -2
+            done
+            echo "=== 4. Recreate Keycloak (same compose project) ==="
+            KEYCLOAK_DIR=$(docker inspect keycloak --format "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}" 2>/dev/null || true)
+            [ -z "$KEYCLOAK_DIR" ] || [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/hosting-base/lianel/dc"
+            [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/lianel/dc"
+            echo "  Dir: $KEYCLOAK_DIR"
             cd "$KEYCLOAK_DIR"
             docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
-            echo "=== 4. Wait for Keycloak, reload nginx ==="
-            sleep 45
+            echo "=== 5. Wait 50s, reload nginx ==="
+            sleep 50
             docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
-            echo "✅ Done"
+            echo "✅ Remote apply done"
           '
-          echo "✅ Config applied, Keycloak recreated with KC_HOSTNAME=www, nginx reloaded"
+          echo "✅ Config applied, Keycloak recreated, nginx reloaded"
 
       - name: Verify /auth/ goes to Keycloak
         env:
