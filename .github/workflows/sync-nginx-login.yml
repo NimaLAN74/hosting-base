@@ -71,11 +71,13 @@ jobs:
             cp /tmp/nginx.conf /root/lianel/dc/nginx/config/nginx.conf
             echo "Writing docker-compose.infra.yaml (KC_HOSTNAME=www for login form)..."
             for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d "$d" ] && cp /tmp/docker-compose.infra.yaml "$d/" && echo "  Updated $d"; done
-            echo "Restarting Keycloak (picks up KC_HOSTNAME=https://www.lianel.se/auth)..."
+            echo "Restarting Keycloak (KC_HOSTNAME=https://www.lianel.se/auth)..."
             cd /root/hosting-base/lianel/dc 2>/dev/null || cd /root/lianel/dc
-            docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
+            docker stop keycloak 2>/dev/null || true
+            docker rm keycloak 2>/dev/null || true
+            docker compose -f docker-compose.infra.yaml up -d keycloak
             echo "Waiting for Keycloak to start..."
-            sleep 25
+            sleep 40
             echo "Testing and reloading nginx..."
             docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
             echo "✅ Nginx + Keycloak updated"
