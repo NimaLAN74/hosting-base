@@ -52,7 +52,7 @@ jobs:
             "${REMOTE_USER}@${REMOTE_HOST}:/tmp/"
           echo "✅ Copied to /tmp on remote"
 
-      - name: Apply config, restart Keycloak, reload nginx
+      - name: Apply config, force KC_HOSTNAME on server, restart Keycloak, reload nginx
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -66,23 +66,34 @@ jobs:
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" '
             set -e
-            echo "Writing nginx.conf..."
+            echo "=== 1. Nginx config ==="
             mkdir -p /root/lianel/dc/nginx/config
             cp /tmp/nginx.conf /root/lianel/dc/nginx/config/nginx.conf
-            echo "Writing docker-compose.infra.yaml (KC_HOSTNAME=www for login form)..."
-            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d "$d" ] && cp /tmp/docker-compose.infra.yaml "$d/" && echo "  Updated $d"; done
-            echo "Restarting Keycloak (KC_HOSTNAME=https://www.lianel.se/auth)..."
-            cd /root/hosting-base/lianel/dc 2>/dev/null || cd /root/lianel/dc
-            docker stop keycloak 2>/dev/null || true
-            docker rm keycloak 2>/dev/null || true
-            docker compose -f docker-compose.infra.yaml up -d keycloak
-            echo "Waiting for Keycloak to start..."
-            sleep 40
-            echo "Testing and reloading nginx..."
+            echo "=== 2. Compose: copy and force KC_HOSTNAME on server ==="
+            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
+              if [ -d "$d" ]; then
+                cp /tmp/docker-compose.infra.yaml "$d/"
+                sed -i "s|KC_HOSTNAME:.*|KC_HOSTNAME: https://www.lianel.se/auth|" "$d/docker-compose.infra.yaml"
+                sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
+                echo "  Patched $d/docker-compose.infra.yaml"
+                grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" || true
+              fi
+            done
+            echo "=== 3. Find compose project that owns keycloak and recreate there ==="
+            KEYCLOAK_DIR=$(docker inspect keycloak --format "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}" 2>/dev/null || true)
+            if [ -z "$KEYCLOAK_DIR" ] || [ ! -d "$KEYCLOAK_DIR" ]; then
+              KEYCLOAK_DIR="/root/hosting-base/lianel/dc"
+              [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/lianel/dc"
+            fi
+            echo "  Using compose dir: $KEYCLOAK_DIR"
+            cd "$KEYCLOAK_DIR"
+            docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
+            echo "=== 4. Wait for Keycloak, reload nginx ==="
+            sleep 45
             docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
-            echo "✅ Nginx + Keycloak updated"
+            echo "✅ Done"
           '
-          echo "✅ Config applied, Keycloak restarted, nginx reloaded"
+          echo "✅ Config applied, Keycloak recreated with KC_HOSTNAME=www, nginx reloaded"
 
       - name: Verify /auth/ goes to Keycloak
         env:
@@ -90,16 +101,22 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Waiting 3s for nginx to settle..."
-          sleep 3
+          echo "Waiting 5s for nginx/Keycloak..."
+          sleep 5
           SIZE=$(curl -s -k -o /tmp/auth_check.html -w "%{size_download}" "https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=https%3A%2F%2Fwww.lianel.se%2F&response_type=code&scope=openid" -L 2>/dev/null || echo "0")
           if [ "$SIZE" -gt 5000 ] 2>/dev/null; then
             echo "✅ Login page looks like Keycloak (response size ${SIZE} bytes)"
           elif [ "$SIZE" -gt 0 ]; then
-            echo "⚠️ Response size ${SIZE} bytes (expected >5000 for Keycloak HTML). Check https://www.lianel.se in browser."
+            echo "⚠️ Response size ${SIZE} bytes (expected >5000 for Keycloak HTML)"
           else
             echo "⚠️ Could not reach www.lianel.se (curl failed or 0 bytes)"
           fi
+
+      - name: Run E2E login flow test (must pass)
+        run: |
+          echo "Running E2E test: www login flow (PKCE, form action, theme CSS)..."
+          bash lianel/dc/scripts/monitoring/e2e-test-www-login-flow.sh
+          echo "✅ E2E login flow passed"
 
       - name: Summary
         run: |
