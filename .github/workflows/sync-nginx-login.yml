@@ -1,0 +1,103 @@
+# Sync nginx config to fix login: /auth/ and /resources/ must go to Keycloak on www.lianel.se.
+# Run this when you cannot log in (login page shows React app or CSS/400 errors).
+name: Sync Nginx (Fix Login)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync-nginx:
+    name: Push nginx.conf to server and reload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Copy nginx.conf to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          echo "Copying nginx.conf to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf \
+            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
+          echo "✅ Copied to /tmp/nginx.conf on remote"
+
+      - name: Apply nginx and reload
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" '
+            set -e
+            echo "Writing nginx.conf to /root/lianel/dc/nginx/config/..."
+            mkdir -p /root/lianel/dc/nginx/config
+            cp /tmp/nginx.conf /root/lianel/dc/nginx/config/nginx.conf
+            echo "Testing nginx config..."
+            docker exec nginx-proxy nginx -t
+            echo "Reloading nginx..."
+            docker exec nginx-proxy nginx -s reload
+            echo "✅ Nginx updated and reloaded"
+          '
+          echo "✅ Nginx sync complete"
+
+      - name: Verify /auth/ goes to Keycloak
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Waiting 3s for nginx to settle..."
+          sleep 3
+          SIZE=$(curl -s -k -o /tmp/auth_check.html -w "%{size_download}" "https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=https%3A%2F%2Fwww.lianel.se%2F&response_type=code&scope=openid" -L 2>/dev/null || echo "0")
+          if [ "$SIZE" -gt 5000 ] 2>/dev/null; then
+            echo "✅ Login page looks like Keycloak (response size ${SIZE} bytes)"
+          elif [ "$SIZE" -gt 0 ]; then
+            echo "⚠️ Response size ${SIZE} bytes (expected >5000 for Keycloak HTML). Check https://www.lianel.se in browser."
+          else
+            echo "⚠️ Could not reach www.lianel.se (curl failed or 0 bytes)"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Nginx synced for login fix" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Config**: \`lianel/dc/nginx/config/nginx.conf\` → \`/root/lianel/dc/nginx/config/nginx.conf\` on server" >> $GITHUB_STEP_SUMMARY
+          echo "- **Nginx**: reloaded so \`/auth/\`, \`/realms/\`, \`/resources/\` on www.lianel.se go to Keycloak" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next**: Open https://www.lianel.se in a **new tab** (or clear site data) and try logging in." >> $GITHUB_STEP_SUMMARY
+          echo "- If login still fails, run **Fix Keycloak Login (realm + frontend client)** workflow too." >> $GITHUB_STEP_SUMMARY
