@@ -12,11 +12,12 @@ use crate::auth::extract_user;
 use crate::models::{
     Control, ControlWithRequirements, EvidenceItem, CreateEvidenceRequest, CreateEvidenceResponse,
     GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
+    RequirementListItem,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence,
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
-    upsert_remediation,
+    upsert_remediation, list_requirements,
 };
 use chrono::NaiveDate;
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
@@ -35,6 +36,44 @@ type AppState = (Arc<AppConfig>, PgPool, ResponseCache);
         (status = 500, description = "Internal server error")
     )
 )]
+#[utoipa::path(
+    get,
+    path = "/api/v1/requirements",
+    tag = "controls",
+    params(("framework" = Option<String>, Query, description = "Filter by framework slug (e.g. soc2, iso27001)")),
+    responses(
+        (status = 200, description = "List of framework requirements", body = Vec<RequirementListItem>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_requirements(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<RequirementsQuery>,
+) -> Result<Json<Vec<RequirementListItem>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let framework = q.framework.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
+    let requirements = list_requirements(pool, framework)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_requirements failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list requirements"})),
+            )
+        })?;
+    Ok(Json(requirements))
+}
+
+pub struct RequirementsQuery {
+    pub framework: Option<String>,
+}
+
 pub async fn get_controls(
     headers: axum::http::HeaderMap,
     State(state): State<AppState>,
@@ -102,6 +141,8 @@ pub async fn get_control(
 #[derive(Debug, serde::Deserialize)]
 pub struct ExportQuery {
     pub format: Option<String>,
+    /// Filter audit export by framework slug (e.g. soc2, iso27001). Only controls mapped to this framework and only those requirement codes are included.
+    pub framework: Option<String>,
 }
 
 fn escape_csv(s: &str) -> String {
@@ -116,7 +157,10 @@ fn escape_csv(s: &str) -> String {
     get,
     path = "/api/v1/controls/export",
     tag = "controls",
-    params(("format" = Option<String>, Query, description = "csv for CSV export, omit for JSON")),
+    params(
+        ("format" = Option<String>, Query, description = "csv for CSV export, omit for JSON"),
+        ("framework" = Option<String>, Query, description = "Filter by framework slug (e.g. soc2, iso27001) for audit view")
+    ),
     responses(
         (status = 200, description = "Audit export (controls + requirements + evidence) as JSON or CSV"),
         (status = 401, description = "Unauthorized"),
@@ -177,6 +221,21 @@ pub async fn get_controls_export(
             evidence,
         });
     }
+
+    // Phase 5: filter by framework if requested (audit view per framework)
+    let framework_slug = q.framework.as_deref().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
+    let entries: Vec<ControlExportEntry> = if let Some(ref slug) = framework_slug {
+        entries
+            .into_iter()
+            .map(|mut e| {
+                e.control.requirements.retain(|r| r.framework_slug.eq_ignore_ascii_case(slug));
+                e
+            })
+            .filter(|e| !e.control.requirements.is_empty())
+            .collect()
+    } else {
+        entries
+    };
 
     let export = AuditExport {
         exported_at: Utc::now(),

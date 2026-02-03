@@ -424,7 +424,6 @@ jobs:
           echo "✅ Keycloak ensured up (auth should not 502)"
 
       - name: Run comp_ai migrations on production DB
-        continue-on-error: true
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}

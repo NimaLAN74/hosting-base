@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
 **Date**: January 2026  
-**Status**: ✅ **Phase 1 Complete** · ⏳ **Phase 2 (Core product) In Progress**
+**Status**: ✅ **Phases 1–4 Complete** · ✅ **Phase 5 (Frameworks & audit) Complete**
 
 ---
 
@@ -87,7 +87,16 @@
    - [x] Inference: compliance context prefix prepended to prompt when framework is set
    - [x] Frontend: framework dropdown (General + list from API), sent in request body
 
-9. **Testing & Deployment**
+9. **Phase 5: Frameworks & audit** ✅
+   - [x] Migrations 010–015: controls, requirements, control_requirements, evidence; SOC 2 seed (011), ISO 27001 seed + cross-mapping (013), remediation_tasks (014), GDPR seed (015)
+   - [x] GET /api/v1/controls, GET /api/v1/controls/:id (with requirements), GET /api/v1/evidence, POST /api/v1/evidence, GitHub evidence integration
+   - [x] GET /api/v1/controls/export?format=csv|json&framework=soc2|iso27001 — audit export (optional framework filter)
+   - [x] GET /api/v1/controls/gaps — controls with no evidence
+   - [x] GET/PUT /api/v1/controls/:id/remediation — remediation tasks
+   - [x] GET /api/v1/requirements?framework=soc2|iso27001 — list framework requirements from DB
+   - [ ] Run comp_ai migrations (009–015) on remote DB if not yet done: `bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc
+
+10. **Testing & Deployment**
    - [ ] Build Docker image (pipeline)
    - [ ] Deploy to remote host (pipeline)
    - [ ] Verify service health (pipeline)
@@ -180,4 +189,4 @@ The service foundation is complete and ready for integration work. All infrastru
 
 ---
 
-**Next Action**: Implement Keycloak authentication and database integration.
+**Next Action**: Run comp_ai migrations on the DB used by comp-ai-service (`bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc). Then deploy and test Phase 5 APIs (controls, export, gaps, requirements, remediation).

@@ -194,6 +194,48 @@ pub async fn get_control_with_requirements(
     }))
 }
 
+/// List requirements from DB, optionally filtered by framework slug (Phase 5 audit view).
+pub async fn list_requirements(
+    pool: &PgPool,
+    framework_slug: Option<&str>,
+) -> Result<Vec<crate::models::RequirementListItem>, sqlx::Error> {
+    let rows = if let Some(slug) = framework_slug {
+        sqlx::query(
+            r#"
+            SELECT r.id, f.slug AS framework_slug, r.code, r.title, r.description
+            FROM comp_ai.requirements r
+            JOIN comp_ai.frameworks f ON f.id = r.framework_id
+            WHERE f.slug = $1
+            ORDER BY r.code
+            "#,
+        )
+        .bind(slug)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT r.id, f.slug AS framework_slug, r.code, r.title, r.description
+            FROM comp_ai.requirements r
+            JOIN comp_ai.frameworks f ON f.id = r.framework_id
+            ORDER BY f.slug, r.code
+            "#,
+        )
+    }
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(crate::models::RequirementListItem {
+            id: row.get("id"),
+            framework_slug: row.get("framework_slug"),
+            code: row.get("code"),
+            title: row.get("title"),
+            description: row.get("description"),
+        });
+    }
+    Ok(out)
+}
+
 /// List evidence for a control (or all if control_id is None)
 pub async fn list_evidence(
     pool: &PgPool,

@@ -5,10 +5,17 @@
 set -e
 
 DC_DIR=""
-for d in /root/hosting-base/lianel/dc /root/lianel/dc /root/hosting-base/lianel/dc .; do
-  [ -f "$d/.env" ] && DC_DIR="$d" && break
-done
-[ -z "$DC_DIR" ] && { echo "ERROR: .env not found in /root/hosting-base/lianel/dc, /root/lianel/dc, or ."; exit 1; }
+# Prefer the compose dir that owns the keycloak container so DB password matches the .env Keycloak uses
+KEYCOWNER=$(docker inspect keycloak --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null) || true
+if [ -n "$KEYCOWNER" ] && [ -f "$KEYCOWNER/.env" ]; then
+  DC_DIR="$KEYCOWNER"
+  echo "Using Keycloak compose dir: $DC_DIR"
+else
+  for d in /root/lianel/dc /root/hosting-base/lianel/dc .; do
+    [ -f "$d/.env" ] && DC_DIR="$d" && break
+  done
+fi
+[ -z "$DC_DIR" ] && { echo "ERROR: .env not found (keycloak compose dir or /root/lianel/dc, /root/hosting-base/lianel/dc, .)"; exit 1; }
 cd "$DC_DIR" && source .env
 
 [ -z "${KEYCLOAK_DB_PASSWORD}" ] && { echo "ERROR: KEYCLOAK_DB_PASSWORD not set in .env"; exit 1; }
@@ -18,9 +25,11 @@ cd "$DC_DIR" && source .env
 PASS_ESC="${KEYCLOAK_DB_PASSWORD//\'/\'\'}"
 SQL="ALTER USER keycloak WITH PASSWORD '${PASS_ESC}';"
 
+# Prefer 127.0.0.1 when Postgres runs on host (not in Docker); 172.18.0.1 for container->host.
+PG_HOST="${POSTGRES_HOST:-127.0.0.1}"
 if command -v psql >/dev/null 2>&1; then
   export PGPASSWORD="${POSTGRES_PASSWORD}"
-  psql -h "${POSTGRES_HOST:-172.18.0.1}" -p "${POSTGRES_PORT:-5432}" -U postgres -d postgres -c "$SQL"
+  psql -h "$PG_HOST" -p "${POSTGRES_PORT:-5432}" -U postgres -d postgres -c "$SQL"
   echo "Keycloak DB user password updated (via psql). Restart Keycloak: docker restart keycloak"
 else
   # Postgres likely in Docker; find a postgres container and run psql inside it

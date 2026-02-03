@@ -34,7 +34,24 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH ready"
 
-      - name: Apply on remote (git pull, force KC_HOSTNAME, recreate Keycloak, reload nginx)
+      - name: Preflight SSH (retry on timeout)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in 1 2 3; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=25 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+              echo "✅ SSH reachable (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ SSH attempt $i failed; retrying in 20s..."
+            [ $i -lt 3 ] && sleep 20
+          done
+          echo "❌ SSH to ${REMOTE_HOST} failed after 3 attempts"
+          exit 1
+
+      - name: Apply on remote (fix 502: sync DB + start Keycloak, then nginx + KC_HOSTNAME, reload, frontendUrl)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -75,16 +92,45 @@ jobs:
               sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
               grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" | head -2
             done
-            echo "=== 4. Reload nginx (sub_filter rewrites auth.lianel.se -> www.lianel.se/auth in HTML) ==="
+            echo "=== 4. Fix 502: sync Keycloak DB password and start Keycloak ==="
+            bash /root/hosting-base/lianel/dc/scripts/maintenance/set-keycloak-db-password-on-server.sh 2>/dev/null || true
+            DC_DIR="/root/hosting-base/lianel/dc"
+            [ -f /root/lianel/dc/docker-compose.infra.yaml ] && DC_DIR="/root/lianel/dc"
+            KEYCOWNER=$(docker inspect keycloak --format "{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}" 2>/dev/null) || true
+            [ -n "$KEYCOWNER" ] && [ -f "$KEYCOWNER/docker-compose.infra.yaml" ] && DC_DIR="$KEYCOWNER" || true
+            echo "  Using compose dir: $DC_DIR"
+            (cd "$DC_DIR" && docker compose -f docker-compose.infra.yaml up -d keycloak)
+            echo "  Waiting 45s for Keycloak to start..."
+            sleep 45
+            echo "=== 5. Reload nginx (sub_filter rewrites auth.lianel.se -> www.lianel.se/auth in HTML) ==="
             docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
-            echo "=== 5. Optionally set realm frontendUrl (if Keycloak is up) ==="
+            echo "=== 6. Set realm frontendUrl (if Keycloak is up) ==="
             for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
               (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) 2>/dev/null && break || true
             done
+            docker ps --filter name=keycloak --format "table {{.Names}}\t{{.Status}}"
             echo "✅ Remote apply done"
           '
-          echo "✅ Config applied, Keycloak recreated, nginx reloaded"
+          echo "✅ Config applied, Keycloak started, nginx reloaded"
+
+      # Deploy the exact nginx.conf from this run (runner checkout). Server git may be behind; this ensures the fix is live.
+      - name: Copy nginx.conf from runner to server and reload
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/nginx/config/nginx.conf"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            "docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload"
+          echo "✅ Runner nginx.conf deployed and reloaded"
+
+      - name: Verify theme CSS (200 + text/css) – fail job if wrong
+        run: |
+          bash lianel/dc/scripts/monitoring/verify-keycloak-www-resources.sh || { echo "❌ Theme CSS not 200/text/css; deploy or config is wrong"; exit 1; }
 
       - name: Verify /auth/ goes to Keycloak
         env:

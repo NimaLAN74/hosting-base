@@ -42,7 +42,7 @@ Current Comp-AI service is the foundation: auth (Keycloak), request history (DB)
 | **2. Core product** | Rate limiting ✅, stable AI doc ✅, history verification ✅, API hardening ✅ | ✅ Done |
 | **3. Compliance features** | Framework-aware prompts, GET /api/v1/frameworks, frontend selector | ✅ Done |
 | **4. Integrations & evidence** | Controls, evidence, GitHub integration, frontend /comp-ai/controls | ✅ Done |
-| **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | **Next** |
+| **5. Frameworks & audit** | Multiframework mapping, audit-ready outputs, remediation workflows | ✅ Done |
 
 ---
 
@@ -65,13 +65,16 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ---
 
-## 5. Next step (from this roadmap)
+## 5. Phase 5 – Frameworks & audit (done)
 
-**Immediate next step**: **Phase 5 – Frameworks & audit**
+**Completed:**
 
-1. **Multiframework mapping** – Seed a second framework (e.g. ISO 27001); map existing controls to its requirements so one control satisfies SOC 2 and ISO 27001 (migration 013).
-2. **Audit-ready export** (optional) – API or UI to export controls + evidence + mappings (JSON/CSV/PDF) for auditors.
-3. **Remediation / gaps** (optional) – View controls with no evidence or missing mappings; simple remediation workflow.
+1. **Multiframework mapping** – ISO 27001 seeded (migration 013); existing controls mapped to SOC 2 and ISO 27001 (one control → many requirements). GDPR seed in migration 015.
+2. **Audit-ready export** – `GET /api/v1/controls/export?format=csv|json&framework=soc2|iso27001` exports controls + requirements + evidence; optional `framework` filter for per-framework audit view.
+3. **Remediation / gaps** – `GET /api/v1/controls/gaps` lists controls with no evidence; `GET/PUT /api/v1/controls/:id/remediation` for assignee, due date, status (table `comp_ai.remediation_tasks`, migration 014).
+4. **Requirements API** – `GET /api/v1/requirements?framework=soc2|iso27001` lists framework requirements from DB for audit view.
+
+**Run migrations** (one-time on the DB used by comp-ai-service): from `lianel/dc`, run `bash scripts/deployment/run-comp-ai-migrations.sh` (runs 009–015).
 
 ---
 
@@ -85,4 +88,4 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ---
 
-**Next action**: Phase 5 – Add ISO 27001 (and more frameworks) to the seed; map existing controls cross-framework. Then audit export and remediation workflows per COMP-AI-MULTIFRAMEWORK-SUPPORT.md.
+**Next action**: Phase 6 or beyond – Expand frameworks (more requirements per framework), automated tests per control, or deeper AI remediation suggestions. See COMP-AI-MULTIFRAMEWORK-SUPPORT.md.

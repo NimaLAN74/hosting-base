@@ -50,6 +50,16 @@ pub struct RequirementRef {
     pub framework_slug: String,
 }
 
+/// Requirement as returned by GET /api/v1/requirements (Phase 5 audit view).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RequirementListItem {
+    pub id: i64,
+    pub framework_slug: String,
+    pub code: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct EvidenceItem {
     pub id: i64,

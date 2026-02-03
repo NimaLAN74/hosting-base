@@ -1,5 +1,22 @@
 # Keycloak login fix – verification results
 
+## E2E test (run this to verify login flow)
+
+From the repo root:
+
+```bash
+bash lianel/dc/scripts/monitoring/e2e-test-www-login-flow.sh
+```
+
+The script checks:
+
+1. GET auth URL with PKCE → 200 or 302, then Keycloak login HTML (not React).
+2. Login page has form and Keycloak markers.
+3. **Form action** must use **www.lianel.se** or **/auth/** (not auth.lianel.se), or login POST returns 400.
+4. Theme CSS request returns `Content-Type: text/css`.
+
+If the test fails on “form action uses auth.lianel.se”, ensure the server uses `docker-compose.infra.yaml` with `KC_HOSTNAME: https://www.lianel.se/auth` and restart Keycloak (e.g. run **Sync Nginx (Fix Login)** workflow).
+
 ## What was fixed (in repo)
 
 - **nginx** (`lianel/dc/nginx/config/nginx.conf`): For `www.lianel.se`, the three Keycloak locations (`^~ /resources/`, `/auth/`, `^~ /realms/`) now use `proxy_set_header Host $host;` instead of `Host auth.lianel.se`, so Keycloak builds form action and theme URLs with `www.lianel.se` (same-origin).

@@ -27,7 +27,7 @@ use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use handlers::controls::{
     get_controls, get_control, get_controls_export, get_controls_gaps,
-    get_remediation, get_control_remediation, put_control_remediation,
+    get_requirements, get_remediation, get_control_remediation, put_control_remediation,
     get_evidence, post_evidence, post_github_evidence,
 };
 use db::create_pool;
@@ -46,6 +46,7 @@ use sqlx::PgPool;
         handlers::controls::get_control,
         handlers::controls::get_controls_export,
         handlers::controls::get_controls_gaps,
+        handlers::controls::get_requirements,
         handlers::controls::get_remediation,
         handlers::controls::get_control_remediation,
         handlers::controls::put_control_remediation,
@@ -65,6 +66,7 @@ use sqlx::PgPool;
         models::Control,
         models::ControlWithRequirements,
         models::RequirementRef,
+        models::RequirementListItem,
         models::EvidenceItem,
         models::CreateEvidenceRequest,
         models::CreateEvidenceResponse,
@@ -143,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/process", axum::routing::post(process_request))
         .route("/api/v1/history", get(get_request_history))
         .route("/api/v1/frameworks", get(get_frameworks))
+        .route("/api/v1/requirements", get(get_requirements))
         .route("/api/v1/controls", get(get_controls))
         .route("/api/v1/controls/export", get(get_controls_export))
         .route("/api/v1/controls/gaps", get(get_controls_gaps))
