@@ -75,22 +75,13 @@ jobs:
               sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
               grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" | head -2
             done
-            echo "=== 4. Recreate Keycloak (same compose project) ==="
-            KEYCLOAK_DIR=$(docker inspect keycloak --format "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}" 2>/dev/null || true)
-            [ -z "$KEYCLOAK_DIR" ] || [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/hosting-base/lianel/dc"
-            [ ! -d "$KEYCLOAK_DIR" ] && KEYCLOAK_DIR="/root/lianel/dc"
-            echo "  Dir: $KEYCLOAK_DIR"
-            cd "$KEYCLOAK_DIR"
-            docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
-            echo "=== 5. Wait 50s for Keycloak ==="
-            sleep 50
-            echo "=== 6. Set realm frontendUrl (form action) via Admin API ==="
+            echo "=== 4. Reload nginx (sub_filter rewrites auth.lianel.se -> www.lianel.se/auth in HTML) ==="
+            docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
+            echo "=== 5. Optionally set realm frontendUrl (if Keycloak is up) ==="
             for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
-              (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) && break
+              (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) 2>/dev/null && break || true
             done
-            echo "=== 7. Reload nginx ==="
-            docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
             echo "✅ Remote apply done"
           '
           echo "✅ Config applied, Keycloak recreated, nginx reloaded"
