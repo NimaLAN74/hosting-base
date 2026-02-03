@@ -41,31 +41,33 @@ if [ "$(echo "$EXISTING_CLIENT" | python3 -c 'import sys, json; print(len(json.l
   echo "⚠ Airflow client already exists. Updating..."
   CLIENT_ID=$(echo "$EXISTING_CLIENT" | python3 -c 'import sys, json; print(json.load(sys.stdin)[0]["id"])')
   
-  # Update existing client
+  # GET full client, strip PKCE requirement from attributes, then PUT (use temp file so JSON is not corrupted by shell)
+  TMP_JSON=$(mktemp)
+  trap "rm -f $TMP_JSON" EXIT
+  curl -s "${KEYCLOAK_URL}/admin/realms/lianel/clients/${CLIENT_ID}" -H "Authorization: Bearer ${TOKEN}" | python3 -c "
+import sys, json
+c = json.load(sys.stdin)
+if c.get('attributes') is None:
+  c['attributes'] = {}
+# Remove or clear PKCE so FAB/authlib (no code_challenge) can authenticate; some Keycloak versions re-add from client type
+c['attributes'].pop('pkce.code.challenge.required', None)
+c['attributes']['pkce.code.challenge.method'] = ''   # empty = do not require PKCE
+c['clientId'] = 'airflow'
+c['enabled'] = True
+c['redirectUris'] = ['https://airflow.lianel.se/oauth-authorized/keycloak', 'https://airflow.lianel.se/auth/oauth-authorized/keycloak']
+c['webOrigins'] = ['https://airflow.lianel.se']
+c['standardFlowEnabled'] = True
+c['publicClient'] = False
+with open('${TMP_JSON}', 'w') as f:
+  json.dump(c, f)
+" || { rm -f "$TMP_JSON"; exit 1; }
   curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/lianel/clients/${CLIENT_ID}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
-    -d '{
-      "clientId": "airflow",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
-      "redirectUris": [
-        "https://airflow.lianel.se/oauth-authorized/keycloak",
-        "https://airflow.lianel.se/auth/oauth-authorized/keycloak"
-      ],
-      "webOrigins": [
-        "https://airflow.lianel.se"
-      ],
-      "attributes": {
-        "pkce.code.challenge.method": "S256"
-      }
-    }' > /dev/null
-  echo "✓ Airflow client updated"
+    -d @"$TMP_JSON" > /dev/null
+  rm -f "$TMP_JSON"
+  trap - EXIT
+  echo "✓ Airflow client updated (PKCE requirement removed - FAB/authlib does not send code_challenge)"
 else
   # Create new client
   echo "3. Creating Airflow client..."
@@ -87,11 +89,8 @@ else
       ],
       "webOrigins": [
         "https://airflow.lianel.se"
-      ],
-      "attributes": {
-        "pkce.code.challenge.method": "S256"
-      }
-    }' > /dev/null && echo "✓ Airflow client created"
+      ]
+    }' > /dev/null && echo "✓ Airflow client created (PKCE not required - FAB/authlib does not send code_challenge)"
   
   CLIENT_ID=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel/clients?clientId=airflow" \
     -H "Authorization: Bearer ${TOKEN}" | python3 -c 'import sys, json; print(json.load(sys.stdin)[0]["id"])')

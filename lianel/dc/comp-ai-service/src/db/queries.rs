@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Row};
-use chrono::{DateTime, NaiveDateTime, Utc};
-use crate::models::{RequestHistory, Control, ControlWithRequirements, RequirementRef, EvidenceItem};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use crate::models::{RequestHistory, Control, ControlWithRequirements, RequirementRef, EvidenceItem, RemediationTask};
 
 /// Save a request to the database
 pub async fn save_request(
@@ -245,6 +245,188 @@ pub async fn list_evidence(
         });
     }
     Ok(out)
+}
+
+/// Controls that have no evidence (Phase 5 gaps).
+pub async fn list_controls_without_evidence(pool: &PgPool) -> Result<Vec<Control>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT c.id, c.internal_id, c.name, c.description, c.category, c.created_at
+        FROM comp_ai.controls c
+        LEFT JOIN comp_ai.evidence e ON e.control_id = c.id
+        WHERE e.id IS NULL
+        ORDER BY c.internal_id
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        out.push(Control {
+            id: row.get("id"),
+            internal_id: row.get("internal_id"),
+            name: row.get("name"),
+            description: row.get("description"),
+            category: row.get("category"),
+            created_at: row_naive_to_utc(created_at_naive),
+        });
+    }
+    Ok(out)
+}
+
+/// List remediation tasks (optionally filter by control_id).
+pub async fn list_remediation_tasks(
+    pool: &PgPool,
+    control_id: Option<i64>,
+) -> Result<Vec<RemediationTask>, sqlx::Error> {
+    let rows = if let Some(cid) = control_id {
+        sqlx::query(
+            r#"
+            SELECT id, control_id, assigned_to, due_date, status, notes, created_at, updated_at
+            FROM comp_ai.remediation_tasks
+            WHERE control_id = $1
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(cid)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT id, control_id, assigned_to, due_date, status, notes, created_at, updated_at
+            FROM comp_ai.remediation_tasks
+            ORDER BY updated_at DESC
+            "#,
+        )
+    }
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        let updated_at_naive: NaiveDateTime = row.get("updated_at");
+        out.push(RemediationTask {
+            id: row.get("id"),
+            control_id: row.get("control_id"),
+            assigned_to: row.get("assigned_to"),
+            due_date: row.get::<Option<NaiveDate>, _>("due_date"),
+            status: row.get("status"),
+            notes: row.get("notes"),
+            created_at: row_naive_to_utc(created_at_naive),
+            updated_at: row_naive_to_utc(updated_at_naive),
+        });
+    }
+    Ok(out)
+}
+
+/// Get remediation task for a control (if any).
+pub async fn get_remediation_by_control_id(
+    pool: &PgPool,
+    control_id: i64,
+) -> Result<Option<RemediationTask>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, control_id, assigned_to, due_date, status, notes, created_at, updated_at
+        FROM comp_ai.remediation_tasks
+        WHERE control_id = $1
+        "#,
+    )
+    .bind(control_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(r) = row else {
+        return Ok(None);
+    };
+
+    let created_at_naive: NaiveDateTime = r.get("created_at");
+    let updated_at_naive: NaiveDateTime = r.get("updated_at");
+    Ok(Some(RemediationTask {
+        id: r.get("id"),
+        control_id: r.get("control_id"),
+        assigned_to: r.get("assigned_to"),
+        due_date: r.get::<Option<NaiveDate>, _>("due_date"),
+        status: r.get("status"),
+        notes: r.get("notes"),
+        created_at: row_naive_to_utc(created_at_naive),
+        updated_at: row_naive_to_utc(updated_at_naive),
+    }))
+}
+
+/// Create or update remediation task for a control (upsert by control_id).
+/// Only provided fields are updated; missing fields leave existing values unchanged.
+pub async fn upsert_remediation(
+    pool: &PgPool,
+    control_id: i64,
+    assigned_to: Option<&str>,
+    due_date: Option<NaiveDate>,
+    status: Option<&str>,
+    notes: Option<&str>,
+) -> Result<RemediationTask, sqlx::Error> {
+    let existing = get_remediation_by_control_id(pool, control_id).await?;
+    if let Some(ex) = existing {
+        let assigned_to = assigned_to.or(ex.assigned_to.as_deref());
+        let due_date = due_date.or(ex.due_date);
+        let status = status.as_deref().unwrap_or(&ex.status);
+        let notes = notes.or(ex.notes.as_deref());
+        let row = sqlx::query(
+            r#"
+            UPDATE comp_ai.remediation_tasks
+            SET assigned_to = $2, due_date = $3, status = $4, notes = $5, updated_at = CURRENT_TIMESTAMP
+            WHERE control_id = $1
+            RETURNING id, control_id, assigned_to, due_date, status, notes, created_at, updated_at
+            "#,
+        )
+        .bind(control_id)
+        .bind(assigned_to)
+        .bind(due_date)
+        .bind(status)
+        .bind(notes)
+        .fetch_one(pool)
+        .await?;
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        let updated_at_naive: NaiveDateTime = row.get("updated_at");
+        return Ok(RemediationTask {
+            id: row.get("id"),
+            control_id: row.get("control_id"),
+            assigned_to: row.get("assigned_to"),
+            due_date: row.get::<Option<NaiveDate>, _>("due_date"),
+            status: row.get("status"),
+            notes: row.get("notes"),
+            created_at: row_naive_to_utc(created_at_naive),
+            updated_at: row_naive_to_utc(updated_at_naive),
+        });
+    }
+    let status_val = status.unwrap_or("open");
+    let row = sqlx::query(
+        r#"
+        INSERT INTO comp_ai.remediation_tasks (control_id, assigned_to, due_date, status, notes)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, control_id, assigned_to, due_date, status, notes, created_at, updated_at
+        "#,
+    )
+    .bind(control_id)
+    .bind(assigned_to)
+    .bind(due_date)
+    .bind(status_val)
+    .bind(notes)
+    .fetch_one(pool)
+    .await?;
+
+    let created_at_naive: NaiveDateTime = row.get("created_at");
+    let updated_at_naive: NaiveDateTime = row.get("updated_at");
+    Ok(RemediationTask {
+        id: row.get("id"),
+        control_id: row.get("control_id"),
+        assigned_to: row.get("assigned_to"),
+        due_date: row.get::<Option<NaiveDate>, _>("due_date"),
+        status: row.get("status"),
+        notes: row.get("notes"),
+        created_at: row_naive_to_utc(created_at_naive),
+        updated_at: row_naive_to_utc(updated_at_naive),
+    })
 }
 
 /// Create an evidence record and link to control

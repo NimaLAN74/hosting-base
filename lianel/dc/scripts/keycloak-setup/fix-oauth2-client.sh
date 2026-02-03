@@ -5,9 +5,14 @@
 
 set -e
 
-KEYCLOAK_URL="https://auth.lianel.se"
-ADMIN_USER="admin"
-ADMIN_PASS="D2eF5gH9jK3lM7nP1qR4sT8vW2xY6zA"
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://auth.lianel.se}"
+ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
+ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-}"
+
+if [ -z "$ADMIN_PASS" ]; then
+  echo "ERROR: KEYCLOAK_ADMIN_PASSWORD not set. Export it or source .env on the server."
+  exit 1
+fi
 
 echo "=== Fixing OAuth2-Proxy Client Configuration ==="
 echo

@@ -1,5 +1,7 @@
 # Login Redirect Flow – Analysis and Test Checklist
 
+**Canonical pattern**: Use **https://auth.lianel.se** for the frontend Keycloak URL (see **KEYCLOAK-PATTERN-GRAFANA-AIRFLOW-FRONTEND.md**). The www.lianel.se/auth same-origin proxy approach was tried for CORS and **caused redirect-to-admin**; do not revert to it. Redirect back to the app is achieved via Keycloak client baseUrl/rootUrl and realm frontendUrl (scripts: update-keycloak-frontend-client.sh, fix-keycloak-https.sh).
+
 ## Summary
 
 The login redirect must send the user **back to the app** (e.g. `https://www.lianel.se/comp-ai`) after Keycloak auth, never to Keycloak’s domain or a `/login` route.

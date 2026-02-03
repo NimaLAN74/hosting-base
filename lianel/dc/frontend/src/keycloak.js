@@ -1,18 +1,11 @@
 // Keycloak initialization and configuration
-// Use https://auth.lianel.se like Grafana and Airflow (see docs/fixes/KEYCLOAK-PATTERN-GRAFANA-AIRFLOW-FRONTEND.md).
-// The www.lianel.se/auth proxy was added for CORS and caused redirect-to-admin; revert to auth.lianel.se.
+// Use https://www.lianel.se/auth (same-origin proxy) so login hits www's /auth/ -> Keycloak.
+// auth.lianel.se/auth/login/ currently serves Airflow's login page (routing bug); using www.lianel.se/auth avoids that.
 import Keycloak from 'keycloak-js';
 
 const getKeycloakUrl = () => {
   const fromEnv = process.env.REACT_APP_KEYCLOAK_URL;
-  // Never use www.lianel.se for Keycloak: login must run on auth.lianel.se so cookies (KC_RESTART etc.)
-  // are set for auth.lianel.se and sent back when the form POSTs. If login runs on www (same-origin proxy),
-  // Keycloak sets cookies for auth.lianel.se (we send Host: auth.lianel.se) but the form posts to www
-  // → "Restart login cookie not found". Force auth.lianel.se when env points at www.
-  if (fromEnv && (fromEnv.includes('www.lianel.se') || fromEnv.includes('lianel.se/auth'))) {
-    return 'https://auth.lianel.se';
-  }
-  return fromEnv || 'https://auth.lianel.se';
+  return fromEnv || 'https://www.lianel.se/auth';
 };
 
 const keycloakConfig = {
@@ -223,11 +216,9 @@ export const login = (redirectToCurrentPath = true) => {
     try {
       const loginUrlOrPromise = keycloak.createLoginUrl({ redirectUri, prompt: 'login' });
       let loginUrl = await Promise.resolve(loginUrlOrPromise);
-      // Force login page onto auth.lianel.se. If Keycloak or keycloak-js returns www (e.g. realm
-      // frontendUrl), the form action would be www → "Restart login cookie not found". Redirect
-      // to auth.lianel.se so the login page and form POST stay on auth and cookies work.
-      if (typeof loginUrl === 'string' && loginUrl.includes('www.lianel.se') && loginUrl.includes('/realms/')) {
-        loginUrl = loginUrl.replace(/https:\/\/www\.lianel\.se/g, 'https://auth.lianel.se');
+      // Keep same-origin: if URL points to auth.lianel.se, use www.lianel.se/auth so login runs via www's proxy.
+      if (typeof loginUrl === 'string' && loginUrl.includes('auth.lianel.se') && loginUrl.includes('/realms/')) {
+        loginUrl = loginUrl.replace(/https:\/\/auth\.lianel\.se/g, 'https://www.lianel.se/auth');
       }
       doRedirect(loginUrl);
     } catch (error) {

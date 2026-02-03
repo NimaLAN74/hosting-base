@@ -6,11 +6,14 @@ import './CompAI.css';
 
 function CompAIControls() {
   const [controls, setControls] = useState([]);
+  const [gaps, setGaps] = useState([]);
+  const [gapsLoading, setGapsLoading] = useState(false);
   const [selectedControl, setSelectedControl] = useState(null);
   const [controlDetail, setControlDetail] = useState(null);
   const [evidence, setEvidence] = useState([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
@@ -27,6 +30,15 @@ function CompAIControls() {
   const [ghEvidenceType, setGhEvidenceType] = useState('last_commit');
   const [ghSubmitting, setGhSubmitting] = useState(false);
 
+  // Remediation (Phase 5)
+  const [remediationTask, setRemediationTask] = useState(null);
+  const [remediationLoading, setRemediationLoading] = useState(false);
+  const [remediationSubmitting, setRemediationSubmitting] = useState(false);
+  const [remediationAssignedTo, setRemediationAssignedTo] = useState('');
+  const [remediationDueDate, setRemediationDueDate] = useState('');
+  const [remediationStatus, setRemediationStatus] = useState('open');
+  const [remediationNotes, setRemediationNotes] = useState('');
+
   useEffect(() => {
     loadControls();
   }, []);
@@ -35,9 +47,11 @@ function CompAIControls() {
     if (selectedControl) {
       loadControlDetail(selectedControl.id);
       loadEvidence(selectedControl.id);
+      loadRemediation(selectedControl.id);
     } else {
       setControlDetail(null);
       setEvidence([]);
+      setRemediationTask(null);
     }
   }, [selectedControl]);
 
@@ -72,6 +86,141 @@ function CompAIControls() {
       setEvidence(Array.isArray(list) ? list : []);
     } catch {
       setEvidence([]);
+    }
+  };
+
+  const loadRemediation = async (controlId) => {
+    setRemediationLoading(true);
+    try {
+      const task = await compAiApi.getControlRemediation(controlId);
+      setRemediationTask(task);
+      if (task) {
+        setRemediationAssignedTo(task.assigned_to || '');
+        setRemediationDueDate(task.due_date ? task.due_date.slice(0, 10) : '');
+        setRemediationStatus(task.status || 'open');
+        setRemediationNotes(task.notes || '');
+      } else {
+        setRemediationAssignedTo('');
+        setRemediationDueDate('');
+        setRemediationStatus('open');
+        setRemediationNotes('');
+      }
+    } catch {
+      setRemediationTask(null);
+    } finally {
+      setRemediationLoading(false);
+    }
+  };
+
+  const handleSaveRemediation = async (e) => {
+    e.preventDefault();
+    if (!selectedControl) return;
+    setRemediationSubmitting(true);
+    clearMessages();
+    try {
+      await compAiApi.putControlRemediation(selectedControl.id, {
+        assigned_to: remediationAssignedTo.trim() || undefined,
+        due_date: remediationDueDate.trim() || undefined,
+        status: remediationStatus,
+        notes: remediationNotes.trim() || undefined,
+      });
+      setSuccess('Remediation saved.');
+      loadRemediation(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to save remediation');
+    } finally {
+      setRemediationSubmitting(false);
+    }
+  };
+
+  const loadGaps = async () => {
+    setGapsLoading(true);
+    setError(null);
+    try {
+      const list = await compAiApi.getControlsGaps();
+      setGaps(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setError(err.message || 'Failed to load gaps');
+    } finally {
+      setGapsLoading(false);
+    }
+  };
+
+  const handleDownloadAuditExport = async () => {
+    setExportLoading(true);
+    clearMessages();
+    try {
+      const data = await compAiApi.getControlsExport();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `comp-ai-audit-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess('Audit export downloaded.');
+    } catch (err) {
+      setError(err.message || 'Failed to download audit export');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleDownloadCsvExport = async () => {
+    setExportLoading(true);
+    clearMessages();
+    try {
+      const blob = await compAiApi.getControlsExport('csv');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `comp-ai-audit-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess('CSV export downloaded.');
+    } catch (err) {
+      setError(err.message || 'Failed to download CSV export');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handlePrintExport = async () => {
+    setExportLoading(true);
+    clearMessages();
+    try {
+      const data = await compAiApi.getControlsExport();
+      const win = window.open('', '_blank');
+      if (!win) {
+        setError('Please allow pop-ups to print.');
+        return;
+      }
+      const rows = (data.controls || []).map((e) => {
+        const reqs = (e.control?.requirements || []).map((r) => `${r.framework_slug}:${r.code}`).join(', ');
+        const evCount = (e.evidence || []).length;
+        const evTypes = (e.evidence || []).map((ev) => ev.type).join(', ');
+        return `<tr><td>${e.control?.internal_id ?? ''}</td><td>${e.control?.name ?? ''}</td><td>${reqs}</td><td>${evCount}</td><td>${evTypes}</td></tr>`;
+      }).join('');
+      win.document.write(`
+        <!DOCTYPE html><html><head><title>Comp-AI Audit Export</title>
+        <style>body{font-family:sans-serif;padding:20px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ccc;padding:8px;text-align:left;} th{background:#eee;}</style>
+        </head><body>
+        <h1>Comp-AI Audit Export</h1>
+        <p>Exported: ${data.exported_at || new Date().toISOString()}</p>
+        <table>
+        <thead><tr><th>Control ID</th><th>Name</th><th>Requirements</th><th>Evidence count</th><th>Evidence types</th></tr></thead>
+        <tbody>${rows}</tbody>
+        </table>
+        </body></html>
+      `);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { win.print(); win.close(); }, 250);
+      setSuccess('Print dialog opened. Use "Save as PDF" to save as PDF.');
+    } catch (err) {
+      setError(err.message || 'Failed to open print view');
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -139,7 +288,7 @@ function CompAIControls() {
   return (
     <PageTemplate
       title="Controls & Evidence"
-      subtitle="Compliance controls and evidence (Phase 4)"
+      subtitle="Compliance controls, evidence, and audit export (Phase 4 & 5)"
     >
       <div className="comp-ai-container comp-ai-controls-container">
         <div className="comp-ai-controls-main">
@@ -153,6 +302,64 @@ function CompAIControls() {
               {success}
             </div>
           )}
+
+          <div className="comp-ai-controls-section comp-ai-audit-actions">
+            <h2>Audit (Phase 5)</h2>
+            <p className="comp-ai-form-hint">Download a full export for auditors. View controls that have no evidence (gaps).</p>
+            <div className="comp-ai-button-row">
+              <button
+                type="button"
+                className="comp-ai-submit-btn"
+                onClick={handleDownloadAuditExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? 'Preparing...' : 'Download JSON'}
+              </button>
+              <button
+                type="button"
+                className="comp-ai-secondary-btn"
+                onClick={handleDownloadCsvExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? 'Preparing...' : 'Download CSV'}
+              </button>
+              <button
+                type="button"
+                className="comp-ai-secondary-btn"
+                onClick={handlePrintExport}
+                disabled={exportLoading}
+              >
+                {exportLoading ? 'Preparing...' : 'Print / Save as PDF'}
+              </button>
+              <button
+                type="button"
+                className="comp-ai-secondary-btn"
+                onClick={loadGaps}
+                disabled={gapsLoading}
+              >
+                {gapsLoading ? 'Loading...' : 'Show gaps'}
+              </button>
+            </div>
+            {gaps.length > 0 && (
+              <div className="comp-ai-gaps-section">
+                <h3>Controls with no evidence ({gaps.length})</h3>
+                <ul className="comp-ai-controls-list comp-ai-gaps-list">
+                  {gaps.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        className="comp-ai-control-item"
+                        onClick={() => setSelectedControl(c)}
+                      >
+                        <span className="comp-ai-control-id">{c.internal_id}</span>
+                        <span className="comp-ai-control-name">{c.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
 
           <div className="comp-ai-controls-section">
             <h2>Controls</h2>
@@ -199,6 +406,68 @@ function CompAIControls() {
                         </ul>
                       </div>
                     )}
+                  </>
+                )}
+              </div>
+
+              <div className="comp-ai-controls-section comp-ai-remediation-section">
+                <h2>Remediation (Phase 5)</h2>
+                <p className="comp-ai-form-hint">Track gaps: assign owner, due date, and status (open / in progress / done).</p>
+                {remediationLoading && <div className="comp-ai-loading">Loading...</div>}
+                {!remediationLoading && (
+                  <>
+                    {remediationTask && (
+                      <div className="comp-ai-remediation-current">
+                        <p><strong>Current:</strong> {remediationTask.assigned_to || '—'} · Due {remediationTask.due_date || '—'} · {remediationTask.status}</p>
+                        {remediationTask.notes && <p className="comp-ai-remediation-notes">{remediationTask.notes}</p>}
+                      </div>
+                    )}
+                    <form onSubmit={handleSaveRemediation} className="comp-ai-evidence-form">
+                      <div className="form-group">
+                        <label htmlFor="remediation-assigned">Assigned to</label>
+                        <input
+                          id="remediation-assigned"
+                          type="text"
+                          value={remediationAssignedTo}
+                          onChange={(e) => setRemediationAssignedTo(e.target.value)}
+                          placeholder="Owner or team"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="remediation-due">Due date</label>
+                        <input
+                          id="remediation-due"
+                          type="date"
+                          value={remediationDueDate}
+                          onChange={(e) => setRemediationDueDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="remediation-status">Status</label>
+                        <select
+                          id="remediation-status"
+                          value={remediationStatus}
+                          onChange={(e) => setRemediationStatus(e.target.value)}
+                        >
+                          <option value="open">Open</option>
+                          <option value="in_progress">In progress</option>
+                          <option value="done">Done</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="remediation-notes">Notes</label>
+                        <textarea
+                          id="remediation-notes"
+                          value={remediationNotes}
+                          onChange={(e) => setRemediationNotes(e.target.value)}
+                          placeholder="Remediation notes"
+                          rows={2}
+                        />
+                      </div>
+                      <button type="submit" className="comp-ai-submit-btn" disabled={remediationSubmitting}>
+                        {remediationSubmitting ? 'Saving...' : remediationTask ? 'Update remediation' : 'Start remediation'}
+                      </button>
+                    </form>
                   </>
                 )}
               </div>
@@ -326,7 +595,8 @@ function CompAIControls() {
             <h3>Controls & Evidence</h3>
             <p>
               Select a control to view requirements and evidence. Add evidence manually or collect from GitHub
-              (last commit or branch protection).
+              (last commit or branch protection). Use <strong>Download for audit</strong> to export a full
+              JSON for auditors; use <strong>Show gaps</strong> to list controls with no evidence.
             </p>
           </div>
           <div className="comp-ai-info-card">

@@ -2,8 +2,8 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::Json,
+    http::{header, StatusCode},
+    response::{IntoResponse, Json, Response},
 };
 use std::sync::Arc;
 use sqlx::PgPool;
@@ -11,9 +11,14 @@ use crate::config::AppConfig;
 use crate::auth::extract_user;
 use crate::models::{
     Control, ControlWithRequirements, EvidenceItem, CreateEvidenceRequest, CreateEvidenceResponse,
-    GitHubEvidenceRequest,
+    GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
 };
-use crate::db::queries::{list_controls, get_control_with_requirements, list_evidence, create_evidence};
+use crate::db::queries::{
+    list_controls, get_control_with_requirements, list_evidence, create_evidence,
+    list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
+    upsert_remediation,
+};
+use chrono::NaiveDate;
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use chrono::Utc;
 use crate::handlers::comp_ai::ResponseCache;
@@ -92,6 +97,321 @@ pub async fn get_control(
     };
 
     Ok(Json(c))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ExportQuery {
+    pub format: Option<String>,
+}
+
+fn escape_csv(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls/export",
+    tag = "controls",
+    params(("format" = Option<String>, Query, description = "csv for CSV export, omit for JSON")),
+    responses(
+        (status = 200, description = "Audit export (controls + requirements + evidence) as JSON or CSV"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_controls_export(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<ExportQuery>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let controls = list_controls(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_controls (export) failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list controls"})),
+            )
+        })?;
+
+    let mut entries = Vec::with_capacity(controls.len());
+    for c in &controls {
+        let control_detail = get_control_with_requirements(pool, c.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("get_control_with_requirements (export) failed: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to build export"})),
+                )
+            })?;
+        let evidence = list_evidence(pool, Some(c.id), 500, 0)
+            .await
+            .map_err(|e| {
+                tracing::error!("list_evidence (export) failed: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to build export"})),
+                )
+            })?;
+        let control_with_req = control_detail.unwrap_or_else(|| ControlWithRequirements {
+            id: c.id,
+            internal_id: c.internal_id.clone(),
+            name: c.name.clone(),
+            description: c.description.clone(),
+            category: c.category.clone(),
+            created_at: c.created_at,
+            requirements: vec![],
+        });
+        entries.push(ControlExportEntry {
+            control: control_with_req,
+            evidence,
+        });
+    }
+
+    let export = AuditExport {
+        exported_at: Utc::now(),
+        controls: entries,
+    };
+
+    let want_csv = q
+        .format
+        .as_deref()
+        .map(|s| s.trim().eq_ignore_ascii_case("csv"))
+        .unwrap_or(false);
+
+    if want_csv {
+        let mut csv = String::from("control_id,internal_id,name,description,requirement_codes,evidence_count,evidence_types\n");
+        for e in &export.controls {
+            let req_codes: Vec<String> = e
+                .control
+                .requirements
+                .iter()
+                .map(|r| format!("{}:{}", r.framework_slug, r.code))
+                .collect();
+            let req_codes = req_codes.join("|");
+            let ev_count = e.evidence.len();
+            let ev_types: Vec<&str> = e.evidence.iter().map(|ev| ev.r#type.as_str()).collect();
+            let ev_types = ev_types.join("|");
+            csv.push_str(&format!(
+                "{},{},{},{},{},{},{}\n",
+                e.control.id,
+                escape_csv(&e.control.internal_id),
+                escape_csv(&e.control.name),
+                escape_csv(e.control.description.as_deref().unwrap_or("")),
+                escape_csv(&req_codes),
+                ev_count,
+                escape_csv(&ev_types),
+            ));
+        }
+        let filename = format!("comp-ai-audit-export-{}.csv", export.exported_at.format("%Y-%m-%d"));
+        let body = axum::body::Body::from(csv);
+        let res = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/csv; charset=utf-8")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", filename),
+            )
+            .body(body)
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to build response"})),
+                )
+            })?;
+        Ok(res)
+    } else {
+        Ok(Json(export).into_response())
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls/gaps",
+    tag = "controls",
+    responses(
+        (status = 200, description = "Controls with no evidence (gaps)", body = Vec<Control>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_controls_gaps(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Control>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let gaps = list_controls_without_evidence(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_controls_without_evidence failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list gaps"})),
+            )
+        })?;
+
+    Ok(Json(gaps))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RemediationQuery {
+    pub control_id: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/remediation",
+    tag = "controls",
+    params(("control_id" = Option<i64>, Query, description = "Filter by control ID")),
+    responses(
+        (status = 200, description = "List of remediation tasks", body = Vec<RemediationTask>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_remediation(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<RemediationQuery>,
+) -> Result<Json<Vec<RemediationTask>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let tasks = list_remediation_tasks(pool, q.control_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_remediation_tasks failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list remediation tasks"})),
+            )
+        })?;
+
+    Ok(Json(tasks))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls/{id}/remediation",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    responses(
+        (status = 200, description = "Remediation task for control", body = RemediationTask),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "No remediation task for this control"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_control_remediation(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<RemediationTask>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let task = get_remediation_by_control_id(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_remediation_by_control_id failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get remediation"})),
+            )
+        })?;
+
+    let Some(t) = task else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "No remediation task for this control"})),
+        ));
+    };
+
+    Ok(Json(t))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/controls/{id}/remediation",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    request_body = UpsertRemediationRequest,
+    responses(
+        (status = 200, description = "Remediation task created or updated", body = RemediationTask),
+        (status = 400, description = "Invalid request (e.g. invalid due_date or status)"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn put_control_remediation(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<UpsertRemediationRequest>,
+) -> Result<Json<RemediationTask>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let due_date = body
+        .due_date
+        .as_deref()
+        .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok());
+    let status = body
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let valid_statuses = ["open", "in_progress", "done"];
+    if let Some(s) = status {
+        if !valid_statuses.contains(&s) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Invalid status",
+                    "detail": "Use open, in_progress, or done"
+                })),
+            ));
+        }
+    }
+
+    let task = upsert_remediation(
+        pool,
+        id,
+        body.assigned_to.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        due_date,
+        status,
+        body.notes.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("upsert_remediation failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to save remediation task"})),
+        )
+    })?;
+
+    Ok(Json(task))
 }
 
 #[derive(Debug, serde::Deserialize)]

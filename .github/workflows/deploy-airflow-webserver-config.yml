@@ -1,0 +1,125 @@
+# Deploy Airflow webserver_config.py to remote host and restart apiserver.
+# Uses pipeline as much as possible; only the copy + restart run via SSH on remote.
+name: Deploy Airflow Webserver Config
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/config/webserver_config.py'
+      - '.github/workflows/deploy-airflow-webserver-config.yml'
+  workflow_dispatch:
+
+env:
+  REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+  REMOTE_USER: ${{ secrets.REMOTE_USER }}
+  REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+
+jobs:
+  deploy-config:
+    name: Deploy webserver_config and restart apiserver
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
+            echo "❌ Error: REMOTE_HOST secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
+            echo "❌ Error: REMOTE_USER secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ ! -s ~/.ssh/deploy_key ]; then
+            echo "❌ Error: SSH key file is empty or missing"
+            exit 1
+          fi
+          if ! grep -q "^-----BEGIN" ~/.ssh/deploy_key; then
+            echo "❌ Error: SSH key format is incorrect"
+            exit 1
+          fi
+          if [ -n "$REMOTE_HOST" ]; then
+            ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          echo "✅ SSH key ready"
+
+      - name: Copy webserver_config.py to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Copying lianel/dc/config/webserver_config.py to remote..."
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P "${REMOTE_PORT}" \
+            lianel/dc/config/webserver_config.py \
+            "${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/config/webserver_config.py" || {
+            echo "❌ scp failed"
+            exit 1
+          }
+          echo "✅ Config copied to /root/lianel/dc/config/webserver_config.py"
+
+      - name: Restart Airflow apiserver on remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Restarting airflow-apiserver on remote..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "cd /root/lianel/dc && docker compose -f docker-compose.airflow.yaml restart airflow-apiserver" || {
+            echo "❌ restart failed"
+            exit 1
+          }
+          echo "✅ airflow-apiserver restarted"
+
+      - name: Sync to hosting-base path (if present)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "test -d /root/hosting-base/lianel/dc/config && cp /root/lianel/dc/config/webserver_config.py /root/hosting-base/lianel/dc/config/webserver_config.py && echo '✅ Synced to hosting-base' || true"
+
+      - name: Deploy Summary
+        run: |
+          echo "## 🔄 Airflow Webserver Config Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **File**: \`lianel/dc/config/webserver_config.py\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Destination**: \`${{ secrets.REMOTE_HOST }}:/root/lianel/dc/config/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: \`airflow-apiserver\` restarted" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY

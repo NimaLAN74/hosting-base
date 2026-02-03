@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run Phase 4/5 comp_ai migrations (009–013) on the DB used by comp-ai-service.
+# Run Phase 4/5 comp_ai migrations (009–015) on the DB used by comp-ai-service.
 # Run from lianel/dc (where .env and database/migrations live).
 # Usage: from lianel/dc: bash scripts/deployment/run-comp-ai-migrations.sh
 #
@@ -31,7 +31,9 @@ for f in "$MIGRATIONS_DIR/009_create_comp_ai_schema.sql" \
          "$MIGRATIONS_DIR/010_comp_ai_controls_evidence.sql" \
          "$MIGRATIONS_DIR/011_comp_ai_seed_soc2.sql" \
          "$MIGRATIONS_DIR/012_comp_ai_grants.sql" \
-         "$MIGRATIONS_DIR/013_comp_ai_seed_iso27001.sql"; do
+         "$MIGRATIONS_DIR/013_comp_ai_seed_iso27001.sql" \
+         "$MIGRATIONS_DIR/014_comp_ai_remediation_tasks.sql" \
+         "$MIGRATIONS_DIR/015_comp_ai_seed_gdpr.sql"; do
   if [ ! -f "$f" ]; then
     echo "Missing $f" >&2
     exit 1
@@ -56,12 +58,14 @@ run_psql() {
   fi
 }
 
-echo "Running comp_ai migrations (009–013)..."
+echo "Running comp_ai migrations (009–015)..."
 for f in "$MIGRATIONS_DIR/009_create_comp_ai_schema.sql" \
          "$MIGRATIONS_DIR/010_comp_ai_controls_evidence.sql" \
          "$MIGRATIONS_DIR/011_comp_ai_seed_soc2.sql" \
          "$MIGRATIONS_DIR/012_comp_ai_grants.sql" \
-         "$MIGRATIONS_DIR/013_comp_ai_seed_iso27001.sql"; do
+         "$MIGRATIONS_DIR/013_comp_ai_seed_iso27001.sql" \
+         "$MIGRATIONS_DIR/014_comp_ai_remediation_tasks.sql" \
+         "$MIGRATIONS_DIR/015_comp_ai_seed_gdpr.sql"; do
   echo "  $f"
   run_psql "$f"
 done

@@ -47,6 +47,8 @@ services:
       - /root/lianel/dc/nginx/config/nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - nginx-logs:/var/log/nginx
+      # Airflow login page static (run scripts/copy-airflow-login-static.sh on host to populate)
+      - /root/airflow-login-static:/var/www/airflow-login-static:ro
     depends_on:
       - keycloak
     restart: unless-stopped

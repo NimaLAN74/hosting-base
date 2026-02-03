@@ -87,3 +87,39 @@ pub struct GitHubEvidenceRequest {
     /// "last_commit" or "branch_protection"
     pub evidence_type: String,
 }
+
+/// One control with requirements and evidence for audit export (Phase 5).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ControlExportEntry {
+    pub control: ControlWithRequirements,
+    pub evidence: Vec<EvidenceItem>,
+}
+
+/// Full audit export payload (Phase 5).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AuditExport {
+    pub exported_at: DateTime<Utc>,
+    pub controls: Vec<ControlExportEntry>,
+}
+
+/// Remediation task for a control (Phase 5 – gaps workflow).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RemediationTask {
+    pub id: i64,
+    pub control_id: i64,
+    pub assigned_to: Option<String>,
+    pub due_date: Option<chrono::NaiveDate>,
+    pub status: String,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Create or update remediation (assignee, due_date, status, notes).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpsertRemediationRequest {
+    pub assigned_to: Option<String>,
+    pub due_date: Option<String>,
+    pub status: Option<String>,
+    pub notes: Option<String>,
+}

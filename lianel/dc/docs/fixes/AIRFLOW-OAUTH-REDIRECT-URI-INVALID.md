@@ -8,8 +8,8 @@
 
 ## Cause
 
-1. **Scheme**: Airflow (Flask-AppBuilder) was building the redirect_uri with **http** instead of **https**. Nginx was forwarding `X-Forwarded-Proto: $scheme`; using literal **https** for the Airflow proxy ensures the app sees HTTPS.
-2. **Path**: FAB’s auth blueprint uses the **`/auth/`** prefix, so the callback URL is **`/auth/oauth-authorized/keycloak`**, not `/oauth-authorized/keycloak`. Keycloak’s Airflow client only had `https://airflow.lianel.se/oauth-authorized/keycloak` as a valid redirect URI, so the actual callback was rejected.
+1. **Scheme**: FAB's **AuthOAuthView** builds `redirect_uri` with **`url_for(".oauth_authorized", provider=provider, _external=True)`** and passes it to `authorize_redirect()`. So the scheme comes from the **current request**. If the proxy does not send **`X-Forwarded-Proto: https`**, the app sees **http** and sends `redirect_uri=http://...` to Keycloak, which rejects it. Nginx must set **`proxy_set_header X-Forwarded-Proto https`** (literal) for the Airflow `location /`.
+2. **Path**: FAB’s auth blueprint uses the **`/auth/`** prefix, so the callback URL is **`/auth/oauth-authorized/keycloak`**, not `/oauth-authorized/keycloak`. Keycloak’s Airflow client must include `https://airflow.lianel.se/auth/oauth-authorized/keycloak` in Valid Redirect URIs (script adds it).
 
 ---
 
@@ -48,6 +48,12 @@ In the **airflow.lianel.se** HTTPS server block, `location /`:
    - **Option B**: In Keycloak Admin UI: **Clients → airflow → Valid redirect URIs** → add **`https://airflow.lianel.se/auth/oauth-authorized/keycloak`** → Save.
 
 3. **Retest**: Open https://airflow.lianel.se, click login, then “Sign in with Keycloak”. Keycloak should accept the redirect_uri and complete the flow.
+
+---
+
+## Source map 404 (Keycloak theme, optional)
+
+The browser may report **Source map error: request failed with status 404** for `auth.lianel.se/resources/.../patternfly.min.css.map`. This is a Keycloak theme asset; it does not affect the OAuth flow or login. You can ignore it or fix it in the Keycloak theme if needed.
 
 ---
 

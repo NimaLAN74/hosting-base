@@ -98,6 +98,55 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** Phase 5: audit export (controls + requirements + evidence). format: undefined = JSON, 'csv' = CSV blob. */
+  async getControlsExport(format = undefined) {
+    const url = format === 'csv'
+      ? '/api/v1/controls/export?format=csv'
+      : '/api/v1/controls/export';
+    const res = await authenticatedFetch(url);
+    if (!res.ok) throw new Error('Failed to fetch audit export');
+    if (format === 'csv') return res.blob();
+    return res.json();
+  },
+
+  /** Phase 5: controls with no evidence (gaps). */
+  async getControlsGaps() {
+    const res = await authenticatedFetch('/api/v1/controls/gaps');
+    if (!res.ok) throw new Error('Failed to fetch gaps');
+    return res.json();
+  },
+
+  /** Phase 5: remediation tasks (optional filter by control_id). */
+  async getRemediation({ control_id } = {}) {
+    const res = await authenticatedFetch(
+      `/api/v1/remediation${buildQuery({ control_id })}`
+    );
+    if (!res.ok) throw new Error('Failed to fetch remediation tasks');
+    return res.json();
+  },
+
+  /** Phase 5: get remediation for one control. */
+  async getControlRemediation(controlId) {
+    const res = await authenticatedFetch(`/api/v1/controls/${controlId}/remediation`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('Failed to fetch remediation');
+    return res.json();
+  },
+
+  /** Phase 5: create or update remediation for a control. */
+  async putControlRemediation(controlId, body) {
+    const res = await authenticatedFetch(`/api/v1/controls/${controlId}/remediation`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to save remediation');
+    }
+    return res.json();
+  },
+
   async getEvidence({ control_id, limit = 50, offset = 0 } = {}) {
     const res = await authenticatedFetch(
       `/api/v1/evidence${buildQuery({ control_id, limit, offset })}`

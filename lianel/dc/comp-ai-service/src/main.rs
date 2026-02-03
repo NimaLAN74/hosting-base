@@ -25,7 +25,11 @@ use utoipa_swagger_ui::SwaggerUi;
 use config::AppConfig;
 use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
-use handlers::controls::{get_controls, get_control, get_evidence, post_evidence, post_github_evidence};
+use handlers::controls::{
+    get_controls, get_control, get_controls_export, get_controls_gaps,
+    get_remediation, get_control_remediation, put_control_remediation,
+    get_evidence, post_evidence, post_github_evidence,
+};
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
 use response_cache::create_cache;
@@ -40,6 +44,11 @@ use sqlx::PgPool;
         handlers::comp_ai::get_frameworks,
         handlers::controls::get_controls,
         handlers::controls::get_control,
+        handlers::controls::get_controls_export,
+        handlers::controls::get_controls_gaps,
+        handlers::controls::get_remediation,
+        handlers::controls::get_control_remediation,
+        handlers::controls::put_control_remediation,
         handlers::controls::get_evidence,
         handlers::controls::post_evidence,
         handlers::controls::post_github_evidence,
@@ -60,6 +69,10 @@ use sqlx::PgPool;
         models::CreateEvidenceRequest,
         models::CreateEvidenceResponse,
         models::GitHubEvidenceRequest,
+        models::ControlExportEntry,
+        models::AuditExport,
+        models::RemediationTask,
+        models::UpsertRemediationRequest,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -131,7 +144,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/history", get(get_request_history))
         .route("/api/v1/frameworks", get(get_frameworks))
         .route("/api/v1/controls", get(get_controls))
+        .route("/api/v1/controls/export", get(get_controls_export))
+        .route("/api/v1/controls/gaps", get(get_controls_gaps))
+        .route("/api/v1/controls/:id/remediation", get(get_control_remediation).put(put_control_remediation))
         .route("/api/v1/controls/:id", get(get_control))
+        .route("/api/v1/remediation", get(get_remediation))
         .route("/api/v1/evidence", get(get_evidence).post(post_evidence))
         .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
         .layer(rate_limit_layer)
@@ -150,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
                 .layer(
                     CorsLayer::new()
                         .allow_origin(AllowOrigin::any())
-                        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT])
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
         );
