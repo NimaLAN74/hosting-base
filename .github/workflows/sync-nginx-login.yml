@@ -34,24 +34,25 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH ready"
 
-      - name: Copy nginx.conf to remote
+      - name: Copy nginx.conf and docker-compose.infra.yaml to remote
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           set -e
-          echo "Copying nginx.conf to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
+          echo "Copying nginx.conf and docker-compose.infra.yaml to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
           scp -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=30 \
             -P "${REMOTE_PORT}" \
             lianel/dc/nginx/config/nginx.conf \
-            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
-          echo "✅ Copied to /tmp/nginx.conf on remote"
+            lianel/dc/docker-compose.infra.yaml \
+            "${REMOTE_USER}@${REMOTE_HOST}:/tmp/"
+          echo "✅ Copied to /tmp on remote"
 
-      - name: Apply nginx and reload
+      - name: Apply config, restart Keycloak, reload nginx
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -65,16 +66,21 @@ jobs:
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" '
             set -e
-            echo "Writing nginx.conf to /root/lianel/dc/nginx/config/..."
+            echo "Writing nginx.conf..."
             mkdir -p /root/lianel/dc/nginx/config
             cp /tmp/nginx.conf /root/lianel/dc/nginx/config/nginx.conf
-            echo "Testing nginx config..."
-            docker exec nginx-proxy nginx -t
-            echo "Reloading nginx..."
-            docker exec nginx-proxy nginx -s reload
-            echo "✅ Nginx updated and reloaded"
+            echo "Writing docker-compose.infra.yaml (KC_HOSTNAME=www for login form)..."
+            for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d "$d" ] && cp /tmp/docker-compose.infra.yaml "$d/" && echo "  Updated $d"; done
+            echo "Restarting Keycloak (picks up KC_HOSTNAME=https://www.lianel.se/auth)..."
+            cd /root/hosting-base/lianel/dc 2>/dev/null || cd /root/lianel/dc
+            docker compose -f docker-compose.infra.yaml up -d keycloak
+            echo "Waiting for Keycloak to start..."
+            sleep 25
+            echo "Testing and reloading nginx..."
+            docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload
+            echo "✅ Nginx + Keycloak updated"
           '
-          echo "✅ Nginx sync complete"
+          echo "✅ Config applied, Keycloak restarted, nginx reloaded"
 
       - name: Verify /auth/ goes to Keycloak
         env:
@@ -95,9 +101,8 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## Nginx synced for login fix" >> $GITHUB_STEP_SUMMARY
+          echo "## Login fix applied" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Config**: \`lianel/dc/nginx/config/nginx.conf\` → \`/root/lianel/dc/nginx/config/nginx.conf\` on server" >> $GITHUB_STEP_SUMMARY
-          echo "- **Nginx**: reloaded so \`/auth/\`, \`/realms/\`, \`/resources/\` on www.lianel.se go to Keycloak" >> $GITHUB_STEP_SUMMARY
-          echo "- **Next**: Open https://www.lianel.se in a **new tab** (or clear site data) and try logging in." >> $GITHUB_STEP_SUMMARY
-          echo "- If login still fails, run **Fix Keycloak Login (realm + frontend client)** workflow too." >> $GITHUB_STEP_SUMMARY
+          echo "- **Nginx**: \`/auth/\`, \`/realms/\`, \`/resources/\` on www → Keycloak" >> $GITHUB_STEP_SUMMARY
+          echo "- **Keycloak**: \`KC_HOSTNAME=https://www.lianel.se/auth\` so login form POST is same-origin" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next**: Open https://www.lianel.se in a **new tab** and log in." >> $GITHUB_STEP_SUMMARY

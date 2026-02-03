@@ -9,8 +9,9 @@ services:
       KC_DB_URL: jdbc:postgresql://172.18.0.1:5432/keycloak
       KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      # Use auth.lianel.se so Keycloak responds. Post-login redirect to app via realm frontendUrl + frontend-client rootUrl (run update-keycloak-frontend-client.sh + fix-keycloak-https.sh).
-      KC_HOSTNAME: auth.lianel.se
+      # Frontend (login form, theme, redirects) at www so form POST is same-origin; admin console on auth.
+      KC_HOSTNAME: https://www.lianel.se/auth
+      KC_HOSTNAME_ADMIN: https://auth.lianel.se
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_PROXY_HEADERS: xforwarded
