@@ -73,7 +73,7 @@ jobs:
             for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d "$d" ] && cp /tmp/docker-compose.infra.yaml "$d/" && echo "  Updated $d"; done
             echo "Restarting Keycloak (picks up KC_HOSTNAME=https://www.lianel.se/auth)..."
             cd /root/hosting-base/lianel/dc 2>/dev/null || cd /root/lianel/dc
-            docker compose -f docker-compose.infra.yaml up -d keycloak
+            docker compose -f docker-compose.infra.yaml up -d --force-recreate keycloak
             echo "Waiting for Keycloak to start..."
             sleep 25
             echo "Testing and reloading nginx..."
