@@ -312,9 +312,8 @@ pub async fn get_remediation(
     tag = "controls",
     params(("id" = i64, Path, description = "Control ID")),
     responses(
-        (status = 200, description = "Remediation task for control", body = RemediationTask),
+        (status = 200, description = "Remediation task for control, or null if none", body = Option<RemediationTask>),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "No remediation task for this control"),
         (status = 500, description = "Internal server error")
     )
 )]
@@ -322,7 +321,7 @@ pub async fn get_control_remediation(
     headers: axum::http::HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
-) -> Result<Json<RemediationTask>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<Option<RemediationTask>>, (StatusCode, Json<serde_json::Value>)> {
     let (config, pool, _) = &state;
     let _user = extract_user(&headers, config.clone())
         .await
@@ -338,14 +337,7 @@ pub async fn get_control_remediation(
             )
         })?;
 
-    let Some(t) = task else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "No remediation task for this control"})),
-        ));
-    };
-
-    Ok(Json(t))
+    Ok(Json(task))
 }
 
 #[utoipa::path(

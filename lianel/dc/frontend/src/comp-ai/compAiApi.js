@@ -125,12 +125,12 @@ export const compAiApi = {
     return res.json();
   },
 
-  /** Phase 5: get remediation for one control. */
+  /** Phase 5: get remediation for one control. Returns task or null (200 with null when no task). */
   async getControlRemediation(controlId) {
     const res = await authenticatedFetch(`/api/v1/controls/${controlId}/remediation`);
-    if (res.status === 404) return null;
     if (!res.ok) throw new Error('Failed to fetch remediation');
-    return res.json();
+    const data = await res.json();
+    return data ?? null;
   },
 
   /** Phase 5: create or update remediation for a control. */
