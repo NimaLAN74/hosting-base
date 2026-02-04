@@ -6,10 +6,24 @@ Used by comp_ai_control_tests_dag and future Comp-AI DAGs (scan, gap analysis, a
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Optional
 
 import requests
+
+log = logging.getLogger(__name__)
+
+
+def _ascii_safe(s: str) -> str:
+    """Strip non-ASCII so HTTP headers (latin-1) don't raise UnicodeEncodeError."""
+    ascii_only = s.encode("ascii", "ignore").decode("ascii")
+    if len(ascii_only) != len(s):
+        log.warning(
+            "COMP_AI_TOKEN or COMP_AI_BASE_URL contained non-ASCII characters; "
+            "ensure Variable values use only ASCII (e.g. no ellipsis …)."
+        )
+    return ascii_only
 
 
 def _get_config() -> tuple[str, str]:
@@ -17,9 +31,9 @@ def _get_config() -> tuple[str, str]:
     base_url = os.environ.get("COMP_AI_BASE_URL")
     token = os.environ.get("COMP_AI_TOKEN")
     try:
-        from airflow.models import Variable
-        base_url = base_url or Variable.get("COMP_AI_BASE_URL", default_var=None)
-        token = token or Variable.get("COMP_AI_TOKEN", default_var=None)
+        from airflow.sdk import Variable
+        base_url = base_url or Variable.get("COMP_AI_BASE_URL", default=None)
+        token = token or Variable.get("COMP_AI_TOKEN", default=None)
     except Exception:
         pass
     if not base_url or not token:
@@ -27,6 +41,9 @@ def _get_config() -> tuple[str, str]:
             "COMP_AI_BASE_URL and COMP_AI_TOKEN must be set (Airflow Variables or env)"
         )
     base_url = base_url.rstrip("/")
+    # Ensure header-safe (ASCII only) so requests/urllib3 don't raise UnicodeEncodeError
+    base_url = _ascii_safe(base_url)
+    token = _ascii_safe(token)
     return base_url, token
 
 

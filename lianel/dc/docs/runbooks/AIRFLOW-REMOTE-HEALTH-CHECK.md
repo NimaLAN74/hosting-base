@@ -5,6 +5,33 @@
 
 ---
 
+## 0. HTTP 500 on GET /auth/login/
+
+**Symptom**: `GET https://airflow.lianel.se/auth/login/?next=...` returns **500 Internal Server Error**.
+
+**Steps (on server):**
+
+1. **Check apiserver logs** for the traceback:
+   ```bash
+   docker logs dc-airflow-apiserver-1 2>&1 | tail -200
+   ```
+   Or find the container name: `docker ps -q -f name=airflow-apiserver` then `docker logs <container> 2>&1 | tail -200`.
+
+2. **Common causes:**
+   - **`sqlalchemy.exc.PendingRollbackError: Can't reconnect until invalid transaction is rolled back`** — The Airflow metadata DB connection is in an invalid state (e.g. after DB restart, network blip, or long idle). **Fix:** Restart the apiserver (see step 3 below). No config change needed.
+   - **Missing or empty `AIRFLOW_OAUTH_CLIENT_SECRET`** — FAB/OAuth may fail when rendering the login page if the Keycloak client secret is not set. In `.env` (or env for the Airflow containers) set `AIRFLOW_OAUTH_CLIENT_SECRET` to the **airflow** client secret from Keycloak (Admin → Clients → airflow → Credentials).
+   - **Config load error** — `webserver_config.py` is loaded at startup; an exception there can cause 500 on first request. Ensure the file is present at `/opt/airflow/config/webserver_config.py` (e.g. in `config/` on the host mounted into the container) and that there are no Python syntax/import errors.
+   - **Keycloak unreachable** — If FAB or authlib fetches OIDC metadata when the login page loads, a network error (e.g. container cannot reach `auth.lianel.se`) can cause 500. From the host: `curl -sI https://auth.lianel.se/realms/lianel/.well-known/openid-configuration`.
+   - **Airflow 3 / FAB version** — After an Airflow or FAB upgrade, OAuth config keys may change. Compare `webserver_config.py` with the FAB docs for your version.
+
+3. **Quick fix:** Restart the apiserver after fixing env or config, then reload:
+   ```bash
+   cd /root/lianel/dc
+   docker compose -f docker-compose.airflow.yaml restart airflow-apiserver
+   ```
+
+---
+
 ## 1. Why `dc-airflow-worker-1` stays in "Created" status
 
 **Symptom**: `docker compose -f docker-compose.airflow.yaml ps -a` shows `dc-airflow-worker-1` with status **Created** (not Running).

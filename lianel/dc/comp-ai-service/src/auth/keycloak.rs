@@ -2,7 +2,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use base64::{Engine, engine::general_purpose};
 use std::sync::Arc;
 use crate::config::AppConfig;
 
@@ -30,96 +29,78 @@ impl KeycloakValidator {
         Self { config }
     }
 
-    /// Validate token using Keycloak's userinfo endpoint
-    /// This works with tokens from any client, including public clients
+    /// Validate token using Keycloak's introspection endpoint.
+    /// Introspection works with both user tokens and client_credentials (service account) tokens,
+    /// unlike userinfo which only works for user-centric tokens.
     pub async fn validate_token(&self, token: &str) -> Result<KeycloakTokenClaims> {
         let client = reqwest::Client::new();
-        
-        // Use userinfo endpoint (works with tokens from any client)
-        let userinfo_url = format!(
-            "{}/realms/{}/protocol/openid-connect/userinfo",
-            self.config.keycloak_url, self.config.keycloak_realm
+
+        let introspect_url = format!(
+            "{}/realms/{}/protocol/openid-connect/token/introspect",
+            self.config.keycloak_url,
+            self.config.keycloak_realm
         );
-        
-        let userinfo_response = client
-            .get(&userinfo_url)
-            .header("Authorization", format!("Bearer {}", token))
+
+        let params = [
+            ("token", token),
+            ("client_id", self.config.keycloak_client_id.as_str()),
+            ("client_secret", self.config.keycloak_client_secret.as_str()),
+        ];
+
+        let introspect_response = client
+            .post(&introspect_url)
+            .form(&params)
             .send()
             .await
             .context("Failed to connect to Keycloak")?;
 
-        if !userinfo_response.status().is_success() {
-            let status = userinfo_response.status();
-            let error_text = userinfo_response.text().await.unwrap_or_default();
+        if !introspect_response.status().is_success() {
+            let status = introspect_response.status();
+            let error_text = introspect_response.text().await.unwrap_or_default();
             return Err(anyhow::anyhow!(
-                "Keycloak userinfo endpoint returned status {}: {}",
+                "Keycloak introspection returned status {}: {}",
                 status,
                 error_text
             ));
         }
 
-        // Get userinfo data
-        let userinfo: Value = userinfo_response
+        let introspect: Value = introspect_response
             .json()
             .await
-            .context("Failed to parse userinfo response")?;
-        
-        // Try to decode JWT token to get additional claims (exp, iat, realm_access)
+            .context("Failed to parse introspection response")?;
+
+        let active = introspect.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !active {
+            return Err(anyhow::anyhow!("Token is not active (expired or invalid)"));
+        }
+
         let mut claims = KeycloakTokenClaims {
-            sub: userinfo
+            sub: introspect
                 .get("sub")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
-            email: userinfo
+            email: introspect
                 .get("email")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            preferred_username: userinfo
+            preferred_username: introspect
                 .get("preferred_username")
+                .or_else(|| introspect.get("username"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            realm_access: None,
-            exp: None,
-            iat: None,
+            realm_access: introspect
+                .get("realm_access")
+                .and_then(|v| serde_json::from_value(v.clone()).ok()),
+            exp: introspect
+                .get("exp")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize),
+            iat: introspect
+                .get("iat")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize),
         };
-
-        // Decode JWT token to get additional claims
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() == 3 {
-            // Try URL_SAFE_NO_PAD first, then fall back to URL_SAFE with padding
-            let claims_json = general_purpose::URL_SAFE_NO_PAD
-                .decode(parts[1])
-                .or_else(|_| {
-                    // Add padding if needed and try again
-                    let mut padded = parts[1].to_string();
-                    while padded.len() % 4 != 0 {
-                        padded.push('=');
-                    }
-                    general_purpose::URL_SAFE.decode(&padded)
-                });
-            
-            if let Ok(claims_bytes) = claims_json {
-                if let Ok(jwt_claims) = serde_json::from_slice::<Value>(&claims_bytes) {
-                    // Extract realm_access
-                    if let Some(realm_access) = jwt_claims.get("realm_access") {
-                        if let Ok(ra) = serde_json::from_value(realm_access.clone()) {
-                            claims.realm_access = Some(ra);
-                        }
-                    }
-                    
-                    // Extract exp and iat
-                    claims.exp = jwt_claims
-                        .get("exp")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v as usize);
-                    claims.iat = jwt_claims
-                        .get("iat")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v as usize);
-                }
-            }
-        }
 
         Ok(claims)
     }
