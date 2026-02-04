@@ -45,6 +45,10 @@ function CompAIControls() {
   const [remediationSuggest, setRemediationSuggest] = useState(null);
   const [remediationSuggestLoading, setRemediationSuggestLoading] = useState(false);
   const [remediationSuggestError, setRemediationSuggestError] = useState(null);
+  // Phase 7.2: AI gap/risk analysis
+  const [gapAnalysis, setGapAnalysis] = useState(null);
+  const [gapAnalysisLoading, setGapAnalysisLoading] = useState(false);
+  const [gapAnalysisError, setGapAnalysisError] = useState(null);
 
   useEffect(() => {
     loadControls();
@@ -160,6 +164,20 @@ function CompAIControls() {
   const handleUseSuggestionInNotes = () => {
     if (remediationSuggest?.suggestion) {
       setRemediationNotes((prev) => (prev ? `${prev}\n\n${remediationSuggest.suggestion}` : remediationSuggest.suggestion));
+    }
+  };
+
+  const handleAnalyseGaps = async () => {
+    setGapAnalysisLoading(true);
+    setGapAnalysisError(null);
+    setGapAnalysis(null);
+    try {
+      const data = await compAiApi.postAnalysisGaps({});
+      setGapAnalysis(data);
+    } catch (err) {
+      setGapAnalysisError(err.message || 'Failed to analyse gaps');
+    } finally {
+      setGapAnalysisLoading(false);
     }
   };
 
@@ -371,6 +389,23 @@ function CompAIControls() {
             {gaps.length > 0 && (
               <div className="comp-ai-gaps-section">
                 <h3>Controls with no evidence ({gaps.length})</h3>
+                <button
+                  type="button"
+                  className="comp-ai-secondary-btn comp-ai-analyse-gaps-btn"
+                  onClick={handleAnalyseGaps}
+                  disabled={gapAnalysisLoading}
+                >
+                  {gapAnalysisLoading ? 'Analysing...' : 'Analyse my gaps'}
+                </button>
+                {gapAnalysisError && (
+                  <p className="comp-ai-error" role="alert">{gapAnalysisError}</p>
+                )}
+                {gapAnalysis && (
+                  <div className="comp-ai-suggestion-card comp-ai-gap-analysis-card">
+                    <p className="comp-ai-suggestion-meta">Model: {gapAnalysis.model_used}</p>
+                    <div className="comp-ai-suggestion-text">{gapAnalysis.summary}</div>
+                  </div>
+                )}
                 <ul className="comp-ai-controls-list comp-ai-gaps-list">
                   {gaps.map((c) => (
                     <li key={c.id}>

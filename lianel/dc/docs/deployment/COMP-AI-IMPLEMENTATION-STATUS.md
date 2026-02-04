@@ -102,11 +102,15 @@
    - [x] **6C** Deeper AI remediation: POST /api/v1/controls/:id/remediation/suggest — control + requirements + current remediation passed to Ollama; optional request body `context`; returns `{ suggestion, model_used }` (503 if Ollama not configured; fallback to mock when COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true)
    - [x] **6D** This status document updated with Phase 6
 
-11. **Testing & Deployment**
+12. **Phase 7: AI risk/remediation** ✅
+   - [x] **7.1** UI for remediation suggest (Get AI suggestion, Use in notes) — done earlier
+   - [x] **7.2** AI gap/risk analysis: POST /api/v1/analysis/gaps (body: `{ framework?: string }`), returns `{ summary, model_used }`; frontend “Analyse my gaps” button in Controls when gaps are shown, summary card
+
+13. **Testing & Deployment**
    - [x] Build Docker image (pipeline)
    - [x] Deploy to remote host (pipeline)
    - [x] Verify service health (pipeline)
-   - [ ] Test API endpoints (manual or E2E) — optional: controls, gaps, export, remediation, remediation/suggest, tests
+   - [ ] Test API endpoints (manual or E2E) — optional: controls, gaps, export, remediation, remediation/suggest, analysis/gaps, tests
 
 ---
 
@@ -195,4 +199,6 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 ---
 
-**Next Action**: Optional manual/E2E verification of Phase 5/6 APIs. Phase 7 (AI risk/remediation); document/ops Phase A done; **G1 Test runner** done via Airflow (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL` and `COMP_AI_TOKEN` for DAG `comp_ai_control_tests`. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.
+**Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI) and **7.2 (AI gap/risk analysis)** done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card.
+
+**Next Action**: Optional 7.3 (structured apply) or 7.4 (retaliation/whistleblower). Document/ops Phase A done; G1 Test runner via Airflow (COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL` and `COMP_AI_TOKEN` for DAG `comp_ai_control_tests`. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.

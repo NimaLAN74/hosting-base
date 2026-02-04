@@ -170,3 +170,16 @@ pub struct RemediationSuggestResponse {
     pub suggestion: String,
     pub model_used: String,
 }
+
+/// Request for AI gap/risk analysis (Phase 7.2). Optional framework filter.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct GapAnalysisRequest {
+    pub framework: Option<String>,
+}
+
+/// AI-generated gap analysis summary (Phase 7.2).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GapAnalysisResponse {
+    pub summary: String,
+    pub model_used: String,
+}

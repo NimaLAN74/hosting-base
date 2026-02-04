@@ -14,6 +14,7 @@ use crate::models::{
     GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
     RequirementListItem, ControlTest, RecordTestResultRequest,
     RemediationSuggestRequest, RemediationSuggestResponse,
+    GapAnalysisRequest, GapAnalysisResponse,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence,
@@ -329,6 +330,124 @@ pub async fn get_controls_gaps(
         })?;
 
     Ok(Json(gaps))
+}
+
+// --- Phase 7.2: AI gap/risk analysis ---
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/analysis/gaps",
+    tag = "controls",
+    request_body = GapAnalysisRequest,
+    responses(
+        (status = 200, description = "AI-generated gap analysis summary", body = GapAnalysisResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "AI model not available"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_analysis_gaps(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<GapAnalysisRequest>,
+) -> Result<Json<GapAnalysisResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let gaps = list_controls_without_evidence(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_controls_without_evidence failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list gaps"})),
+            )
+        })?;
+
+    let framework_hint = body
+        .framework
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| format!(" (focus on framework: {})", s))
+        .unwrap_or_else(|| "".to_string());
+
+    let gap_list: Vec<String> = gaps
+        .iter()
+        .map(|c| {
+            format!(
+                "- {} [{}]: {}",
+                c.internal_id,
+                c.name,
+                c.description.as_deref().unwrap_or("(no description)")
+            )
+        })
+        .collect();
+
+    let system_prompt = format!(
+        "You are a compliance and risk expert. The following controls have no evidence yet (gaps).{}\n\n\
+         List of controls with no evidence ({} total):\n{}\n\n\
+         Provide a short risk analysis: (1) suggest a prioritisation order (which gaps to address first and why), \
+         (2) typical evidence types to collect for each, and (3) suggested order of work. Be concise and actionable.",
+        framework_hint,
+        gaps.len(),
+        gap_list.join("\n")
+    );
+
+    let user_prompt = "Summarise prioritisation, evidence types, and suggested order of work for closing these gaps.";
+
+    let (summary, model_used) = if let (Some(ref url), Some(ref model)) =
+        (&config.comp_ai_ollama_url, &config.comp_ai_ollama_model)
+    {
+        match inference::generate(
+            url,
+            model,
+            user_prompt,
+            config.comp_ai_max_tokens,
+            config.comp_ai_temperature,
+            Some(&system_prompt),
+        )
+        .await
+        {
+            Ok((text, _)) => (text.trim().to_string(), model.clone()),
+            Err(e) => {
+                tracing::error!("Ollama gap analysis failed: {}", e);
+                if config.comp_ai_ollama_fallback_to_mock {
+                    (
+                        format!(
+                            "Prioritise closing {} gap(s) by control criticality and audit timeline. \
+                             Collect evidence types: policy docs, screenshots, logs, or attestations as required by each control.",
+                            gaps.len()
+                        ),
+                        "mock-model (Ollama unavailable)".to_string(),
+                    )
+                } else {
+                    return Err((
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(serde_json::json!({
+                            "error": "AI model unavailable",
+                            "detail": e.to_string()
+                        })),
+                    ));
+                }
+            }
+        }
+    } else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "AI model not configured",
+                "detail": "Set COMP_AI_OLLAMA_URL and COMP_AI_OLLAMA_MODEL for gap analysis"
+            })),
+        ));
+    };
+
+    Ok(Json(GapAnalysisResponse {
+        summary: summary,
+        model_used,
+    }))
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -162,6 +162,21 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** Phase 7.2: AI gap/risk analysis. body: { framework?: string }. Returns { summary, model_used }. */
+  async postAnalysisGaps(body = {}) {
+    const res = await authenticatedFetch('/api/v1/analysis/gaps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 503) throw new Error(data.error || 'AI model is not available. Try again later.');
+      throw new Error(data.error || data.detail || 'Failed to analyse gaps');
+    }
+    return res.json();
+  },
+
   async getEvidence({ control_id, limit = 50, offset = 0 } = {}) {
     const res = await authenticatedFetch(
       `/api/v1/evidence${buildQuery({ control_id, limit, offset })}`

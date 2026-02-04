@@ -2,7 +2,7 @@
 
 **Goal:** Use AI to help users/customers with **risk analysis** and **remediation** (and optionally **retaliation**-related compliance). This phase adds tools and UI so the product directly supports those workflows.
 
-**Status:** Plan defined; **7.1 UI for remediation suggest done.** Next: 7.2 AI gap/risk analysis.
+**Status:** **7.1** and **7.2** done. Next: 7.3 (optional) or 7.4 (optional).
 
 ---
 
@@ -49,18 +49,11 @@
 
 ---
 
-## 7.2 AI gap/risk analysis (next)
+## 7.2 AI gap/risk analysis ✅
 
-- **Option A – Dedicated endpoint:** `POST /api/v1/analysis/gaps`  
-  - Body: `{ framework?: string }` (optional; defaults to all).  
-  - Backend fetches gaps, builds a prompt (“These controls have no evidence: … Suggest prioritisation and evidence types.”), calls Ollama, returns `{ summary, model_used }`.  
-  - Frontend: “Analyse my gaps” button on Controls (or Gaps view) that calls this and shows the summary in a modal or new section.
-
-- **Option B – Chat with context:**  
-  - Frontend builds a message like “My controls with no evidence are: [list]. Suggest prioritisation and what evidence to collect first.” and sends it to `POST /api/v1/process` with the chosen framework.  
-  - No new endpoint; reuses chat. Less structured; good for ad-hoc questions.
-
-Recommendation: **Option A** for a clear “Risk analysis” feature; Option B as a complement for follow-up questions.
+- [x] **Backend:** `POST /api/v1/analysis/gaps` — body `{ framework?: string }`; fetches gaps, builds prompt (prioritisation + evidence types + order of work), calls Ollama, returns `{ summary, model_used }`. Fallback to mock when Ollama unavailable (if COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true).
+- [x] **Frontend:** “Analyse my gaps” button in Controls view (when gaps list is shown); calls API and displays summary in a card (same style as remediation suggestion). `compAiApi.postAnalysisGaps(body)`.
+- Option B (chat with context) remains available for ad-hoc follow-up questions.
 
 ---
 

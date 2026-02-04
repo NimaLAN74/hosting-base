@@ -29,7 +29,7 @@ use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use handlers::controls::{
     get_controls, get_control, get_controls_export, get_controls_gaps,
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
-    post_remediation_suggest,
+    post_remediation_suggest, post_analysis_gaps,
     get_control_tests, get_tests, post_test_result,
     get_evidence, post_evidence, post_github_evidence,
 };
@@ -54,6 +54,7 @@ use sqlx::PgPool;
         handlers::controls::get_control_remediation,
         handlers::controls::put_control_remediation,
         handlers::controls::post_remediation_suggest,
+        handlers::controls::post_analysis_gaps,
         handlers::controls::get_control_tests,
         handlers::controls::get_tests,
         handlers::controls::post_test_result,
@@ -84,6 +85,8 @@ use sqlx::PgPool;
         models::UpsertRemediationRequest,
         models::RemediationSuggestRequest,
         models::RemediationSuggestResponse,
+        models::GapAnalysisRequest,
+        models::GapAnalysisResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -159,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/controls/export", get(get_controls_export))
         .route("/api/v1/controls/gaps", get(get_controls_gaps))
         .route("/api/v1/controls/:id/remediation/suggest", axum::routing::post(post_remediation_suggest))
+        .route("/api/v1/analysis/gaps", axum::routing::post(post_analysis_gaps))
         .route("/api/v1/controls/:id/remediation", get(get_control_remediation).put(put_control_remediation))
         .route("/api/v1/controls/:id/tests/:test_id/result", axum::routing::post(post_test_result))
         .route("/api/v1/controls/:id/tests", get(get_control_tests))
