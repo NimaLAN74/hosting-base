@@ -180,3 +180,22 @@ INSERT INTO comp_ai.control_tests (control_id, name, test_type, schedule, last_r
 SELECT c.id, 'SIEM/log ingestion health', 'integration', '0 * * * *', 'pass', 'Last 24h events ingested'
 FROM comp_ai.controls c WHERE c.internal_id = 'CTL-MON-001'
 ON CONFLICT (control_id, name) DO NOTHING;
+
+-- Seed evidence (so Evidence list has rows and Gaps shows only controls without evidence)
+INSERT INTO comp_ai.evidence (control_id, type, source, description, link_url, created_by)
+SELECT c.id, 'manual', 'Demo seed', 'Sample evidence for MFA control (IdP configuration documented).', NULL, 'migration'
+FROM comp_ai.controls c
+WHERE c.internal_id = 'CTL-MFA-001'
+  AND NOT EXISTS (SELECT 1 FROM comp_ai.evidence e WHERE e.control_id = c.id);
+
+INSERT INTO comp_ai.evidence (control_id, type, source, description, link_url, created_by)
+SELECT c.id, 'manual', 'Demo seed', 'Sample evidence for security monitoring (SIEM dashboard).', NULL, 'migration'
+FROM comp_ai.controls c
+WHERE c.internal_id = 'CTL-MON-001'
+  AND NOT EXISTS (SELECT 1 FROM comp_ai.evidence e WHERE e.control_id = c.id);
+
+-- Seed one remediation task (so Remediation section has data)
+INSERT INTO comp_ai.remediation_tasks (control_id, assigned_to, due_date, status, notes)
+SELECT c.id, 'Demo assignee', CURRENT_DATE + 30, 'open', 'Demo: collect evidence for access review.'
+FROM comp_ai.controls c WHERE c.internal_id = 'CTL-ACCESS-001'
+ON CONFLICT (control_id) DO NOTHING;

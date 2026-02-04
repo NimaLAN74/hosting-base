@@ -147,6 +147,21 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** Phase 6C / 7.1: AI remediation suggestion for a control. body: { context?: string }. Returns { suggestion, model_used }. */
+  async postRemediationSuggest(controlId, body = {}) {
+    const res = await authenticatedFetch(`/api/v1/controls/${controlId}/remediation/suggest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 503) throw new Error(data.error || 'AI model is not available. Try again later.');
+      throw new Error(data.error || data.detail || 'Failed to get suggestion');
+    }
+    return res.json();
+  },
+
   async getEvidence({ control_id, limit = 50, offset = 0 } = {}) {
     const res = await authenticatedFetch(
       `/api/v1/evidence${buildQuery({ control_id, limit, offset })}`

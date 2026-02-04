@@ -77,4 +77,14 @@ for f in "$MIGRATIONS_DIR/009_create_comp_ai_schema.sql" \
   echo "  $f"
   run_psql "$f"
 done
+
+echo "Verifying comp_ai.controls has demo data..."
+COUNT=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -t -A -c "SELECT COUNT(*) FROM comp_ai.controls" 2>/dev/null || echo "0")
+if [ "${COUNT:-0}" -lt 1 ]; then
+  echo "ERROR: comp_ai.controls has 0 rows. Comp-AI UI will show empty." >&2
+  echo "  Ensure POSTGRES_DB (and POSTGRES_HOST) in .env match the DB the Comp-AI container uses." >&2
+  echo "  On the server: docker exec lianel-comp-ai-service env | grep POSTGRES" >&2
+  exit 1
+fi
+echo "  comp_ai.controls row count: $COUNT"
 echo "Done."

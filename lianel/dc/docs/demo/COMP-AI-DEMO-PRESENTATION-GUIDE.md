@@ -2,25 +2,38 @@
 
 Use this to run a live demo or client presentation of the Comp-AI UI and service.
 
+**How it helps organisations:** For risk analysis and remediation, see **[COMP-AI-VALUE-RISK-AND-REMEDIATION.md](COMP-AI-VALUE-RISK-AND-REMEDIATION.md)** — coverage vs gaps, evidence, remediation tasks, and export.
+
 ---
 
 ## 0. If Controls / Gaps / Evidence are empty
 
 The Comp-AI UI reads from the **same database** as the Comp-AI service. If you see no controls, no gaps, and empty lists, the **comp_ai** schema may not have seed data.
 
-**Fix (on the server that hosts the Comp-AI service and PostgreSQL):**
+**Do not run the commands below locally.** Run them **on the server** (over SSH) where the Comp-AI service and PostgreSQL run.
 
-1. Ensure the Comp-AI service and migrations use the **same** database (same `POSTGRES_*` or `COMP_AI_MIGRATION_*` in `.env`).
-2. Run the full migration script from `lianel/dc`:
+### Fix: run on the server only
+
+1. **SSH into the server**, then copy-paste this single block (adjust `cd` path if your repo is not under `/root/hosting-base`):
+
    ```bash
-   cd /path/to/hosting-base/lianel/dc
-   # Load .env (POSTGRES_PASSWORD etc.)
-   COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh
-   ```
-   This runs migrations **009–018**. Migration **018** ensures demo seed data (3 controls, SOC 2 / ISO 27001 / GDPR requirements, mappings, and sample tests) so the UI has data to show.
-3. Restart the Comp-AI service if needed, then refresh the UI.
+   # 1) See which DB the Comp-AI container uses (match this in .env)
+   docker exec lianel-comp-ai-service env | grep POSTGRES
 
-**Or:** Re-run the **Deploy Comp AI Service to Production** workflow (it runs 009–018 on the remote DB). After it succeeds, refresh the Comp-AI Controls page.
+   # 2) Ensure .env in lianel/dc has same POSTGRES_DB and POSTGRES_HOST, then run migrations
+   cd /root/hosting-base/lianel/dc
+   COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh
+
+   # 3) Restart Comp-AI so it picks up any env change (optional)
+   cd /root/hosting-base/lianel/dc
+   docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service
+   ```
+
+2. **Refresh the Comp-AI UI** in the browser.
+
+The script runs migrations **009–018** (018 seeds 3 controls + requirements + tests) and **verifies** that `comp_ai.controls` has at least one row; if not, it exits with an error and tells you to align `POSTGRES_DB` with the container.
+
+**Alternative:** Re-run the **Deploy Comp AI Service to Production** workflow; it runs the same migrations on the remote DB via the pipeline. After it succeeds, refresh the Controls page.
 
 ---
 

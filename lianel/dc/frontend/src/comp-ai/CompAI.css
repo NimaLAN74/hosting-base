@@ -647,6 +647,45 @@
   color: #333;
 }
 
+/* Phase 7.1: AI remediation suggestion */
+.comp-ai-remediation-suggest {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comp-ai-remediation-suggest .comp-ai-error {
+  margin: 0;
+  font-size: 14px;
+}
+
+.comp-ai-suggestion-card {
+  background: #f0f4ff;
+  border: 1px solid #667eea;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-top: 8px;
+}
+
+.comp-ai-suggestion-meta {
+  font-size: 12px;
+  color: #667eea;
+  margin: 0 0 10px 0;
+}
+
+.comp-ai-suggestion-text {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  margin-bottom: 12px;
+}
+
+.comp-ai-use-suggestion-btn {
+  margin-top: 4px;
+}
+
 .comp-ai-evidence-desc {
   margin: 6px 0 0 0;
   color: #666;

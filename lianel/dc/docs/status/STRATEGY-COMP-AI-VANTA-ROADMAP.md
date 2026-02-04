@@ -80,6 +80,10 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ## 6. References
 
+- **Gap list vs Vanta**: `lianel/dc/docs/status/COMP-AI-VS-VANTA-GAP-LIST.md` — what Vanta has that we don’t; progress (~20–25% breadth, ~50–60% core).
+- **Document / operational compliance**: `lianel/dc/docs/status/COMP-AI-DOCUMENT-OPERATIONAL-COMPLIANCE.md` — non-code (documents, emails, Excel), tools that exist, and how to extend Comp-AI for org-wide operational/admin compliance.
+- **Implementation plan (doc/ops + gaps)**: `lianel/dc/docs/status/COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md` — phased plan for document/operational compliance (A–D) and workstreams from the Vanta gap list; use it to choose what to prioritise.
+- **Airflow as runner**: `lianel/dc/docs/status/COMP-AI-AIRFLOW-RUNNER-DESIGN.md` — all scheduled/automated Comp-AI tasks (control tests, future scan/gap/alerts) run in Airflow; event-based sync is the fallback if needed.
 - **Comp-AI multiframework design**: `lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`  
 - **Comp-AI implementation status**: `lianel/dc/docs/deployment/COMP-AI-IMPLEMENTATION-STATUS.md`  
 - **Comp-AI deployment**: `lianel/dc/docs/deployment/COMP-AI-DEPLOYMENT-PLAN.md`  
@@ -88,4 +92,4 @@ Full design: **`lianel/dc/docs/status/COMP-AI-MULTIFRAMEWORK-SUPPORT.md`**.
 
 ---
 
-**Next action**: Phase 6 or beyond – Expand frameworks (more requirements per framework), automated tests per control, or deeper AI remediation suggestions. See COMP-AI-MULTIFRAMEWORK-SUPPORT.md.
+**Next action**: See COMP-AI-VS-VANTA-GAP-LIST.md for priorities (test runner, integrations, Vanta Control Set, alerts, policy docs). Phase 7: AI risk/remediation (7.1 done; 7.2 gap analysis next).

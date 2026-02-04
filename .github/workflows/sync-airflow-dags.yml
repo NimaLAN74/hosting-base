@@ -10,6 +10,10 @@ on:
       - '.github/workflows/sync-airflow-dags.yml'
   workflow_dispatch:  # Allow manual trigger
 
+# Optional: set these secrets to populate Airflow Variables for Comp-AI DAG (comp_ai_control_tests)
+# COMP_AI_BASE_URL - default http://lianel-comp-ai-service:3002 (from same host/docker network)
+# COMP_AI_TOKEN - Bearer token for Comp-AI API (Keycloak service account or user token)
+
 env:
   REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
   REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -153,6 +157,28 @@ jobs:
             "ls -la /root/lianel/dc/dags/*.py | wc -l && echo 'DAG files found'"
           
           echo "✅ Verification complete"
+
+      - name: Set Airflow Variables for Comp-AI
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'http://lianel-comp-ai-service:3002' }}
+          COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
+        run: |
+          echo "Setting Comp-AI Airflow Variables (if COMP_AI_TOKEN is set)..."
+          if [ -z "$COMP_AI_TOKEN" ]; then
+            echo "⚠️  COMP_AI_TOKEN not set — skipping variable set. Add COMP_AI_TOKEN (and optionally COMP_AI_BASE_URL) as repo secrets to enable comp_ai_control_tests DAG."
+            exit 0
+          fi
+          # Pass COMP_AI_* from runner to remote; find airflow-apiserver container by name
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "CONTAINER=\$(docker ps -q -f name=airflow-apiserver | head -1); if [ -z \"\$CONTAINER\" ]; then echo 'No airflow-apiserver container found'; exit 0; fi; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_BASE_URL '${COMP_AI_BASE_URL}'; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_TOKEN '${COMP_AI_TOKEN}'"
+          echo "✅ COMP_AI_BASE_URL and COMP_AI_TOKEN set in Airflow"
 
       - name: Sync Summary
         run: |

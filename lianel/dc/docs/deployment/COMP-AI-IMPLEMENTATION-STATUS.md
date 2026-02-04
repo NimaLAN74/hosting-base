@@ -195,4 +195,4 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 ---
 
-**Next Action**: Optional manual/E2E verification of Phase 5/6 APIs (controls, export, gaps, requirements, remediation, tests, remediation/suggest). Then Phase 7+ (e.g. more frameworks, Vanta Control Set, frontend for tests/remediation suggest, E2E tests). See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-MULTIFRAMEWORK-SUPPORT.md.
+**Next Action**: Optional manual/E2E verification of Phase 5/6 APIs. Phase 7 (AI risk/remediation); document/ops Phase A done; **G1 Test runner** done via Airflow (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL` and `COMP_AI_TOKEN` for DAG `comp_ai_control_tests`. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.

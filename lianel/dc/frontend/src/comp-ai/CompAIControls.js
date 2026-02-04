@@ -18,8 +18,10 @@ function CompAIControls() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
-  // Manual evidence form
-  const [manualType, setManualType] = useState('');
+  // Manual evidence form (Phase A: document/policy/spreadsheet/email types)
+  const EVIDENCE_TYPE_PRESETS = ['document', 'policy', 'spreadsheet', 'email', 'manual', 'other'];
+  const [manualType, setManualType] = useState('document');
+  const [manualTypeOther, setManualTypeOther] = useState('');
   const [manualSource, setManualSource] = useState('');
   const [manualDescription, setManualDescription] = useState('');
   const [manualLinkUrl, setManualLinkUrl] = useState('');
@@ -39,6 +41,10 @@ function CompAIControls() {
   const [remediationDueDate, setRemediationDueDate] = useState('');
   const [remediationStatus, setRemediationStatus] = useState('open');
   const [remediationNotes, setRemediationNotes] = useState('');
+  // Phase 7.1: AI remediation suggestion
+  const [remediationSuggest, setRemediationSuggest] = useState(null);
+  const [remediationSuggestLoading, setRemediationSuggestLoading] = useState(false);
+  const [remediationSuggestError, setRemediationSuggestError] = useState(null);
 
   useEffect(() => {
     loadControls();
@@ -53,6 +59,8 @@ function CompAIControls() {
       setControlDetail(null);
       setEvidence([]);
       setRemediationTask(null);
+      setRemediationSuggest(null);
+      setRemediationSuggestError(null);
     }
   }, [selectedControl]);
 
@@ -131,6 +139,27 @@ function CompAIControls() {
       setError(err.message || 'Failed to save remediation');
     } finally {
       setRemediationSubmitting(false);
+    }
+  };
+
+  const handleGetRemediationSuggest = async () => {
+    if (!selectedControl) return;
+    setRemediationSuggestLoading(true);
+    setRemediationSuggestError(null);
+    setRemediationSuggest(null);
+    try {
+      const data = await compAiApi.postRemediationSuggest(selectedControl.id, {});
+      setRemediationSuggest(data);
+    } catch (err) {
+      setRemediationSuggestError(err.message || 'Failed to get AI suggestion');
+    } finally {
+      setRemediationSuggestLoading(false);
+    }
+  };
+
+  const handleUseSuggestionInNotes = () => {
+    if (remediationSuggest?.suggestion) {
+      setRemediationNotes((prev) => (prev ? `${prev}\n\n${remediationSuggest.suggestion}` : remediationSuggest.suggestion));
     }
   };
 
@@ -232,19 +261,21 @@ function CompAIControls() {
 
   const handleAddManualEvidence = async (e) => {
     e.preventDefault();
-    if (!selectedControl || !manualType.trim()) return;
+    const typeValue = manualType === 'other' ? manualTypeOther.trim() : manualType;
+    if (!selectedControl || !typeValue) return;
     setManualSubmitting(true);
     clearMessages();
     try {
       await compAiApi.postEvidence({
         control_id: selectedControl.id,
-        type: manualType.trim(),
+        type: typeValue,
         source: manualSource.trim() || undefined,
         description: manualDescription.trim() || undefined,
         link_url: manualLinkUrl.trim() || undefined,
       });
       setSuccess('Evidence added.');
-      setManualType('');
+      setManualType('document');
+      setManualTypeOther('');
       setManualSource('');
       setManualDescription('');
       setManualLinkUrl('');
@@ -413,6 +444,33 @@ function CompAIControls() {
                 {remediationLoading && <div className="comp-ai-loading">Loading...</div>}
                 {!remediationLoading && (
                   <>
+                    {/* Phase 7.1: AI remediation suggestion */}
+                    <div className="comp-ai-remediation-suggest">
+                      <button
+                        type="button"
+                        className="comp-ai-secondary-btn"
+                        onClick={handleGetRemediationSuggest}
+                        disabled={remediationSuggestLoading}
+                      >
+                        {remediationSuggestLoading ? 'Getting suggestion...' : 'Get AI suggestion'}
+                      </button>
+                      {remediationSuggestError && (
+                        <p className="comp-ai-error" role="alert">{remediationSuggestError}</p>
+                      )}
+                      {remediationSuggest && (
+                        <div className="comp-ai-suggestion-card">
+                          <p className="comp-ai-suggestion-meta">Model: {remediationSuggest.model_used}</p>
+                          <div className="comp-ai-suggestion-text">{remediationSuggest.suggestion}</div>
+                          <button
+                            type="button"
+                            className="comp-ai-secondary-btn comp-ai-use-suggestion-btn"
+                            onClick={handleUseSuggestionInNotes}
+                          >
+                            Use in notes
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     {remediationTask && (
                       <div className="comp-ai-remediation-current">
                         <p><strong>Current:</strong> {remediationTask.assigned_to || '—'} · Due {remediationTask.due_date ? formatDateEU(remediationTask.due_date) : '—'} · {remediationTask.status}</p>
@@ -503,17 +561,36 @@ function CompAIControls() {
 
                 <form onSubmit={handleAddManualEvidence} className="comp-ai-evidence-form">
                   <h3>Manual evidence</h3>
+                  <p className="comp-ai-form-hint">For operational/admin: use Document, Policy, Spreadsheet, or Email and paste a link (SharePoint, Drive, etc.).</p>
                   <div className="form-group">
                     <label htmlFor="manual-type">Type *</label>
-                    <input
+                    <select
                       id="manual-type"
-                      type="text"
-                      value={manualType}
+                      value={EVIDENCE_TYPE_PRESETS.includes(manualType) ? manualType : 'other'}
                       onChange={(e) => setManualType(e.target.value)}
-                      placeholder="e.g. policy_doc, screenshot"
                       required
-                    />
+                    >
+                      <option value="document">Document</option>
+                      <option value="policy">Policy</option>
+                      <option value="spreadsheet">Spreadsheet</option>
+                      <option value="email">Email</option>
+                      <option value="manual">Manual / other technical</option>
+                      <option value="other">Other (custom)</option>
+                    </select>
                   </div>
+                  {manualType === 'other' && (
+                    <div className="form-group">
+                      <label htmlFor="manual-type-other">Custom type *</label>
+                      <input
+                        id="manual-type-other"
+                        type="text"
+                        value={manualTypeOther}
+                        onChange={(e) => setManualTypeOther(e.target.value)}
+                        placeholder="e.g. screenshot, policy_doc"
+                        required={manualType === 'other'}
+                      />
+                    </div>
+                  )}
                   <div className="form-group">
                     <label htmlFor="manual-source">Source</label>
                     <input
@@ -521,7 +598,7 @@ function CompAIControls() {
                       type="text"
                       value={manualSource}
                       onChange={(e) => setManualSource(e.target.value)}
-                      placeholder="e.g. Confluence, Google Drive"
+                      placeholder="e.g. Confluence, Google Drive, SharePoint"
                     />
                   </div>
                   <div className="form-group">
@@ -541,7 +618,7 @@ function CompAIControls() {
                       type="url"
                       value={manualLinkUrl}
                       onChange={(e) => setManualLinkUrl(e.target.value)}
-                      placeholder="https://..."
+                      placeholder="https://... (e.g. SharePoint, Drive)"
                     />
                   </div>
                   <button type="submit" className="comp-ai-submit-btn" disabled={manualSubmitting}>
