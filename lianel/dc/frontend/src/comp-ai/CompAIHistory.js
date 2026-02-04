@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
+import { formatDateTimeEU } from '../services/dateFormat';
 import './CompAI.css';
 
 function CompAIHistory() {
@@ -31,12 +32,7 @@ function CompAIHistory() {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleString();
-    } catch {
-      return dateString;
-    }
+    return formatDateTimeEU(dateString);
   };
 
   const truncateText = (text, maxLength = 100) => {

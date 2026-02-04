@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
+import { formatDateTimeEU } from '../services/dateFormat';
 import './CompAI.css';
 
 function CompAIMonitoring() {
@@ -48,7 +49,7 @@ function CompAIMonitoring() {
 
           {lastChecked && (
             <div className="comp-ai-last-checked">
-              Last checked: {lastChecked.toLocaleString()}
+              Last checked: {formatDateTimeEU(lastChecked)}
             </div>
           )}
 
@@ -85,7 +86,7 @@ function CompAIMonitoring() {
                   <p><strong>Status:</strong> {health.status === 'healthy' ? '✅ Operational' : '⚠️ Issues Detected'}</p>
                   {health.uptime && <p><strong>Uptime:</strong> {health.uptime}</p>}
                   {health.timestamp && (
-                    <p><strong>Last Update:</strong> {new Date(health.timestamp).toLocaleString()}</p>
+                    <p><strong>Last Update:</strong> {formatDateTimeEU(health.timestamp)}</p>
                   )}
                 </div>
               </div>

@@ -131,8 +131,8 @@
   padding: 10px 12px;
   border-bottom: 1px solid #e0e0e0;
   font-size: 13px;
-  color: #2c3e50; /* Explicit text color for table cells */
-  background-color: inherit; /* Inherit from row background */
+  color: #1a252f; /* Darker for better contrast (WCAG) */
+  background-color: inherit;
 }
 
 .data-table tbody tr {
@@ -148,7 +148,14 @@
 }
 
 .data-table tbody tr:hover td {
-  color: #2c3e50; /* Ensure text remains readable on hover */
+  color: #1a252f;
+}
+
+.data-table-empty {
+  text-align: center;
+  padding: 20px;
+  color: #444;
+  background: #f5f5f5;
 }
 
 .table-note {

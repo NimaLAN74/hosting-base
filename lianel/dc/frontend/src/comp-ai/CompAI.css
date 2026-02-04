@@ -697,6 +697,14 @@
   margin: 0 0 8px 0;
 }
 
+.comp-ai-date-hint {
+  display: block;
+  font-size: 12px;
+  color: #555;
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
 .comp-ai-button-row {
   display: flex;
   gap: 12px;

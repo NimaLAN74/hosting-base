@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
+import { formatDateEU, formatDateTimeEU, formatFilenameDateEU, euStringFromISOInput, toISODateFromInput, EU_DATE_INPUT_PLACEHOLDER, EU_DATE_INPUT_LABEL } from '../services/dateFormat';
 import './CompAI.css';
 
 function CompAIControls() {
@@ -96,7 +97,7 @@ function CompAIControls() {
       setRemediationTask(task);
       if (task) {
         setRemediationAssignedTo(task.assigned_to || '');
-        setRemediationDueDate(task.due_date ? task.due_date.slice(0, 10) : '');
+        setRemediationDueDate(task.due_date ? euStringFromISOInput(task.due_date.slice(0, 10)) : '');
         setRemediationStatus(task.status || 'open');
         setRemediationNotes(task.notes || '');
       } else {
@@ -120,7 +121,7 @@ function CompAIControls() {
     try {
       await compAiApi.putControlRemediation(selectedControl.id, {
         assigned_to: remediationAssignedTo.trim() || undefined,
-        due_date: remediationDueDate.trim() || undefined,
+        due_date: toISODateFromInput(remediationDueDate) || undefined,
         status: remediationStatus,
         notes: remediationNotes.trim() || undefined,
       });
@@ -155,7 +156,7 @@ function CompAIControls() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `comp-ai-audit-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `comp-ai-audit-export-${formatFilenameDateEU()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       setSuccess('Audit export downloaded.');
@@ -174,7 +175,7 @@ function CompAIControls() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `comp-ai-audit-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `comp-ai-audit-export-${formatFilenameDateEU()}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       setSuccess('CSV export downloaded.');
@@ -206,7 +207,7 @@ function CompAIControls() {
         <style>body{font-family:sans-serif;padding:20px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ccc;padding:8px;text-align:left;} th{background:#eee;}</style>
         </head><body>
         <h1>Comp-AI Audit Export</h1>
-        <p>Exported: ${data.exported_at || new Date().toISOString()}</p>
+        <p>Exported: ${data.exported_at ? formatDateTimeEU(data.exported_at) : formatDateTimeEU(new Date())}</p>
         <table>
         <thead><tr><th>Control ID</th><th>Name</th><th>Requirements</th><th>Evidence count</th><th>Evidence types</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -278,11 +279,7 @@ function CompAIControls() {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleString();
-    } catch {
-      return dateString;
-    }
+    return formatDateTimeEU(dateString);
   };
 
   return (
@@ -418,7 +415,7 @@ function CompAIControls() {
                   <>
                     {remediationTask && (
                       <div className="comp-ai-remediation-current">
-                        <p><strong>Current:</strong> {remediationTask.assigned_to || '—'} · Due {remediationTask.due_date || '—'} · {remediationTask.status}</p>
+                        <p><strong>Current:</strong> {remediationTask.assigned_to || '—'} · Due {remediationTask.due_date ? formatDateEU(remediationTask.due_date) : '—'} · {remediationTask.status}</p>
                         {remediationTask.notes && <p className="comp-ai-remediation-notes">{remediationTask.notes}</p>}
                       </div>
                     )}
@@ -433,14 +430,21 @@ function CompAIControls() {
                           placeholder="Owner or team"
                         />
                       </div>
-                      <div className="form-group">
-                        <label htmlFor="remediation-due">Due date</label>
+                      <div className="form-group eu-date-input-wrapper">
+                        <label htmlFor="remediation-due">Due date ({EU_DATE_INPUT_LABEL})</label>
                         <input
                           id="remediation-due"
-                          type="date"
+                          type="text"
+                          inputMode="text"
+                          autoComplete="off"
+                          data-date-format="eu"
                           value={remediationDueDate}
                           onChange={(e) => setRemediationDueDate(e.target.value)}
+                          placeholder={EU_DATE_INPUT_PLACEHOLDER}
+                          title={`Enter date as ${EU_DATE_INPUT_LABEL}`}
+                          aria-label={`Due date in ${EU_DATE_INPUT_LABEL} format`}
                         />
+                        <span className="comp-ai-form-hint comp-ai-date-hint">Format: {EU_DATE_INPUT_LABEL}</span>
                       </div>
                       <div className="form-group">
                         <label htmlFor="remediation-status">Status</label>

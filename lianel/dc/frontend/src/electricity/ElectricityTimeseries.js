@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useKeycloak } from '../KeycloakProvider';
 import PageTemplate from '../PageTemplate';
+import { formatDateEU, formatDateTimeEU, toISODateFromInput, EU_DATE_INPUT_PLACEHOLDER, EU_DATE_INPUT_LABEL } from '../services/dateFormat';
 import './ElectricityTimeseries.css';
 
 function ElectricityTimeseries() {
@@ -34,41 +35,19 @@ function ElectricityTimeseries() {
         params.append('country_code', filters.country_code.trim());
       }
       if (filters.start_date && filters.start_date.trim()) {
-        // Convert DDMMYYYY to YYYY-MM-DD format for API
-        const dateStr = filters.start_date.trim();
-        if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
-          // DDMMYYYY format
-          const day = dateStr.substring(0, 2);
-          const month = dateStr.substring(2, 4);
-          const year = dateStr.substring(4, 8);
-          const apiDate = `${year}-${month}-${day}`;
+        const apiDate = toISODateFromInput(filters.start_date);
+        if (apiDate) {
           params.append('start_date', apiDate);
-          console.log('Converted start_date:', dateStr, '->', apiDate);
-        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          // Already in YYYY-MM-DD format
-          params.append('start_date', dateStr);
-          console.log('Using start_date as-is:', dateStr);
         } else {
-          console.warn('Invalid start_date format:', dateStr);
+          console.warn('Invalid start_date format:', filters.start_date);
         }
       }
       if (filters.end_date && filters.end_date.trim()) {
-        // Convert DDMMYYYY to YYYY-MM-DD format for API
-        const dateStr = filters.end_date.trim();
-        if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
-          // DDMMYYYY format
-          const day = dateStr.substring(0, 2);
-          const month = dateStr.substring(2, 4);
-          const year = dateStr.substring(4, 8);
-          const apiDate = `${year}-${month}-${day}`;
+        const apiDate = toISODateFromInput(filters.end_date);
+        if (apiDate) {
           params.append('end_date', apiDate);
-          console.log('Converted end_date:', dateStr, '->', apiDate);
-        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          // Already in YYYY-MM-DD format
-          params.append('end_date', dateStr);
-          console.log('Using end_date as-is:', dateStr);
         } else {
-          console.warn('Invalid end_date format:', dateStr);
+          console.warn('Invalid end_date format:', filters.end_date);
         }
       }
       if (filters.production_type && filters.production_type.trim()) {
@@ -132,19 +111,9 @@ function ElectricityTimeseries() {
     return () => clearTimeout(timeoutId);
   }, [authenticated, filters.country_code, filters.start_date, filters.end_date, filters.production_type, filters.limit, fetchData]);
 
-  // Helper function to format date as DDMMYYYY
+  // Helper function to format date as DD/MM/YYYY for display
   const formatDateDDMMYYYY = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return 'N/A';
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
-      return `${day}${month}${year}`;
-    } catch (e) {
-      return 'N/A';
-    }
+    return formatDateEU(dateString);
   };
 
   const handleFilterChange = (field, value) => {
@@ -220,83 +189,33 @@ function ElectricityTimeseries() {
           />
         </div>
 
-        <div className="filter-group">
-          <label>Start Date:</label>
-          <input
-            type="date"
-            value={filters.start_date ? (() => {
-              // Convert DDMMYYYY to YYYY-MM-DD for date input
-              const dateStr = filters.start_date.trim();
-              if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
-                const day = dateStr.substring(0, 2);
-                const month = dateStr.substring(2, 4);
-                const year = dateStr.substring(4, 8);
-                return `${year}-${month}-${day}`;
-              }
-              return dateStr; // Already in YYYY-MM-DD format
-            })() : ''}
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value) {
-                // Convert YYYY-MM-DD to DDMMYYYY for storage
-                const [year, month, day] = value.split('-');
-                handleFilterChange('start_date', `${day}${month}${year}`);
-              } else {
-                handleFilterChange('start_date', '');
-              }
-            }}
-          />
+        <div className="filter-group eu-date-input-wrapper">
+          <label>Start date ({EU_DATE_INPUT_LABEL}):</label>
           <input
             type="text"
+            inputMode="text"
+            autoComplete="off"
+            data-date-format="eu"
             value={filters.start_date}
-            onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, '').slice(0, 8);
-              handleFilterChange('start_date', value);
-            }}
-            placeholder="Or enter DDMMYYYY"
-            pattern="\d{8}"
-            maxLength={8}
-            style={{ marginTop: '5px', width: '100%' }}
+            onChange={(e) => handleFilterChange('start_date', e.target.value)}
+            placeholder={EU_DATE_INPUT_PLACEHOLDER}
+            title={`Use ${EU_DATE_INPUT_LABEL} or DDMMYYYY (e.g. 01/01/2024 or 01012024)`}
+            aria-label={`Start date in ${EU_DATE_INPUT_LABEL} format`}
           />
         </div>
 
-        <div className="filter-group">
-          <label>End Date:</label>
-          <input
-            type="date"
-            value={filters.end_date ? (() => {
-              // Convert DDMMYYYY to YYYY-MM-DD for date input
-              const dateStr = filters.end_date.trim();
-              if (dateStr.length === 8 && /^\d{8}$/.test(dateStr)) {
-                const day = dateStr.substring(0, 2);
-                const month = dateStr.substring(2, 4);
-                const year = dateStr.substring(4, 8);
-                return `${year}-${month}-${day}`;
-              }
-              return dateStr; // Already in YYYY-MM-DD format
-            })() : ''}
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value) {
-                // Convert YYYY-MM-DD to DDMMYYYY for storage
-                const [year, month, day] = value.split('-');
-                handleFilterChange('end_date', `${day}${month}${year}`);
-              } else {
-                handleFilterChange('end_date', '');
-              }
-            }}
-          />
+        <div className="filter-group eu-date-input-wrapper">
+          <label>End date ({EU_DATE_INPUT_LABEL}):</label>
           <input
             type="text"
+            inputMode="text"
+            autoComplete="off"
+            data-date-format="eu"
             value={filters.end_date}
-            onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, '').slice(0, 8);
-              handleFilterChange('end_date', value);
-            }}
-            placeholder="Or enter DDMMYYYY"
-            pattern="\d{8}"
-            maxLength={8}
-            style={{ marginTop: '5px', width: '100%' }}
+            onChange={(e) => handleFilterChange('end_date', e.target.value)}
+            placeholder={EU_DATE_INPUT_PLACEHOLDER}
+            title={`Use ${EU_DATE_INPUT_LABEL} or DDMMYYYY (e.g. 31/12/2026 or 31122026)`}
+            aria-label={`End date in ${EU_DATE_INPUT_LABEL} format`}
           />
         </div>
 
@@ -377,7 +296,7 @@ function ElectricityTimeseries() {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                    <td colSpan="7" className="data-table-empty">
                       No data to display for the selected filters
                     </td>
                   </tr>
@@ -390,7 +309,7 @@ function ElectricityTimeseries() {
                     }
                     return (
                       <tr key={record.id || idx}>
-                        <td>{formatDateDDMMYYYY(record.timestamp_utc)} {new Date(record.timestamp_utc).toLocaleTimeString()}</td>
+                        <td>{formatDateTimeEU(record.timestamp_utc)}</td>
                         <td>{record.country_code || 'N/A'}</td>
                         <td>{record.bidding_zone || 'N/A'}</td>
                         <td>{record.production_type || 'Load'}</td>

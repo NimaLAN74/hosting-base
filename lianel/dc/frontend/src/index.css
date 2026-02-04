@@ -4,6 +4,12 @@
   box-sizing: border-box;
 }
 
+/* EU date inputs: always plain text, no browser date picker icon (use type="text" + DD/MM/YYYY) */
+input[data-date-format="eu"],
+.eu-date-input-wrapper input[type="text"] {
+  background-image: none !important;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',

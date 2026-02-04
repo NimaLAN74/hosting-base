@@ -4,6 +4,7 @@ import PageTemplate from '../PageTemplate';
 import { energyApi } from './energyApi';
 import { TimeSeriesChart, CountryComparisonChart, ProductDistributionChart, FlowDistributionChart } from './EnergyCharts';
 import MultiSelect from './MultiSelect';
+import { formatFilenameDateEU } from '../services/dateFormat';
 import '../App.css';
 import './Energy.css';
 
@@ -422,7 +423,7 @@ function Energy() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `energy-data-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `energy-data-${formatFilenameDateEU()}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
