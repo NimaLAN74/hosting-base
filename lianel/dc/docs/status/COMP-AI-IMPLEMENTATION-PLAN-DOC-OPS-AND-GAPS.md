@@ -96,7 +96,7 @@ These are the same gaps as in **COMP-AI-VS-VANTA-GAP-LIST.md**, turned into **co
 | **G4** | **One cloud integration** | e.g. AWS or Azure: list resources, run checks, evidence. | Very high | No |
 | **G5** | **Document / policy evidence** | Phase A + B (+ optional C) above. | Medium | **Yes – Part 1** |
 | **G6** | **Policy / System Description** | Auto-generate SOC 2 System Description; control–policy mapping. | Medium | Partial (policies) |
-| **G7** | **Alerts** | Slack or email when test fails or gap created. | Medium | No |
+| **G7** | **Alerts** | Slack or email when test fails or gap created. | Medium | **Yes** — Airflow DAG `comp_ai_alerts`; log + optional Slack |
 | **G8** | **Vanta Control Set** | Adopt or mirror control/requirement IDs and names. | Medium | No |
 | **G9** | **AI evidence review** | “Review all evidence for control X” → AI flags gaps and suggests fixes. | Medium | Overlaps B5 (analyse document). |
 
@@ -134,7 +134,8 @@ Suggested ordering **if you want balance**:
 |-------|------------|--------|
 | 1 | Phase A – Document evidence | ✅ Done |
 | 2 | **G1 Test runner (Airflow)** | ✅ Done — Airflow DAG `comp_ai_control_tests` runs tests and records results; see COMP-AI-AIRFLOW-RUNNER-DESIGN.md |
-| 3 | *(e.g. Phase B – Upload + AI analysis or G7 Alerts)* | Not started |
+| 3 | **G7 Alerts** | ✅ Done — DAG `comp_ai_alerts`; log + optional Slack (SLACK_WEBHOOK_URL) |
+| 4 | *(e.g. Phase B – Upload + AI analysis)* | Not started |
 | … | | |
 
 **Runner:** All scheduled/automated Comp-AI jobs use **Airflow** as runner. Event-based sync is the fallback if coordination between Comp-AI and Airflow becomes a problem (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md).

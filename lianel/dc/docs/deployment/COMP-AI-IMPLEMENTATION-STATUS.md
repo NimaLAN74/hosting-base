@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
 **Date**: January 2026  
-**Status**: ✅ **Phases 1–5 Complete** · ✅ **Phase 6 (Expand frameworks, tests, AI remediation) Complete**
+**Status**: ✅ **Phases 1–5 Complete** · ✅ **Phase 6 Complete** · ✅ **Phase 7 + G7 Alerts Complete**
 
 ---
 
@@ -106,7 +106,10 @@
    - [x] **7.1** UI for remediation suggest (Get AI suggestion, Use in notes) — done earlier
    - [x] **7.2** AI gap/risk analysis: POST /api/v1/analysis/gaps (body: `{ framework?: string }`), returns `{ summary, model_used }`; frontend “Analyse my gaps” button in Controls when gaps are shown, summary card
 
-13. **Testing & Deployment**
+13. **G7 Alerts (Airflow)** ✅
+   - [x] `comp_ai_alerts` DAG: daily 07:00 UTC; GET gaps + GET tests; log summary; optional Slack via `SLACK_WEBHOOK_URL` (Variable or env). See COMP-AI-AIRFLOW-RUNNER-DESIGN.md.
+
+14. **Testing & Deployment**
    - [x] Build Docker image (pipeline)
    - [x] Deploy to remote host (pipeline)
    - [x] Verify service health (pipeline)
@@ -199,6 +202,6 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 ---
 
-**Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI) and **7.2 (AI gap/risk analysis)** done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card.
+**Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI) and **7.2 (AI gap/risk analysis)** done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card. **G7 Alerts:** DAG `comp_ai_alerts` runs daily at 07:00 UTC; logs gaps and failed tests; optional Slack via `SLACK_WEBHOOK_URL`.
 
-**Next Action**: Optional 7.3 (structured apply) or 7.4 (retaliation/whistleblower). Document/ops Phase A done; G1 Test runner via Airflow (COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL` and `COMP_AI_TOKEN` for DAG `comp_ai_control_tests`. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.
+**Next Action**: Optional 7.3 (structured apply) or 7.4 (retaliation/whistleblower). Document/ops Phase A done; G1 Test runner and G7 Alerts via Airflow (COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL`, `COMP_AI_TOKEN`; optional `SLACK_WEBHOOK_URL` for alerts. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.

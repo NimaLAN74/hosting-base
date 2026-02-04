@@ -66,6 +66,15 @@ def get_tests(control_id: Optional[int] = None) -> list[dict[str, Any]]:
     return resp.json()
 
 
+def get_gaps() -> list[dict[str, Any]]:
+    """GET /api/v1/controls/gaps. Returns list of controls with no evidence (gaps)."""
+    base_url, token = _get_config()
+    url = f"{base_url}/api/v1/controls/gaps"
+    resp = requests.get(url, headers=_headers(token), timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def post_test_result(
     base_url: str,
     token: str,

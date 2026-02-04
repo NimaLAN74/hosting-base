@@ -2,7 +2,7 @@
 
 **Purpose:** Use **Airflow** as the single runner for all scheduled and automated Comp-AI jobs (control tests, document scan, gap analysis, etc.). If sync between Comp-AI and Airflow becomes a problem, use an **event-based** solution for coordination.
 
-**Status:** Design agreed; first DAG (control tests) implemented.
+**Status:** Design agreed; control tests and alerts DAGs implemented.
 
 ---
 
@@ -21,7 +21,7 @@
 | **Control tests** | `comp_ai_control_tests` | Daily (or per-test schedule later) | GET /api/v1/tests, POST /api/v1/controls/:id/tests/:test_id/result |
 | **Document scan (Phase C)** | `comp_ai_scan_documents` (future) | On-demand or weekly | POST /api/v1/scan/documents (when implemented) |
 | **Gap / risk analysis** | `comp_ai_gap_analysis` (future) | Weekly or on-demand | POST /api/v1/analysis/gaps (when implemented) |
-| **Alerts (G7)** | Task in DAG or separate DAG | After tests run or on schedule | GET /api/v1/controls/gaps, then Slack/email |
+| **Alerts (G7)** | `comp_ai_alerts` | Daily 07:00 UTC (after tests) | GET /api/v1/controls/gaps, GET /api/v1/tests; log + optional Slack |
 
 ---
 
@@ -57,15 +57,21 @@
 
 ---
 
-## 6. Future DAGs (when APIs exist)
+## 6. Implemented: Alerts DAG (G7)
+
+- **DAG id:** `comp_ai_alerts`
+- **Schedule:** Daily at 07:00 UTC (after `comp_ai_control_tests` at 06:00).
+- **Steps:** `GET /api/v1/controls/gaps`, `GET /api/v1/tests`; filter tests with `last_result == 'fail'`; build summary; log; if `SLACK_WEBHOOK_URL` (Airflow Variable or env) is set, POST summary to Slack (or "No gaps, no failed tests" when clear).
+- **Helper:** `comp_ai_client.get_gaps()`, `get_tests()`.
+
+## 7. Future DAGs (when APIs exist)
 
 - **comp_ai_scan_documents:** Call `POST /api/v1/scan/documents` (Phase C); schedule weekly or trigger via event.
 - **comp_ai_gap_analysis:** Call `POST /api/v1/analysis/gaps` (Phase 7.2); schedule weekly; optionally feed into alerts.
-- **comp_ai_alerts:** After control tests (or on schedule): GET gaps, optionally GET test results; send Slack/email on failures or new gaps (G7).
 
 ---
 
-## 7. Event-based sync (fallback, not yet implemented)
+## 8. Event-based sync (fallback, not yet implemented)
 
 When we need Comp-AI and Airflow to stay in sync in a more reactive way:
 
@@ -79,4 +85,4 @@ When we need Comp-AI and Airflow to stay in sync in a more reactive way:
 
 - **Implementation plan:** `COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md` (G1 test runner, Phase C scan).
 - **Comp-AI API:** `GET /api/v1/tests`, `POST /api/v1/controls/:id/tests/:test_id/result` (and future scan/analysis endpoints).
-- **Airflow DAGs:** `lianel/dc/dags/comp_ai_control_tests_dag.py`, `lianel/dc/dags/utils/comp_ai_client.py`.
+- **Airflow DAGs:** `lianel/dc/dags/comp_ai_control_tests_dag.py`, `lianel/dc/dags/comp_ai_alerts_dag.py`, `lianel/dc/dags/utils/comp_ai_client.py`.
