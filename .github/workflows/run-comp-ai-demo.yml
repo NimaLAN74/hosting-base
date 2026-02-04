@@ -29,8 +29,7 @@ jobs:
           COMP_AI_DEMO_OUTPUT: demo-output
         run: |
           chmod +x lianel/dc/scripts/monitoring/run-comp-ai-demo-and-report.sh
-          cd lianel/dc && bash scripts/monitoring/run-comp-ai-demo-and-report.sh || true
-        continue-on-error: true
+          cd lianel/dc && bash scripts/monitoring/run-comp-ai-demo-and-report.sh
 
       - name: Upload demo report
         uses: actions/upload-artifact@v4

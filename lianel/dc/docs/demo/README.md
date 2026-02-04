@@ -30,11 +30,13 @@ You need a valid Bearer token for the Comp-AI API (same as when using the Comp A
 
 ### Option 2: GitHub Actions (manual workflow)
 
-1. In the repo, go to **Actions** → **Run Comp-AI Demo and Report** → **Run workflow**.
-2. Configure **Secrets** (Settings → Secrets and variables → Actions):
-   - `COMP_AI_TOKEN` — Bearer token from browser after login, **or**
-   - `COMP_AI_DEMO_USER` + `COMP_AI_DEMO_PASSWORD` and optionally `COMP_AI_KEYCLOAK_CLIENT_ID`, `COMP_AI_KEYCLOAK_CLIENT_SECRET`, `KEYCLOAK_URL`, `KEYCLOAK_REALM`
-3. After the run, download the **comp-ai-demo-report** artifact (contains the Markdown report and raw output).
+1. **Add the token as a repository secret** (required once):
+   - Repo **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
+   - Name: **`COMP_AI_TOKEN`** (exactly).
+   - Value: paste the Bearer token from the browser (log in at www.lianel.se → Comp AI → DevTools → Network → copy from a Comp-AI request; use only the token part, not the word "Bearer").
+   - Alternatively use Keycloak user secrets: **`COMP_AI_DEMO_USER`**, **`COMP_AI_DEMO_PASSWORD`**, and optionally **`COMP_AI_KEYCLOAK_CLIENT_ID`**, **`COMP_AI_KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_URL`**, **`KEYCLOAK_REALM`**.
+2. In the repo, go to **Actions** → **Run Comp-AI Demo and Report** → **Run workflow**.
+3. After the run (green), download the **comp-ai-demo-report** artifact (Markdown report + raw JSON/CSV).
 
 ## What the demo covers
 
