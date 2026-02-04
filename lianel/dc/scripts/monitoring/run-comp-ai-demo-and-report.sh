@@ -54,13 +54,16 @@ if [ -z "$TOKEN" ]; then
 fi
 
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
+# Timeouts for CI (GitHub runner may be slow to reach www): override with CURL_CONNECT_TIMEOUT / CURL_MAX_TIME
+CURL_CT="${CURL_CONNECT_TIMEOUT:-30}"
+CURL_MT="${CURL_MAX_TIME:-60}"
 
 # Helper: GET and save status + body
 api_get() {
   local path="$1"
   local outname="$2"
   local url="${BASE_URL}${path}"
-  curl -s -w "\n%{http_code}" -H "$AUTH_HEADER" "$url" > "${REPORT_DIR}/${outname}.raw"
+  curl -s --connect-timeout "$CURL_CT" --max-time "$CURL_MT" -w "\n%{http_code}" -H "$AUTH_HEADER" "$url" > "${REPORT_DIR}/${outname}.raw"
   local body=$(sed '$d' "${REPORT_DIR}/${outname}.raw")
   local code=$(tail -1 "${REPORT_DIR}/${outname}.raw")
   echo "$body" > "${REPORT_DIR}/${outname}.json"
@@ -73,7 +76,7 @@ api_post() {
   local body="$2"
   local outname="$3"
   local url="${BASE_URL}${path}"
-  curl -s -w "\n%{http_code}" -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$body" "$url" > "${REPORT_DIR}/${outname}.raw"
+  curl -s --connect-timeout "$CURL_CT" --max-time "$CURL_MT" -w "\n%{http_code}" -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$body" "$url" > "${REPORT_DIR}/${outname}.raw"
   local resp=$(sed '$d' "${REPORT_DIR}/${outname}.raw")
   local code=$(tail -1 "${REPORT_DIR}/${outname}.raw")
   echo "$resp" > "${REPORT_DIR}/${outname}.json"
@@ -87,7 +90,7 @@ echo ""
 
 # --- Health (no auth) ---
 echo "[1/14] Health..."
-HEALTH_CODE=$(curl -s -o "${REPORT_DIR}/health.json" -w "%{http_code}" "${BASE_URL}/api/v1/comp-ai/health")
+HEALTH_CODE=$(curl -s --connect-timeout "$CURL_CT" --max-time "$CURL_MT" -o "${REPORT_DIR}/health.json" -w "%{http_code}" "${BASE_URL}/api/v1/comp-ai/health")
 echo "  HTTP $HEALTH_CODE"
 
 # --- Controls ---
@@ -127,7 +130,7 @@ echo "  HTTP $EXPORT_JSON_CODE"
 
 # --- Export CSV ---
 echo "[6/14] GET /api/v1/controls/export?format=csv..."
-curl -s -o "${REPORT_DIR}/export_csv.csv" -w "%{http_code}" -H "$AUTH_HEADER" "${BASE_URL}/api/v1/controls/export?format=csv" > "${REPORT_DIR}/export_csv_code.txt" || true
+curl -s --connect-timeout "$CURL_CT" --max-time "$CURL_MT" -o "${REPORT_DIR}/export_csv.csv" -w "%{http_code}" -H "$AUTH_HEADER" "${BASE_URL}/api/v1/controls/export?format=csv" > "${REPORT_DIR}/export_csv_code.txt" || true
 EXPORT_CSV_CODE=$(cat "${REPORT_DIR}/export_csv_code.txt" 2>/dev/null || echo "0")
 echo "  HTTP $EXPORT_CSV_CODE"
 

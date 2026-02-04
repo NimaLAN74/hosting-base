@@ -12,6 +12,7 @@ jobs:
   demo:
     name: Run demo and upload report
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'https://www.lianel.se' }}
       COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
