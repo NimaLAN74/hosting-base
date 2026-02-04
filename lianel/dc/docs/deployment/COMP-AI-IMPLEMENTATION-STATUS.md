@@ -94,7 +94,7 @@
    - [x] GET /api/v1/controls/gaps — controls with no evidence
    - [x] GET/PUT /api/v1/controls/:id/remediation — remediation tasks
    - [x] GET /api/v1/requirements?framework=soc2|iso27001 — list framework requirements from DB
-   - [ ] Run comp_ai migrations (009–017) on remote DB if not yet done: `bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc
+   - [x] Run comp_ai migrations (009–017) on remote DB via pipeline (Deploy Comp AI Service workflow runs them on production after checkout)
 
 10. **Phase 6: Expand frameworks, tests, AI remediation** ✅
    - [x] **6A** Migration 016: expand frameworks – more requirements per framework (SOC 2 CC6.3–CC7.4, ISO 27001 A.5.1–A.12.4.2, GDPR Art. 24–34, Art. 5(1)(a)) and control–requirement mappings
@@ -103,10 +103,10 @@
    - [x] **6D** This status document updated with Phase 6
 
 11. **Testing & Deployment**
-   - [ ] Build Docker image (pipeline)
-   - [ ] Deploy to remote host (pipeline)
-   - [ ] Verify service health (pipeline)
-   - [ ] Test API endpoints (manual or E2E)
+   - [x] Build Docker image (pipeline)
+   - [x] Deploy to remote host (pipeline)
+   - [x] Verify service health (pipeline)
+   - [ ] Test API endpoints (manual or E2E) — optional: controls, gaps, export, remediation, remediation/suggest, tests
 
 ---
 
@@ -188,11 +188,11 @@ curl http://localhost:3002/health
 
 ## ✅ Current Status
 
-**Phase 1–5**: ✅ **COMPLETE**  
-**Phase 6**: ✅ **COMPLETE** (expand frameworks, automated tests per control, AI remediation suggest)
+**Phase 1–6**: ✅ **COMPLETE**  
+**Pipeline**: ✅ **Deploy Comp AI Service to Production** — latest run **success** (migrations 009–017 applied on remote, image deployed).
 
-All Phase 6 deliverables are in place: migration 016 (more requirements per framework), migration 017 + APIs for control tests, POST /api/v1/controls/:id/remediation/suggest for AI-generated remediation steps.
+All Phase 6 deliverables are live: migration 016 (more requirements per framework), migration 017 + APIs for control tests, POST /api/v1/controls/:id/remediation/suggest for AI-generated remediation steps.
 
 ---
 
-**Next Action**: Run comp_ai migrations (009–017) on the DB used by comp-ai-service if not yet done (`bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc). Then deploy and test Phase 5/6 APIs (controls, export, gaps, requirements, remediation, tests, remediation/suggest).
+**Next Action**: Optional manual/E2E verification of Phase 5/6 APIs (controls, export, gaps, requirements, remediation, tests, remediation/suggest). Then Phase 7+ (e.g. more frameworks, Vanta Control Set, frontend for tests/remediation suggest, E2E tests). See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-MULTIFRAMEWORK-SUPPORT.md.
