@@ -51,7 +51,7 @@ jobs:
           echo "❌ SSH to ${REMOTE_HOST} failed after 3 attempts"
           exit 1
 
-      - name: Apply on remote (fix 502: sync DB + start Keycloak, then nginx + KC_HOSTNAME, reload, frontendUrl)
+      - name: "Apply on remote (fix 502: sync DB + start Keycloak, then nginx + KC_HOSTNAME, reload, frontendUrl)"
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}

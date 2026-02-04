@@ -376,7 +376,7 @@ jobs:
             "cd /root/hosting-base/lianel/dc && docker compose -f docker-compose.infra.yaml -f docker-compose.comp-ai.yaml up -d comp-ai-service"
           echo "✅ Comp-AI restarted with Ollama defaults"
 
-      - name: Sync nginx config from repo (fix login: /auth/ → Keycloak)
+      - name: "Sync nginx config from repo (fix login: /auth/ → Keycloak)"
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
