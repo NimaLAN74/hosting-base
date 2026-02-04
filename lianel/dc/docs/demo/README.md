@@ -30,12 +30,10 @@ You need a valid Bearer token for the Comp-AI API (same as when using the Comp A
 
 ### Option 2: GitHub Actions (manual workflow)
 
-1. **Add the token as a repository secret** (required once):
-   - Repo **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
-   - Name: **`COMP_AI_TOKEN`** (exactly).
-   - Value: paste the Bearer token from the browser (log in at www.lianel.se → Comp AI → DevTools → Network → copy from a Comp-AI request; use only the token part, not the word "Bearer").
-   - Alternatively use Keycloak user secrets: **`COMP_AI_DEMO_USER`**, **`COMP_AI_DEMO_PASSWORD`**, and optionally **`COMP_AI_KEYCLOAK_CLIENT_ID`**, **`COMP_AI_KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_URL`**, **`KEYCLOAK_REALM`**.
-2. In the repo, go to **Actions** → **Run Comp-AI Demo and Report** → **Run workflow**.
+1. **Add one of these as repository secrets** (Settings → Secrets and variables → Actions):
+   - **Option A – Bearer token:** **`COMP_AI_TOKEN`** = token from browser (Comp AI → DevTools → Network → copy from a request).
+   - **Option B – Keycloak (workflow gets token):** **`COMP_AI_DEMO_USER`**, **`COMP_AI_DEMO_PASSWORD`**. Optional: **`COMP_AI_KEYCLOAK_CLIENT_ID`** (default `comp-ai-service`), **`COMP_AI_KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_URL`** (default `https://www.lianel.se/auth`), **`KEYCLOAK_REALM`** (default `lianel`). The workflow has a **Get token from Keycloak** step that runs when `COMP_AI_TOKEN` is not set and fetches a fresh token each run.
+2. **Actions** → **Run Comp-AI Demo and Report** → **Run workflow**.
 3. After the run (green), download the **comp-ai-demo-report** artifact (Markdown report + raw JSON/CSV).
 
 ## What the demo covers

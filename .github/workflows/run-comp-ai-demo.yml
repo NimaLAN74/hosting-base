@@ -1,8 +1,8 @@
 # Run Comp-AI demo: call all controls/tests APIs and upload report artifact.
 # Trigger manually (Actions → Run Comp-AI Demo → Run workflow).
-# Set one of:
-#   - COMP_AI_TOKEN (secret): Bearer token from browser after login to www.lianel.se
-#   - Or Keycloak credentials: DEMO_USER, DEMO_PASSWORD, COMP_AI_KEYCLOAK_CLIENT_ID, COMP_AI_KEYCLOAK_CLIENT_SECRET (optional), KEYCLOAK_URL (optional)
+# Auth: use COMP_AI_TOKEN secret, or let the workflow get a token from Keycloak using
+#   COMP_AI_DEMO_USER, COMP_AI_DEMO_PASSWORD, and optionally COMP_AI_KEYCLOAK_CLIENT_ID,
+#   COMP_AI_KEYCLOAK_CLIENT_SECRET, KEYCLOAK_URL, KEYCLOAK_REALM.
 name: Run Comp-AI Demo and Report
 
 on:
@@ -12,21 +12,49 @@ jobs:
   demo:
     name: Run demo and upload report
     runs-on: ubuntu-latest
+    env:
+      COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'https://www.lianel.se' }}
+      COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
+      COMP_AI_DEMO_USER: ${{ secrets.COMP_AI_DEMO_USER }}
+      COMP_AI_DEMO_PASSWORD: ${{ secrets.COMP_AI_DEMO_PASSWORD }}
+      COMP_AI_KEYCLOAK_CLIENT_ID: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_ID }}
+      COMP_AI_KEYCLOAK_CLIENT_SECRET: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_URL: ${{ secrets.KEYCLOAK_URL || 'https://www.lianel.se/auth' }}
+      KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM || 'lianel' }}
+      COMP_AI_DEMO_OUTPUT: demo-output
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get token from Keycloak
+        id: keycloak-token
+        if: env.COMP_AI_TOKEN == '' && env.COMP_AI_DEMO_USER != '' && env.COMP_AI_DEMO_PASSWORD != ''
+        run: |
+          echo "Fetching access token from Keycloak..."
+          CLIENT_ID="${COMP_AI_KEYCLOAK_CLIENT_ID:-comp-ai-service}"
+          BODY="client_id=${CLIENT_ID}&username=${COMP_AI_DEMO_USER}&password=${COMP_AI_DEMO_PASSWORD}&grant_type=password"
+          if [ -n "${COMP_AI_KEYCLOAK_CLIENT_SECRET}" ]; then
+            BODY="${BODY}&client_secret=${COMP_AI_KEYCLOAK_CLIENT_SECRET}"
+          fi
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "$BODY")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY_ONLY=$(echo "$RESPONSE" | sed '$d')
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Keycloak token request failed (HTTP $HTTP_CODE): $BODY_ONLY"
+            exit 1
+          fi
+          TOKEN=$(echo "$BODY_ONLY" | jq -r '.access_token // empty')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "No access_token in Keycloak response"
+            exit 1
+          fi
+          echo "COMP_AI_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "Token obtained from Keycloak."
+
       - name: Run Comp-AI demo script
-        env:
-          COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'https://www.lianel.se' }}
-          COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
-          DEMO_USER: ${{ secrets.COMP_AI_DEMO_USER }}
-          DEMO_PASSWORD: ${{ secrets.COMP_AI_DEMO_PASSWORD }}
-          COMP_AI_KEYCLOAK_CLIENT_ID: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_ID }}
-          COMP_AI_KEYCLOAK_CLIENT_SECRET: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_SECRET }}
-          KEYCLOAK_URL: ${{ secrets.KEYCLOAK_URL }}
-          KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
-          COMP_AI_DEMO_OUTPUT: demo-output
         run: |
           chmod +x lianel/dc/scripts/monitoring/run-comp-ai-demo-and-report.sh
           cd lianel/dc && bash scripts/monitoring/run-comp-ai-demo-and-report.sh
