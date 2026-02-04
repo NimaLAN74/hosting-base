@@ -65,6 +65,8 @@ if [ -z "$TOKEN" ]; then
   echo "ERROR: Failed to get Comp-AI access token"
   exit 1
 fi
+# Strip non-ASCII so Airflow DAGs don't get 401 or header errors
+TOKEN=$(printf '%s' "$TOKEN" | tr -cd '[\x20-\x7E]')
 
 # 4) Set Airflow variable (pass token via file to avoid shell escaping)
 CONTAINER=$(docker ps -q -f name=airflow-apiserver | head -1)

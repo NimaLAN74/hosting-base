@@ -2,7 +2,9 @@
 Comp-AI API client for Airflow DAGs.
 
 Uses Airflow Variables: COMP_AI_BASE_URL, COMP_AI_TOKEN.
-Used by comp_ai_control_tests_dag and future Comp-AI DAGs (scan, gap analysis, alerts).
+Optional: COMP_AI_KEYCLOAK_URL, COMP_AI_CLIENT_ID, COMP_AI_CLIENT_SECRET, COMP_AI_KEYCLOAK_REALM
+  — if set, fetches a fresh token via client_credentials (avoids 401 from expired token).
+Used by comp_ai_control_tests_dag and comp_ai_alerts_dag.
 """
 from __future__ import annotations
 
@@ -26,24 +28,61 @@ def _ascii_safe(s: str) -> str:
     return ascii_only
 
 
-def _get_config() -> tuple[str, str]:
-    """Get base URL and Bearer token from env or Airflow Variable (when available)."""
-    base_url = os.environ.get("COMP_AI_BASE_URL")
-    token = os.environ.get("COMP_AI_TOKEN")
+def _get_variable(key: str, default: Optional[str] = None) -> Optional[str]:
     try:
         from airflow.sdk import Variable
-        base_url = base_url or Variable.get("COMP_AI_BASE_URL", default=None)
-        token = token or Variable.get("COMP_AI_TOKEN", default=None)
+        return Variable.get(key, default=default)
     except Exception:
-        pass
-    if not base_url or not token:
-        raise ValueError(
-            "COMP_AI_BASE_URL and COMP_AI_TOKEN must be set (Airflow Variables or env)"
+        return default
+
+
+def _fetch_token_client_credentials() -> Optional[str]:
+    """Fetch Bearer token from Keycloak (client_credentials). Returns None if config missing."""
+    keycloak_url = os.environ.get("COMP_AI_KEYCLOAK_URL") or _get_variable("COMP_AI_KEYCLOAK_URL")
+    client_id = os.environ.get("COMP_AI_CLIENT_ID") or _get_variable("COMP_AI_CLIENT_ID")
+    client_secret = os.environ.get("COMP_AI_CLIENT_SECRET") or _get_variable("COMP_AI_CLIENT_SECRET")
+    realm = os.environ.get("COMP_AI_KEYCLOAK_REALM") or _get_variable("COMP_AI_KEYCLOAK_REALM") or "lianel"
+    if not keycloak_url or not client_id or not client_secret:
+        return None
+    keycloak_url = keycloak_url.rstrip("/")
+    token_url = f"{keycloak_url}/realms/{realm}/protocol/openid-connect/token"
+    try:
+        resp = requests.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
         )
+        resp.raise_for_status()
+        data = resp.json()
+        token = (data.get("access_token") or "").strip()
+        if token:
+            return _ascii_safe(token)
+    except Exception as e:
+        log.warning("Failed to fetch token via client_credentials: %s", e)
+    return None
+
+
+def _get_config() -> tuple[str, str]:
+    """Get base URL and Bearer token. Prefers client_credentials if configured."""
+    base_url = os.environ.get("COMP_AI_BASE_URL") or _get_variable("COMP_AI_BASE_URL")
+    if not base_url:
+        raise ValueError("COMP_AI_BASE_URL must be set (Airflow Variable or env)")
     base_url = base_url.rstrip("/")
-    # Ensure header-safe (ASCII only) so requests/urllib3 don't raise UnicodeEncodeError
     base_url = _ascii_safe(base_url)
-    token = _ascii_safe(token)
+
+    token = _fetch_token_client_credentials()
+    if not token:
+        token = os.environ.get("COMP_AI_TOKEN") or _get_variable("COMP_AI_TOKEN")
+        if not token:
+            raise ValueError(
+                "COMP_AI_TOKEN must be set, or set COMP_AI_KEYCLOAK_URL, COMP_AI_CLIENT_ID, COMP_AI_CLIENT_SECRET (Airflow Variables or env)"
+            )
+        token = _ascii_safe(token)
     return base_url, token
 
 

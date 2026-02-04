@@ -39,9 +39,9 @@
 ## 4. Authentication and configuration
 
 - Airflow needs to call Comp-AI APIs with **Bearer token** (Keycloak).
-- **Variables** (recommended): `COMP_AI_BASE_URL` (e.g. `http://lianel-comp-ai-service:3002` or `https://www.lianel.se`), `COMP_AI_TOKEN` (Bearer token for a service account or machine user). Set in Airflow UI or via env.
-- **Optional:** Airflow Connection (e.g. HTTP) with token in password; DAG code reads connection and sets `Authorization: Bearer <token>`.
-- Token must be refreshed periodically (Keycloak) or use a long-lived service-account token; refresh can be a separate Airflow task or external process.
+- **Option A – Stored token:** Set `COMP_AI_BASE_URL` and `COMP_AI_TOKEN` (Airflow Variables or env). Token must be **ASCII-only** (no ellipsis … or other non-ASCII). Refresh periodically (e.g. run `scripts/maintenance/set-comp-ai-airflow-token.sh` on the server) or use a long-lived token.
+- **Option B – Client credentials (recommended):** Set `COMP_AI_BASE_URL` and `COMP_AI_KEYCLOAK_URL`, `COMP_AI_CLIENT_ID`, `COMP_AI_CLIENT_SECRET` (and optionally `COMP_AI_KEYCLOAK_REALM`, default `lianel`). The DAG fetches a fresh token each run via Keycloak; avoids 401 from expiry and non-ASCII in stored token.
+- **Non-ASCII / 401:** If you see “non-ASCII characters” or “401 Unauthorized”, see runbook `COMP-AI-AIRFLOW-401-TOKEN.md` or re-run the token script with ASCII sanitization, or switch to Option B.
 
 ---
 
