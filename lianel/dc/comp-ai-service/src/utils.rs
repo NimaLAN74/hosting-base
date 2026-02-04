@@ -46,7 +46,7 @@ pub mod serde_eu_date {
     }
 
     pub mod option {
-        use super::{deserialize, serialize};
+        use super::EU_DATE_FORMAT;
         use chrono::NaiveDate;
         use serde::{Deserialize, Deserializer, Serializer};
 
@@ -67,7 +67,7 @@ pub mod serde_eu_date {
             let opt = Option::<String>::deserialize(deserializer)?;
             match opt {
                 Some(value) => {
-                    let date = chrono::NaiveDate::parse_from_str(&value, super::EU_DATE_FORMAT)
+                    let date = NaiveDate::parse_from_str(&value, EU_DATE_FORMAT)
                         .map_err(serde::de::Error::custom)?;
                     Ok(Some(date))
                 }

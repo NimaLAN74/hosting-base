@@ -28,16 +28,6 @@ type AppState = (Arc<AppConfig>, PgPool, ResponseCache);
 
 #[utoipa::path(
     get,
-    path = "/api/v1/controls",
-    tag = "controls",
-    responses(
-        (status = 200, description = "List of controls", body = Vec<Control>),
-        (status = 401, description = "Unauthorized"),
-        (status = 500, description = "Internal server error")
-    )
-)]
-#[utoipa::path(
-    get,
     path = "/api/v1/requirements",
     tag = "controls",
     params(("framework" = Option<String>, Query, description = "Filter by framework slug (e.g. soc2, iso27001)")),
@@ -74,6 +64,16 @@ pub struct RequirementsQuery {
     pub framework: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls",
+    tag = "controls",
+    responses(
+        (status = 200, description = "List of controls", body = Vec<Control>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn get_controls(
     headers: axum::http::HeaderMap,
     State(state): State<AppState>,
