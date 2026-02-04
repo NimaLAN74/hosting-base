@@ -60,6 +60,7 @@ pub async fn get_requirements(
     Ok(Json(requirements))
 }
 
+#[derive(Debug, serde::Deserialize)]
 pub struct RequirementsQuery {
     pub framework: Option<String>,
 }
