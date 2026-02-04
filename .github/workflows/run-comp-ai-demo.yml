@@ -1,0 +1,40 @@
+# Run Comp-AI demo: call all controls/tests APIs and upload report artifact.
+# Trigger manually (Actions → Run Comp-AI Demo → Run workflow).
+# Set one of:
+#   - COMP_AI_TOKEN (secret): Bearer token from browser after login to www.lianel.se
+#   - Or Keycloak credentials: DEMO_USER, DEMO_PASSWORD, COMP_AI_KEYCLOAK_CLIENT_ID, COMP_AI_KEYCLOAK_CLIENT_SECRET (optional), KEYCLOAK_URL (optional)
+name: Run Comp-AI Demo and Report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  demo:
+    name: Run demo and upload report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Comp-AI demo script
+        env:
+          COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'https://www.lianel.se' }}
+          COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
+          DEMO_USER: ${{ secrets.COMP_AI_DEMO_USER }}
+          DEMO_PASSWORD: ${{ secrets.COMP_AI_DEMO_PASSWORD }}
+          COMP_AI_KEYCLOAK_CLIENT_ID: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_ID }}
+          COMP_AI_KEYCLOAK_CLIENT_SECRET: ${{ secrets.COMP_AI_KEYCLOAK_CLIENT_SECRET }}
+          KEYCLOAK_URL: ${{ secrets.KEYCLOAK_URL }}
+          KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
+          COMP_AI_DEMO_OUTPUT: demo-output
+        run: |
+          chmod +x lianel/dc/scripts/monitoring/run-comp-ai-demo-and-report.sh
+          cd lianel/dc && bash scripts/monitoring/run-comp-ai-demo-and-report.sh || true
+        continue-on-error: true
+
+      - name: Upload demo report
+        uses: actions/upload-artifact@v4
+        with:
+          name: comp-ai-demo-report
+          path: lianel/dc/demo-output/
+          if-no-files-found: ignore

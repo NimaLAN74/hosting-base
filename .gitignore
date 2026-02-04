@@ -78,3 +78,7 @@ lianel/dc/nginx/ssl/
 data/
 volumes/
 
+# Comp-AI demo run artifacts (report script output)
+lianel/dc/demo-output/
+lianel/dc/docs/demo/demo-output-*/
+
