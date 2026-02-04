@@ -29,6 +29,8 @@ use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use handlers::controls::{
     get_controls, get_control, get_controls_export, get_controls_gaps,
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
+    post_remediation_suggest,
+    get_control_tests, get_tests, post_test_result,
     get_evidence, post_evidence, post_github_evidence,
 };
 use db::create_pool;
@@ -51,6 +53,10 @@ use sqlx::PgPool;
         handlers::controls::get_remediation,
         handlers::controls::get_control_remediation,
         handlers::controls::put_control_remediation,
+        handlers::controls::post_remediation_suggest,
+        handlers::controls::get_control_tests,
+        handlers::controls::get_tests,
+        handlers::controls::post_test_result,
         handlers::controls::get_evidence,
         handlers::controls::post_evidence,
         handlers::controls::post_github_evidence,
@@ -76,6 +82,8 @@ use sqlx::PgPool;
         models::AuditExport,
         models::RemediationTask,
         models::UpsertRemediationRequest,
+        models::RemediationSuggestRequest,
+        models::RemediationSuggestResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -150,7 +158,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/controls", get(get_controls))
         .route("/api/v1/controls/export", get(get_controls_export))
         .route("/api/v1/controls/gaps", get(get_controls_gaps))
+        .route("/api/v1/controls/:id/remediation/suggest", axum::routing::post(post_remediation_suggest))
         .route("/api/v1/controls/:id/remediation", get(get_control_remediation).put(put_control_remediation))
+        .route("/api/v1/controls/:id/tests/:test_id/result", axum::routing::post(post_test_result))
+        .route("/api/v1/controls/:id/tests", get(get_control_tests))
+        .route("/api/v1/tests", get(get_tests))
         .route("/api/v1/controls/:id", get(get_control))
         .route("/api/v1/remediation", get(get_remediation))
         .route("/api/v1/evidence", get(get_evidence).post(post_evidence))

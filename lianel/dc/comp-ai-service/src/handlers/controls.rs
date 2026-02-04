@@ -12,13 +12,16 @@ use crate::auth::extract_user;
 use crate::models::{
     Control, ControlWithRequirements, EvidenceItem, CreateEvidenceRequest, CreateEvidenceResponse,
     GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
-    RequirementListItem,
+    RequirementListItem, ControlTest, RecordTestResultRequest,
+    RemediationSuggestRequest, RemediationSuggestResponse,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence,
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
     upsert_remediation, list_requirements,
+    list_control_tests, list_all_control_tests, record_control_test_result,
 };
+use crate::inference;
 use crate::utils::{format_eu_date, parse_eu_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use chrono::Utc;
@@ -465,6 +468,292 @@ pub async fn put_control_remediation(
     })?;
 
     Ok(Json(task))
+}
+
+// --- Phase 6C: AI remediation suggestion ---
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/controls/{id}/remediation/suggest",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    request_body = RemediationSuggestRequest,
+    responses(
+        (status = 200, description = "AI-generated remediation suggestion", body = RemediationSuggestResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Control not found"),
+        (status = 503, description = "AI model not available (Ollama not configured or failed)"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_remediation_suggest(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<RemediationSuggestRequest>,
+) -> Result<Json<RemediationSuggestResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let control = get_control_with_requirements(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_control_with_requirements failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get control"})),
+            )
+        })?;
+
+    let Some(c) = control else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Control not found"})),
+        ));
+    };
+
+    let remediation = get_remediation_by_control_id(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_remediation_by_control_id failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get remediation"})),
+            )
+        })?;
+
+    let req_codes: Vec<String> = c
+        .requirements
+        .iter()
+        .map(|r| format!("{} ({})", r.code, r.framework_slug))
+        .collect();
+    let system_prompt = format!(
+        "You are a compliance and security expert. Suggest concrete remediation steps for the following control.\n\n\
+         Control: {} [{}]\nDescription: {}\n\
+         Mapped framework requirements: {}\n\
+         Current remediation (if any): {}",
+        c.name,
+        c.internal_id,
+        c.description.as_deref().unwrap_or("(none)"),
+        req_codes.join(", "),
+        remediation
+            .as_ref()
+            .map(|t| {
+                format!(
+                    "status={}, assigned_to={}, due_date={}, notes={}",
+                    t.status,
+                    t.assigned_to.as_deref().unwrap_or("(unset)"),
+                    t.due_date
+                        .map(|d| format_eu_date(d))
+                        .unwrap_or_else(|| "(unset)".to_string()),
+                    t.notes.as_deref().unwrap_or("(none)")
+                )
+            })
+            .unwrap_or_else(|| "(no remediation task yet)".to_string()),
+    );
+
+    let user_prompt = match body.context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(ctx) => format!(
+            "Suggest concrete remediation steps (assignee, due date, and actionable steps). Additional context: {}",
+            ctx
+        ),
+        None => "Suggest concrete remediation steps (assignee, due date, and actionable steps).".to_string(),
+    };
+
+    let (suggestion, model_used) = if let (Some(ref url), Some(ref model)) =
+        (&config.comp_ai_ollama_url, &config.comp_ai_ollama_model)
+    {
+        match inference::generate(
+            url,
+            model,
+            &user_prompt,
+            config.comp_ai_max_tokens,
+            config.comp_ai_temperature,
+            Some(&system_prompt),
+        )
+        .await
+        {
+            Ok((text, _)) => (text.trim().to_string(), model.clone()),
+            Err(e) => {
+                tracing::error!("Ollama remediation suggest failed: {}", e);
+                if config.comp_ai_ollama_fallback_to_mock {
+                    (
+                        format!(
+                            "1. Assign an owner for this control.\n2. Set a due date (e.g. 30 days).\n3. Implement evidence collection for: {}.",
+                            req_codes.join(", ")
+                        ),
+                        "mock-model (Ollama unavailable)".to_string(),
+                    )
+                } else {
+                    return Err((
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(serde_json::json!({
+                            "error": "AI model unavailable",
+                            "detail": e.to_string()
+                        })),
+                    ));
+                }
+            }
+        }
+    } else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "AI model not configured",
+                "detail": "Set COMP_AI_OLLAMA_URL and COMP_AI_OLLAMA_MODEL for remediation suggestions"
+            })),
+        ));
+    };
+
+    Ok(Json(RemediationSuggestResponse {
+        suggestion,
+        model_used,
+    }))
+}
+
+// --- Phase 6B: control tests ---
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls/{id}/tests",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    responses(
+        (status = 200, description = "List of automated tests for the control", body = Vec<ControlTest>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_control_tests(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<ControlTest>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let tests = list_control_tests(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_control_tests failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list control tests"})),
+            )
+        })?;
+
+    Ok(Json(tests))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TestsQuery {
+    pub control_id: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/tests",
+    tag = "controls",
+    params(("control_id" = Option<i64>, Query, description = "Filter by control ID")),
+    responses(
+        (status = 200, description = "List of all control tests", body = Vec<ControlTest>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_tests(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<TestsQuery>,
+) -> Result<Json<Vec<ControlTest>>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let tests = list_all_control_tests(pool, q.control_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_all_control_tests failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list tests"})),
+            )
+        })?;
+
+    Ok(Json(tests))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/controls/{id}/tests/{test_id}/result",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID"), ("test_id" = i64, Path, description = "Test ID")),
+    request_body = RecordTestResultRequest,
+    responses(
+        (status = 200, description = "Test result recorded", body = ControlTest),
+        (status = 400, description = "Invalid result (use pass, fail, or skipped)"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Test not found or not linked to control"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_test_result(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path((id, test_id)): Path<(i64, i64)>,
+    Json(body): Json<RecordTestResultRequest>,
+) -> Result<Json<ControlTest>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let result = body.result.trim().to_lowercase();
+    if !["pass", "fail", "skipped"].contains(&result.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Invalid result",
+                "detail": "Use pass, fail, or skipped"
+            })),
+        ));
+    }
+
+    let tests = list_control_tests(pool, id).await.map_err(|e| {
+        tracing::error!("list_control_tests failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to list control tests"})),
+        )
+    })?;
+    if !tests.iter().any(|t| t.id == test_id) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Test not found or not linked to this control"})),
+        ));
+    }
+
+    let updated = record_control_test_result(
+        pool,
+        test_id,
+        &result,
+        body.details.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("record_control_test_result failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to record test result"})),
+        )
+    })?;
+
+    Ok(Json(updated))
 }
 
 #[derive(Debug, serde::Deserialize)]

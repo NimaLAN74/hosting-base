@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
 **Date**: January 2026  
-**Status**: ✅ **Phases 1–4 Complete** · ✅ **Phase 5 (Frameworks & audit) Complete**
+**Status**: ✅ **Phases 1–5 Complete** · ✅ **Phase 6 (Expand frameworks, tests, AI remediation) Complete**
 
 ---
 
@@ -88,15 +88,21 @@
    - [x] Frontend: framework dropdown (General + list from API), sent in request body
 
 9. **Phase 5: Frameworks & audit** ✅
-   - [x] Migrations 010–015: controls, requirements, control_requirements, evidence; SOC 2 seed (011), ISO 27001 seed + cross-mapping (013), remediation_tasks (014), GDPR seed (015)
+   - [x] Migrations 010–017: controls, requirements, control_requirements, evidence; SOC 2 seed (011), ISO 27001 + GDPR seeds (013, 015), remediation_tasks (014), expand frameworks (016), control_tests (017)
    - [x] GET /api/v1/controls, GET /api/v1/controls/:id (with requirements), GET /api/v1/evidence, POST /api/v1/evidence, GitHub evidence integration
    - [x] GET /api/v1/controls/export?format=csv|json&framework=soc2|iso27001 — audit export (optional framework filter)
    - [x] GET /api/v1/controls/gaps — controls with no evidence
    - [x] GET/PUT /api/v1/controls/:id/remediation — remediation tasks
    - [x] GET /api/v1/requirements?framework=soc2|iso27001 — list framework requirements from DB
-   - [ ] Run comp_ai migrations (009–015) on remote DB if not yet done: `bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc
+   - [ ] Run comp_ai migrations (009–017) on remote DB if not yet done: `bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc
 
-10. **Testing & Deployment**
+10. **Phase 6: Expand frameworks, tests, AI remediation** ✅
+   - [x] **6A** Migration 016: expand frameworks – more requirements per framework (SOC 2 CC6.3–CC7.4, ISO 27001 A.5.1–A.12.4.2, GDPR Art. 24–34, Art. 5(1)(a)) and control–requirement mappings
+   - [x] **6B** Automated tests per control: migration 017 `comp_ai.control_tests`, GET /api/v1/controls/:id/tests, GET /api/v1/tests, POST /api/v1/controls/:id/tests/:test_id/result (record result: pass/fail/skipped)
+   - [x] **6C** Deeper AI remediation: POST /api/v1/controls/:id/remediation/suggest — control + requirements + current remediation passed to Ollama; optional request body `context`; returns `{ suggestion, model_used }` (503 if Ollama not configured; fallback to mock when COMP_AI_OLLAMA_FALLBACK_TO_MOCK=true)
+   - [x] **6D** This status document updated with Phase 6
+
+11. **Testing & Deployment**
    - [ ] Build Docker image (pipeline)
    - [ ] Deploy to remote host (pipeline)
    - [ ] Verify service health (pipeline)
@@ -182,11 +188,11 @@ curl http://localhost:3002/health
 
 ## ✅ Current Status
 
-**Phase 1**: ✅ **COMPLETE**  
-**Phase 2**: ⏳ **READY TO START**
+**Phase 1–5**: ✅ **COMPLETE**  
+**Phase 6**: ✅ **COMPLETE** (expand frameworks, automated tests per control, AI remediation suggest)
 
-The service foundation is complete and ready for integration work. All infrastructure components are in place.
+All Phase 6 deliverables are in place: migration 016 (more requirements per framework), migration 017 + APIs for control tests, POST /api/v1/controls/:id/remediation/suggest for AI-generated remediation steps.
 
 ---
 
-**Next Action**: Run comp_ai migrations on the DB used by comp-ai-service (`bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc). Then deploy and test Phase 5 APIs (controls, export, gaps, requirements, remediation).
+**Next Action**: Run comp_ai migrations (009–017) on the DB used by comp-ai-service if not yet done (`bash scripts/deployment/run-comp-ai-migrations.sh` from lianel/dc). Then deploy and test Phase 5/6 APIs (controls, export, gaps, requirements, remediation, tests, remediation/suggest).

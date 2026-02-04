@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Row};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use crate::models::{RequestHistory, Control, ControlWithRequirements, RequirementRef, EvidenceItem, RemediationTask};
+use crate::models::{RequestHistory, Control, ControlWithRequirements, RequirementRef, EvidenceItem, RemediationTask, ControlTest};
 
 /// Save a request to the database
 pub async fn save_request(
@@ -498,4 +498,124 @@ pub async fn create_evidence(
     .await?;
 
     Ok(row.get::<i64, _>("id"))
+}
+
+// --- Phase 6B: control_tests ---
+
+/// List automated tests for a control.
+pub async fn list_control_tests(pool: &PgPool, control_id: i64) -> Result<Vec<ControlTest>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+        FROM comp_ai.control_tests
+        WHERE control_id = $1
+        ORDER BY name
+        "#,
+    )
+    .bind(control_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        let updated_at_naive: NaiveDateTime = row.get("updated_at");
+        let last_run_at: Option<NaiveDateTime> = row.get("last_run_at");
+        out.push(ControlTest {
+            id: row.get("id"),
+            control_id: row.get("control_id"),
+            name: row.get("name"),
+            test_type: row.get("test_type"),
+            schedule: row.get("schedule"),
+            last_run_at: last_run_at.map(row_naive_to_utc),
+            last_result: row.get("last_result"),
+            last_details: row.get("last_details"),
+            created_at: row_naive_to_utc(created_at_naive),
+            updated_at: row_naive_to_utc(updated_at_naive),
+        });
+    }
+    Ok(out)
+}
+
+/// List all control tests (optionally filter by control_id).
+pub async fn list_all_control_tests(pool: &PgPool, control_id: Option<i64>) -> Result<Vec<ControlTest>, sqlx::Error> {
+    let rows = if let Some(cid) = control_id {
+        sqlx::query(
+            r#"
+            SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+            FROM comp_ai.control_tests
+            WHERE control_id = $1
+            ORDER BY control_id, name
+            "#,
+        )
+        .bind(cid)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+            FROM comp_ai.control_tests
+            ORDER BY control_id, name
+            "#,
+        )
+    }
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let created_at_naive: NaiveDateTime = row.get("created_at");
+        let updated_at_naive: NaiveDateTime = row.get("updated_at");
+        let last_run_at: Option<NaiveDateTime> = row.get("last_run_at");
+        out.push(ControlTest {
+            id: row.get("id"),
+            control_id: row.get("control_id"),
+            name: row.get("name"),
+            test_type: row.get("test_type"),
+            schedule: row.get("schedule"),
+            last_run_at: last_run_at.map(row_naive_to_utc),
+            last_result: row.get("last_result"),
+            last_details: row.get("last_details"),
+            created_at: row_naive_to_utc(created_at_naive),
+            updated_at: row_naive_to_utc(updated_at_naive),
+        });
+    }
+    Ok(out)
+}
+
+/// Record a test run result (updates last_run_at, last_result, last_details).
+pub async fn record_control_test_result(
+    pool: &PgPool,
+    test_id: i64,
+    result: &str,
+    details: Option<&str>,
+) -> Result<ControlTest, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        UPDATE comp_ai.control_tests
+        SET last_run_at = CURRENT_TIMESTAMP, last_result = $2, last_details = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+        "#,
+    )
+    .bind(test_id)
+    .bind(result)
+    .bind(details)
+    .fetch_one(pool)
+    .await?;
+
+    let created_at_naive: NaiveDateTime = row.get("created_at");
+    let updated_at_naive: NaiveDateTime = row.get("updated_at");
+    let last_run_at: Option<NaiveDateTime> = row.get("last_run_at");
+    Ok(ControlTest {
+        id: row.get("id"),
+        control_id: row.get("control_id"),
+        name: row.get("name"),
+        test_type: row.get("test_type"),
+        schedule: row.get("schedule"),
+        last_run_at: last_run_at.map(row_naive_to_utc),
+        last_result: row.get("last_result"),
+        last_details: row.get("last_details"),
+        created_at: row_naive_to_utc(created_at_naive),
+        updated_at: row_naive_to_utc(updated_at_naive),
+    })
 }

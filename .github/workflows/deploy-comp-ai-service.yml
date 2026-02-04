@@ -83,7 +83,9 @@ jobs:
                    lianel/dc/database/migrations/012_comp_ai_grants.sql \
                    lianel/dc/database/migrations/013_comp_ai_seed_iso27001.sql \
                    lianel/dc/database/migrations/014_comp_ai_remediation_tasks.sql \
-                   lianel/dc/database/migrations/015_comp_ai_seed_gdpr.sql; do
+                   lianel/dc/database/migrations/015_comp_ai_seed_gdpr.sql \
+                   lianel/dc/database/migrations/016_comp_ai_expand_frameworks.sql \
+                   lianel/dc/database/migrations/017_comp_ai_control_tests.sql; do
             echo "Running $f"
             PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
           done

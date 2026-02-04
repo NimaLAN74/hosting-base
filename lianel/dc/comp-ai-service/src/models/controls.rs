@@ -135,3 +135,38 @@ pub struct UpsertRemediationRequest {
     pub status: Option<String>,
     pub notes: Option<String>,
 }
+
+/// Automated test per control (Phase 6B).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ControlTest {
+    pub id: i64,
+    pub control_id: i64,
+    pub name: String,
+    pub test_type: String,
+    pub schedule: Option<String>,
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub last_result: Option<String>,
+    pub last_details: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Record a test run result (POST body).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RecordTestResultRequest {
+    pub result: String,
+    pub details: Option<String>,
+}
+
+/// Optional context for AI remediation suggestion (Phase 6C).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RemediationSuggestRequest {
+    pub context: Option<String>,
+}
+
+/// AI-generated remediation suggestion (Phase 6C).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RemediationSuggestResponse {
+    pub suggestion: String,
+    pub model_used: String,
+}
