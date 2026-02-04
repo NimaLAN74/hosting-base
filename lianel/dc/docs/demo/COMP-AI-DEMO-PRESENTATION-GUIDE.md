@@ -4,6 +4,26 @@ Use this to run a live demo or client presentation of the Comp-AI UI and service
 
 ---
 
+## 0. If Controls / Gaps / Evidence are empty
+
+The Comp-AI UI reads from the **same database** as the Comp-AI service. If you see no controls, no gaps, and empty lists, the **comp_ai** schema may not have seed data.
+
+**Fix (on the server that hosts the Comp-AI service and PostgreSQL):**
+
+1. Ensure the Comp-AI service and migrations use the **same** database (same `POSTGRES_*` or `COMP_AI_MIGRATION_*` in `.env`).
+2. Run the full migration script from `lianel/dc`:
+   ```bash
+   cd /path/to/hosting-base/lianel/dc
+   # Load .env (POSTGRES_PASSWORD etc.)
+   COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh
+   ```
+   This runs migrations **009–018**. Migration **018** ensures demo seed data (3 controls, SOC 2 / ISO 27001 / GDPR requirements, mappings, and sample tests) so the UI has data to show.
+3. Restart the Comp-AI service if needed, then refresh the UI.
+
+**Or:** Re-run the **Deploy Comp AI Service to Production** workflow (it runs 009–018 on the remote DB). After it succeeds, refresh the Comp-AI Controls page.
+
+---
+
 ## 1. Pipeline status
 
 The **Run Comp-AI Demo and Report** workflow was triggered. To run it again:

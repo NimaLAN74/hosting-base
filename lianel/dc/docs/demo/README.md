@@ -2,6 +2,8 @@
 
 This folder holds **demo reports** produced by running all Comp-AI controls/tests APIs. Use them for client demos and audit-style summaries.
 
+**If the Comp-AI UI shows empty Controls / Gaps / Evidence:** the database may lack seed data. Run migrations 009–018 on the same DB the Comp-AI service uses (see **COMP-AI-DEMO-PRESENTATION-GUIDE.md** § “If Controls / Gaps / Evidence are empty”), or re-run the **Deploy Comp AI Service** workflow so it applies 018 (ensure demo seed) on the remote DB.
+
 ## How to generate a report
 
 ### Option 1: Run the script locally (or on the server)
