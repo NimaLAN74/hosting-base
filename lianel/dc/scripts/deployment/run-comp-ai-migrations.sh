@@ -2,6 +2,7 @@
 # Run Phase 4/5 comp_ai migrations (009–015) on the DB used by comp-ai-service.
 # Run from lianel/dc (where .env and database/migrations live).
 # Usage: from lianel/dc: bash scripts/deployment/run-comp-ai-migrations.sh
+# Also invoked by deploy-comp-ai-service GH Action on production DB.
 #
 # On the server, the DB user must have permission to create schema and objects in
 # POSTGRES_DB. Set COMP_AI_MIGRATION_USER (and optionally COMP_AI_MIGRATION_PASSWORD)
