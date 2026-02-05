@@ -14,10 +14,10 @@ use crate::models::{
     GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
     RequirementListItem, ControlTest, RecordTestResultRequest,
     RemediationSuggestRequest, RemediationSuggestResponse,
-    GapAnalysisRequest, GapAnalysisResponse,
+    GapAnalysisRequest, GapAnalysisResponse, EvidenceAnalyzeResponse,
 };
 use crate::db::queries::{
-    list_controls, get_control_with_requirements, list_evidence, create_evidence,
+    list_controls, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
     upsert_remediation, list_requirements,
     list_control_tests, list_all_control_tests, record_control_test_result,
@@ -995,7 +995,7 @@ fn extract_text_from_file(content_type: &str, bytes: &[u8]) -> Option<String> {
         return std::str::from_utf8(bytes).ok().map(String::from);
     }
     if ct == "application/pdf" {
-        return pdf_extract::extract_from_bytes(bytes).ok().filter(|s: &String| !s.is_empty());
+        return pdf_extract::extract_text_from_mem(bytes).ok().filter(|s: &String| !s.is_empty());
     }
     // Fallback: try utf-8
     std::str::from_utf8(bytes).ok().map(String::from)
