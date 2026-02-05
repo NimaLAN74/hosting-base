@@ -1,6 +1,6 @@
-# Runtime-only image: binary is built on the runner (glibc/linux-gnu).
-# Use glibc base (debian) so the runner-built binary runs; Alpine (musl) would fail.
-FROM debian:bookworm-slim
+# Runtime-only image: binary is built on the runner (ubuntu-24 glibc 2.39).
+# Base must have glibc >= 2.38 (bookworm has 2.36; AWS SDK and deps require newer).
+FROM ubuntu:24.04
 
 WORKDIR /app
 
