@@ -46,6 +46,18 @@ pub struct AppConfig {
     pub aws_access_key_id: Option<String>,
     /// G4: AWS secret key for IAM (optional if using instance role / env default).
     pub aws_secret_access_key: Option<String>,
+    /// D3: M365 (Microsoft Graph) – tenant ID for OAuth (e.g. xxx.onmicrosoft.com or tenant GUID).
+    pub m365_tenant_id: Option<String>,
+    /// D3: M365 app (client) ID.
+    pub m365_client_id: Option<String>,
+    /// D3: M365 client secret.
+    pub m365_client_secret: Option<String>,
+    /// D3: Mailbox to read (user ID or userPrincipalName). Required for app-only.
+    pub m365_mailbox_user_id: Option<String>,
+    /// C3: Google Drive – folder ID to list (optional; can be overridden per request).
+    pub google_drive_folder_id: Option<String>,
+    /// C3: Path to service account JSON file (for Drive API).
+    pub google_drive_credentials_path: Option<String>,
     /// Base directory for uploaded evidence files (Phase B). If unset, upload is disabled.
     pub comp_ai_evidence_storage_path: Option<String>,
     /// Max upload size in bytes (default 10 MB).
@@ -132,6 +144,12 @@ impl AppConfig {
             aws_region: env::var("AWS_REGION").ok(),
             aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").ok(),
             aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").ok(),
+            m365_tenant_id: env::var("M365_TENANT_ID").ok(),
+            m365_client_id: env::var("M365_CLIENT_ID").ok(),
+            m365_client_secret: env::var("M365_CLIENT_SECRET").ok(),
+            m365_mailbox_user_id: env::var("M365_MAILBOX_USER_ID").ok(),
+            google_drive_folder_id: env::var("GOOGLE_DRIVE_FOLDER_ID").ok(),
+            google_drive_credentials_path: env::var("GOOGLE_DRIVE_CREDENTIALS_PATH").ok(),
             comp_ai_evidence_storage_path: env::var("COMP_AI_EVIDENCE_STORAGE_PATH").ok(),
             comp_ai_evidence_max_file_bytes: env::var("COMP_AI_EVIDENCE_MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "10485760".to_string()) // 10 MiB

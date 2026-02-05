@@ -2316,7 +2316,6 @@ pub async fn post_sharepoint_evidence(
             None,
             None,
             None,
-            None,
         )
         .await
         {
