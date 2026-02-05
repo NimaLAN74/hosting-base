@@ -11,6 +11,8 @@ pub struct Control {
     pub name: String,
     pub description: Option<String>,
     pub category: Option<String>,
+    /// G8: External control ID (e.g. Vanta Control Set) for alignment.
+    pub external_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -39,6 +41,8 @@ pub struct ControlWithRequirements {
     pub name: String,
     pub description: Option<String>,
     pub category: Option<String>,
+    /// G8: External control ID (e.g. Vanta Control Set).
+    pub external_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub requirements: Vec<RequirementRef>,
 }
@@ -48,6 +52,8 @@ pub struct RequirementRef {
     pub code: String,
     pub title: Option<String>,
     pub framework_slug: String,
+    /// G8: External requirement ID (e.g. Vanta Control Set).
+    pub external_id: Option<String>,
 }
 
 /// Requirement as returned by GET /api/v1/requirements (Phase 5 audit view).
@@ -92,6 +98,34 @@ pub struct CreateEvidenceResponse {
     pub id: i64,
     pub control_id: i64,
     pub collected_at: DateTime<Utc>,
+}
+
+/// One document entry for batch scan (Phase C).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ScanDocumentItem {
+    /// URL of the document (required).
+    pub url: String,
+    /// Evidence type (e.g. document, policy). Defaults to "document".
+    #[serde(rename = "type")]
+    pub r#type: Option<String>,
+}
+
+/// Request for batch document scan (Phase C1).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ScanDocumentsRequest {
+    /// Control to link all created evidence to (if not set per item).
+    pub control_id: i64,
+    /// List of documents (URL + optional type).
+    pub documents: Vec<ScanDocumentItem>,
+}
+
+/// Response from batch document scan (Phase C1).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ScanDocumentsResponse {
+    /// Created evidence IDs in order.
+    pub evidence_ids: Vec<i64>,
+    /// Number of evidence records created.
+    pub created: usize,
 }
 
 /// Request to collect evidence from GitHub (last commit or branch protection).
@@ -142,7 +176,7 @@ pub struct UpsertRemediationRequest {
     pub notes: Option<String>,
 }
 
-/// Automated test per control (Phase 6B).
+/// Automated test per control (Phase 6B). G2: config holds test params (e.g. GitHub owner/repo).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ControlTest {
     pub id: i64,
@@ -150,6 +184,8 @@ pub struct ControlTest {
     pub name: String,
     pub test_type: String,
     pub schedule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<serde_json::Value>,
     pub last_run_at: Option<DateTime<Utc>>,
     pub last_result: Option<String>,
     pub last_details: Option<String>,
@@ -197,4 +233,52 @@ pub struct EvidenceAnalyzeResponse {
     pub suggested_control_ids: Option<Vec<i64>>,
     pub gaps: Option<Vec<String>>,
     pub model_used: String,
+}
+
+/// Response for "review all evidence for control" (G9).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EvidenceReviewResponse {
+    pub summary: String,
+    pub gaps: Option<Vec<String>>,
+    pub suggested_fixes: Option<Vec<String>>,
+    pub model_used: String,
+}
+
+/// One policy/document reference in control–policy mapping (G6).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PolicyRef {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub source: Option<String>,
+    pub link_url: Option<String>,
+    pub file_name: Option<String>,
+}
+
+/// One control with its linked policies/documents (G6).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ControlPolicyMappingEntry {
+    pub control_id: i64,
+    pub internal_id: String,
+    pub name: String,
+    pub policies: Vec<PolicyRef>,
+}
+
+/// G8: Update control external_id (Vanta alignment).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PatchControlRequest {
+    pub external_id: Option<String>,
+}
+
+/// Control–policy mapping response (G6).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ControlPolicyMappingResponse {
+    pub mapping: Vec<ControlPolicyMappingEntry>,
+}
+
+/// SOC 2 System Description template (G6). Placeholders: {{organisation_name}}, {{system_name}}, {{as_of_date}}.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SystemDescriptionResponse {
+    pub template: String,
+    pub placeholders: Vec<String>,
 }

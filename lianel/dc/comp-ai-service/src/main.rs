@@ -27,11 +27,13 @@ use config::AppConfig;
 use handlers::health::health_check;
 use handlers::comp_ai::{get_frameworks, get_request_history, process_request};
 use handlers::controls::{
-    get_controls, get_control, get_controls_export, get_controls_gaps,
+    get_controls, get_control, patch_control, get_controls_export, get_controls_gaps,
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
     post_remediation_suggest, post_analysis_gaps,
     get_control_tests, get_tests, post_test_result,
-    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_github_evidence,
+    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review, post_github_evidence,
+    post_scan_documents, post_scan_upload_batch,
+    get_control_policy_mapping, get_system_description,
 };
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
@@ -47,6 +49,7 @@ use sqlx::PgPool;
         handlers::comp_ai::get_frameworks,
         handlers::controls::get_controls,
         handlers::controls::get_control,
+        handlers::controls::patch_control,
         handlers::controls::get_controls_export,
         handlers::controls::get_controls_gaps,
         handlers::controls::get_requirements,
@@ -62,7 +65,12 @@ use sqlx::PgPool;
         handlers::controls::post_evidence,
         handlers::controls::post_evidence_upload,
         handlers::controls::post_evidence_analyze,
+        handlers::controls::post_control_evidence_review,
         handlers::controls::post_github_evidence,
+        handlers::controls::post_scan_documents,
+        handlers::controls::post_scan_upload_batch,
+        handlers::controls::get_control_policy_mapping,
+        handlers::controls::get_system_description,
     ),
     components(schemas(
         models::CompAIRequest,
@@ -90,6 +98,15 @@ use sqlx::PgPool;
         models::GapAnalysisRequest,
         models::GapAnalysisResponse,
         models::EvidenceAnalyzeResponse,
+        models::EvidenceReviewResponse,
+        models::ScanDocumentItem,
+        models::ScanDocumentsRequest,
+        models::ScanDocumentsResponse,
+        models::ControlPolicyMappingResponse,
+        models::ControlPolicyMappingEntry,
+        models::PolicyRef,
+        models::SystemDescriptionResponse,
+        models::PatchControlRequest,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -164,18 +181,23 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/controls", get(get_controls))
         .route("/api/v1/controls/export", get(get_controls_export))
         .route("/api/v1/controls/gaps", get(get_controls_gaps))
+        .route("/api/v1/controls/policy-mapping", get(get_control_policy_mapping))
+        .route("/api/v1/system-description", get(get_system_description))
         .route("/api/v1/controls/:id/remediation/suggest", axum::routing::post(post_remediation_suggest))
         .route("/api/v1/analysis/gaps", axum::routing::post(post_analysis_gaps))
         .route("/api/v1/controls/:id/remediation", get(get_control_remediation).put(put_control_remediation))
         .route("/api/v1/controls/:id/tests/:test_id/result", axum::routing::post(post_test_result))
         .route("/api/v1/controls/:id/tests", get(get_control_tests))
         .route("/api/v1/tests", get(get_tests))
-        .route("/api/v1/controls/:id", get(get_control))
+        .route("/api/v1/controls/:id", get(get_control).patch(patch_control))
         .route("/api/v1/remediation", get(get_remediation))
         .route("/api/v1/evidence", get(get_evidence).post(post_evidence))
         .route("/api/v1/evidence/upload", axum::routing::post(post_evidence_upload))
         .route("/api/v1/evidence/:id/analyze", axum::routing::post(post_evidence_analyze))
+        .route("/api/v1/controls/:id/evidence/review", axum::routing::post(post_control_evidence_review))
         .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
+        .route("/api/v1/scan/documents", axum::routing::post(post_scan_documents))
+        .route("/api/v1/scan/upload-batch", axum::routing::post(post_scan_upload_batch))
         .layer(rate_limit_layer)
         .with_state((config.clone(), pool, response_cache));
 
@@ -192,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
                 .layer(
                     CorsLayer::new()
                         .allow_origin(AllowOrigin::any())
-                        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT])
+                        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::PATCH])
                         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
                 )
         );

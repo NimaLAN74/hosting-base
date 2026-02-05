@@ -98,6 +98,21 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** G8: Update control external_id (e.g. Vanta Control Set alignment). body: { external_id: string | null } */
+  async patchControl(id, body) {
+    const res = await authenticatedFetch(`/api/v1/controls/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Control not found');
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to update control');
+    }
+    return res.json();
+  },
+
   /** Phase 5: audit export (controls + requirements + evidence). format: undefined = JSON, 'csv' = CSV blob. */
   async getControlsExport(format = undefined) {
     const url = format === 'csv'
@@ -113,6 +128,20 @@ export const compAiApi = {
   async getControlsGaps() {
     const res = await authenticatedFetch('/api/v1/controls/gaps');
     if (!res.ok) throw new Error('Failed to fetch gaps');
+    return res.json();
+  },
+
+  /** G6: control–policy mapping (controls with policy/document evidence). */
+  async getControlPolicyMapping() {
+    const res = await authenticatedFetch('/api/v1/controls/policy-mapping');
+    if (!res.ok) throw new Error('Failed to fetch policy mapping');
+    return res.json();
+  },
+
+  /** G6: SOC 2 System Description template. */
+  async getSystemDescription() {
+    const res = await authenticatedFetch('/api/v1/system-description');
+    if (!res.ok) throw new Error('Failed to fetch system description');
     return res.json();
   },
 
@@ -212,6 +241,16 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** G9: Review all evidence for a control – AI flags gaps and suggests fixes. */
+  async postControlEvidenceReview(controlId) {
+    const res = await authenticatedFetch(`/api/v1/controls/${controlId}/evidence/review`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Evidence review failed');
+    }
+    return res.json();
+  },
+
   /** Phase B: AI analyse document (evidence must have extracted text). */
   async postEvidenceAnalyze(evidenceId) {
     const res = await authenticatedFetch(`/api/v1/evidence/${evidenceId}/analyze`, { method: 'POST' });
@@ -231,6 +270,39 @@ export const compAiApi = {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || data.detail || 'Failed to collect GitHub evidence');
+    }
+    return res.json();
+  },
+
+  /** Phase C1: batch create evidence from document URLs. */
+  async postScanDocuments(controlId, documents) {
+    const res = await authenticatedFetch('/api/v1/scan/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ control_id: controlId, documents }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Scan failed');
+    }
+    return res.json();
+  },
+
+  /** Phase C2: batch upload multiple files; creates evidence for each. */
+  async postScanUploadBatch(controlId, type, files) {
+    const form = new FormData();
+    form.append('control_id', String(controlId));
+    form.append('type', type);
+    for (let i = 0; i < files.length; i++) {
+      form.append('file', files[i]);
+    }
+    const res = await authenticatedFetch('/api/v1/scan/upload-batch', {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Batch upload failed');
     }
     return res.json();
   },

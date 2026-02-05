@@ -31,8 +31,12 @@ services:
       COMP_AI_MAX_PROMPT_LEN: ${COMP_AI_MAX_PROMPT_LEN:-32768}
       COMP_AI_RESPONSE_CACHE_TTL_SECS: ${COMP_AI_RESPONSE_CACHE_TTL_SECS:-300}
       COMP_AI_RESPONSE_CACHE_MAX_ENTRIES: ${COMP_AI_RESPONSE_CACHE_MAX_ENTRIES:-1000}
+      COMP_AI_EVIDENCE_STORAGE_PATH: ${COMP_AI_EVIDENCE_STORAGE_PATH:-/var/lib/comp-ai/evidence}
+      COMP_AI_EVIDENCE_MAX_FILE_BYTES: ${COMP_AI_EVIDENCE_MAX_FILE_BYTES:-10485760}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       RUST_LOG: info
+    volumes:
+      - comp-ai-evidence:/var/lib/comp-ai/evidence
     expose:
       - "3002"
     depends_on:
@@ -68,3 +72,4 @@ networks:
 
 volumes:
   ollama-data:
+  comp-ai-evidence:

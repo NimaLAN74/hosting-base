@@ -1,0 +1,42 @@
+# Run Comp-AI Phase B test (evidence upload + AI analyse) on the remote host via SSH.
+# Trigger manually (Actions → Run Comp-AI Phase B test on remote → Run workflow).
+# Requires: REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY (and optionally REMOTE_PORT).
+# On the remote, .env must provide Keycloak/Comp-AI credentials (or script fetches from Keycloak).
+name: Run Comp-AI Phase B test on remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-remote:
+    name: Phase B test on remote host
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+      REMOTE_USER: ${{ secrets.REMOTE_USER }}
+      REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+    steps:
+      - name: Setup SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          [ -n "$REMOTE_HOST" ] && ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Run Phase B test on remote
+        run: |
+          if [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_USER" ]; then
+            echo "Set REMOTE_HOST and REMOTE_USER secrets to run this workflow."
+            exit 1
+          fi
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "cd /root/hosting-base && (git pull origin master || true) && cd lianel/dc && bash scripts/monitoring/test-comp-ai-phase-b-remote.sh"

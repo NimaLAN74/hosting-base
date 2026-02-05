@@ -202,8 +202,8 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 ---
 
-**Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI) and **7.2 (AI gap/risk analysis)** done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card. **G7 Alerts:** DAG `comp_ai_alerts` runs daily at 07:00 UTC; logs gaps and failed tests; optional Slack via `SLACK_WEBHOOK_URL`.
+**Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI), 7.2 (AI gap/risk analysis), 7.3 (Apply to remediation) done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card. **G7 Alerts:** DAG `comp_ai_alerts` runs daily at 07:00 UTC; logs gaps and failed tests; optional Slack via `SLACK_WEBHOOK_URL`.
 
 **Phase B (Document upload + AI analysis):** Migration 019 (evidence file_path, file_name, content_type, extracted_text); config `COMP_AI_EVIDENCE_STORAGE_PATH`, `COMP_AI_EVIDENCE_MAX_FILE_BYTES`; `POST /api/v1/evidence/upload` (multipart), `POST /api/v1/evidence/:id/analyze` (Ollama); text extraction (PDF + txt via pdf-extract); UI: “Upload file” form and “Analyse” button per evidence with extracted text.
 
-**Next Action**: Deploy Phase B (run migration 019, set `COMP_AI_EVIDENCE_STORAGE_PATH` on server). Then optional: Phase C (scan/documents), 7.3 (structured apply), or 7.4 (retaliation/whistleblower). See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.
+**Next Action**: Phase C (scan + org DAG) and 7.3 (apply) done. See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md for next workstreams (G3 IdP, G6 policy, G9 AI evidence review, etc.).

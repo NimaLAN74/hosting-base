@@ -114,6 +114,40 @@ def get_gaps() -> list[dict[str, Any]]:
     return resp.json()
 
 
+def post_scan_documents(
+    base_url: str,
+    token: str,
+    control_id: int,
+    documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    POST /api/v1/scan/documents (Phase C).
+    documents: list of {"url": str, "type": optional str}.
+    Returns {"evidence_ids": [...], "created": int}.
+    """
+    url = f"{base_url}/api/v1/scan/documents"
+    body = {"control_id": control_id, "documents": documents}
+    resp = requests.post(url, headers=_headers(token), json=body, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def post_analysis_gaps(
+    base_url: str,
+    token: str,
+    framework: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    POST /api/v1/analysis/gaps (Phase 7.2). Optional framework filter.
+    Returns {"summary": str, "model_used": str}.
+    """
+    url = f"{base_url}/api/v1/analysis/gaps"
+    body = {} if framework is None else {"framework": framework}
+    resp = requests.post(url, headers=_headers(token), json=body, timeout=90)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def post_test_result(
     base_url: str,
     token: str,
@@ -130,19 +164,61 @@ def post_test_result(
     return resp.json()
 
 
+def post_github_evidence(
+    base_url: str,
+    token: str,
+    control_id: int,
+    owner: str,
+    repo: str,
+    evidence_type: str,
+) -> dict[str, Any]:
+    """POST /api/v1/integrations/github/evidence. evidence_type: last_commit | branch_protection."""
+    url = f"{base_url}/api/v1/integrations/github/evidence"
+    body = {
+        "control_id": control_id,
+        "owner": owner,
+        "repo": repo,
+        "evidence_type": evidence_type,
+    }
+    resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def run_test_and_record(test: dict[str, Any], base_url: str, token: str) -> dict[str, Any]:
     """
-    Run a single control test (stub: always pass with details) and record result via API.
-    Later: dispatch by test_type / name to real checks (e.g. GitHub, IdP).
+    Run a single control test and record result via API.
+    G2: Real execution for github_last_commit / github_branch_protection when test has config.owner/repo.
+    Otherwise stub (pass with placeholder details).
     """
     test_id = test["id"]
     control_id = test["control_id"]
     name = test.get("name", "")
     test_type = test.get("test_type", "manual")
+    config = test.get("config") or {}
 
-    # Stub: no real check yet; return pass with placeholder details.
-    # Future: if test_type == "integration" and name mentions "GitHub", call GitHub API; etc.
+    # G2: GitHub integration tests – call Comp-AI GitHub evidence API, then record pass/fail
+    if test_type in ("github_last_commit", "github_branch_protection"):
+        owner = config.get("owner") if isinstance(config, dict) else None
+        repo = config.get("repo") if isinstance(config, dict) else None
+        if owner and repo:
+            evidence_type = "last_commit" if test_type == "github_last_commit" else "branch_protection"
+            try:
+                data = post_github_evidence(
+                    base_url, token, control_id, str(owner).strip(), str(repo).strip(), evidence_type
+                )
+                result = "pass"
+                details = f"Evidence collected; id={data.get('id', '?')}"
+                log.info("GitHub test %s (%s): %s", name, test_type, details)
+            except requests.RequestException as e:
+                result = "fail"
+                resp = getattr(e, "response", None)
+                details = (resp.text[:500] if resp is not None and getattr(resp, "text", None) else str(e))[:500]
+                log.warning("GitHub test %s (%s) failed: %s", name, test_type, details)
+            return post_test_result(base_url, token, control_id, test_id, result, details)
+        log.info("Test %s has type %s but no config.owner/repo; skipping real run", name, test_type)
+
+    # Stub for other test types (manual, integration without config, etc.)
     result = "pass"
     details = f"Scheduled run (Airflow); test_type={test_type}"
-
     return post_test_result(base_url, token, control_id, test_id, result, details)

@@ -58,6 +58,22 @@ function CompAIControls() {
   const [gapAnalysis, setGapAnalysis] = useState(null);
   const [gapAnalysisLoading, setGapAnalysisLoading] = useState(false);
   const [gapAnalysisError, setGapAnalysisError] = useState(null);
+  // G9: AI evidence review (all evidence for this control)
+  const [evidenceReview, setEvidenceReview] = useState(null);
+  const [evidenceReviewLoading, setEvidenceReviewLoading] = useState(false);
+  const [evidenceReviewError, setEvidenceReviewError] = useState(null);
+  const [externalIdEdit, setExternalIdEdit] = useState('');
+  const [externalIdSubmitting, setExternalIdSubmitting] = useState(false);
+
+  // Phase C: Scan documents (batch URLs + batch upload)
+  const [scanUrls, setScanUrls] = useState('');
+  const [scanType, setScanType] = useState('document');
+  const [scanUrlsSubmitting, setScanUrlsSubmitting] = useState(false);
+  const [scanBatchFiles, setScanBatchFiles] = useState([]);
+  const [scanBatchType, setScanBatchType] = useState('document');
+  const [scanBatchSubmitting, setScanBatchSubmitting] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanError, setScanError] = useState(null);
 
   useEffect(() => {
     loadControls();
@@ -68,14 +84,22 @@ function CompAIControls() {
       loadControlDetail(selectedControl.id);
       loadEvidence(selectedControl.id);
       loadRemediation(selectedControl.id);
+      setEvidenceReview(null);
+      setEvidenceReviewError(null);
     } else {
       setControlDetail(null);
       setEvidence([]);
       setRemediationTask(null);
       setRemediationSuggest(null);
       setRemediationSuggestError(null);
+      setEvidenceReview(null);
+      setEvidenceReviewError(null);
     }
   }, [selectedControl]);
+
+  useEffect(() => {
+    setExternalIdEdit(controlDetail?.external_id ?? '');
+  }, [controlDetail]);
 
   const loadControls = async () => {
     setLoading(true);
@@ -176,6 +200,30 @@ function CompAIControls() {
     }
   };
 
+  /** Phase 7.3: One-click apply – save suggestion into remediation (notes) and persist. */
+  const handleApplySuggestionToRemediation = async () => {
+    if (!selectedControl || !remediationSuggest?.suggestion) return;
+    setRemediationSubmitting(true);
+    clearMessages();
+    const newNotes = (remediationNotes.trim() ? remediationNotes.trim() + '\n\n' : '') + remediationSuggest.suggestion;
+    try {
+      await compAiApi.putControlRemediation(selectedControl.id, {
+        assigned_to: remediationAssignedTo.trim() || undefined,
+        due_date: toISODateFromInput(remediationDueDate) || undefined,
+        status: remediationStatus,
+        notes: newNotes || undefined,
+      });
+      setRemediationNotes(newNotes);
+      setRemediationSuggest(null);
+      setSuccess('AI suggestion applied to remediation.');
+      loadRemediation(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to apply suggestion');
+    } finally {
+      setRemediationSubmitting(false);
+    }
+  };
+
   const handleAnalyseGaps = async () => {
     setGapAnalysisLoading(true);
     setGapAnalysisError(null);
@@ -200,6 +248,21 @@ function CompAIControls() {
       setError(err.message || 'Failed to load gaps');
     } finally {
       setGapsLoading(false);
+    }
+  };
+
+  const handleReviewEvidence = async () => {
+    if (!selectedControl) return;
+    setEvidenceReviewLoading(true);
+    setEvidenceReviewError(null);
+    setEvidenceReview(null);
+    try {
+      const data = await compAiApi.postControlEvidenceReview(selectedControl.id);
+      setEvidenceReview(data);
+    } catch (err) {
+      setEvidenceReviewError(err.message || 'Failed to review evidence');
+    } finally {
+      setEvidenceReviewLoading(false);
     }
   };
 
@@ -332,6 +395,52 @@ function CompAIControls() {
       setError(err.message || 'Failed to collect GitHub evidence');
     } finally {
       setGhSubmitting(false);
+    }
+  };
+
+  const handleScanUrls = async (e) => {
+    e.preventDefault();
+    if (!selectedControl || !scanUrls.trim()) return;
+    const urls = scanUrls.trim().split(/\n/).map((s) => s.trim()).filter(Boolean);
+    if (urls.length === 0) return;
+    setScanUrlsSubmitting(true);
+    setScanError(null);
+    setScanResult(null);
+    clearMessages();
+    try {
+      const documents = urls.map((url) => ({ url, type: scanType }));
+      const data = await compAiApi.postScanDocuments(selectedControl.id, documents);
+      setScanResult(data);
+      setSuccess(`Scan: created ${data.created} evidence item(s).`);
+      setScanUrls('');
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setScanError(err.message || 'Scan failed');
+    } finally {
+      setScanUrlsSubmitting(false);
+    }
+  };
+
+  const handleScanBatch = async (e) => {
+    e.preventDefault();
+    if (!selectedControl || !scanBatchFiles.length) return;
+    setScanBatchSubmitting(true);
+    setScanError(null);
+    setScanResult(null);
+    clearMessages();
+    try {
+      const files = Array.from(scanBatchFiles);
+      const data = await compAiApi.postScanUploadBatch(selectedControl.id, scanBatchType, files);
+      setScanResult(data);
+      setSuccess(`Batch upload: created ${data.created} evidence item(s).`);
+      setScanBatchFiles([]);
+      const input = document.getElementById('scan-batch-files');
+      if (input) input.value = '';
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setScanError(err.message || 'Batch upload failed');
+    } finally {
+      setScanBatchSubmitting(false);
     }
   };
 
@@ -499,13 +608,49 @@ function CompAIControls() {
                   <>
                     <p><strong>{controlDetail.internal_id}</strong> — {controlDetail.name}</p>
                     {controlDetail.description && <p className="comp-ai-control-desc">{controlDetail.description}</p>}
+                    <div className="comp-ai-external-id">
+                      <label htmlFor="external-id">External ID (e.g. Vanta)</label>
+                      <input
+                        id="external-id"
+                        type="text"
+                        value={externalIdEdit}
+                        onChange={(e) => setExternalIdEdit(e.target.value)}
+                        placeholder={controlDetail.external_id || 'e.g. vanta-control-id'}
+                      />
+                      <button
+                        type="button"
+                        className="comp-ai-secondary-btn"
+                        disabled={externalIdSubmitting}
+                        onClick={async () => {
+                          if (!selectedControl) return;
+                          setExternalIdSubmitting(true);
+                          try {
+                            await compAiApi.patchControl(selectedControl.id, {
+                              external_id: externalIdEdit.trim() || null,
+                            });
+                            await loadControlDetail(selectedControl.id);
+                          } catch (err) {
+                            setError(err.message || 'Failed to update external ID');
+                          } finally {
+                            setExternalIdSubmitting(false);
+                          }
+                        }}
+                      >
+                        {externalIdSubmitting ? 'Saving...' : 'Save'}
+                      </button>
+                      {controlDetail.external_id && (
+                        <span className="comp-ai-meta">Current: {controlDetail.external_id}</span>
+                      )}
+                    </div>
                     {controlDetail.requirements && controlDetail.requirements.length > 0 && (
                       <div className="comp-ai-requirements">
                         <h3>Mapped requirements</h3>
                         <ul>
                           {controlDetail.requirements.map((r, i) => (
                             <li key={i}>
-                              {r.framework_slug}: {r.code} — {r.title || '—'}
+                              {r.framework_slug}: {r.code}
+                              {r.external_id && <span className="comp-ai-meta"> ({r.external_id})</span>}
+                              {' — '}{r.title || '—'}
                             </li>
                           ))}
                         </ul>
@@ -538,13 +683,23 @@ function CompAIControls() {
                         <div className="comp-ai-suggestion-card">
                           <p className="comp-ai-suggestion-meta">Model: {remediationSuggest.model_used}</p>
                           <div className="comp-ai-suggestion-text">{remediationSuggest.suggestion}</div>
-                          <button
-                            type="button"
-                            className="comp-ai-secondary-btn comp-ai-use-suggestion-btn"
-                            onClick={handleUseSuggestionInNotes}
-                          >
-                            Use in notes
-                          </button>
+                          <div className="comp-ai-suggestion-actions">
+                            <button
+                              type="button"
+                              className="comp-ai-secondary-btn comp-ai-use-suggestion-btn"
+                              onClick={handleUseSuggestionInNotes}
+                            >
+                              Use in notes
+                            </button>
+                            <button
+                              type="button"
+                              className="comp-ai-submit-btn"
+                              onClick={handleApplySuggestionToRemediation}
+                              disabled={remediationSubmitting}
+                            >
+                              {remediationSubmitting ? 'Applying...' : 'Apply to remediation'}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -653,6 +808,50 @@ function CompAIControls() {
                       <p className="comp-ai-analyze-model">Model: {analyzeResult.model_used}</p>
                     )}
                   </div>
+                )}
+                {evidence.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="comp-ai-secondary-btn"
+                      onClick={handleReviewEvidence}
+                      disabled={evidenceReviewLoading}
+                    >
+                      {evidenceReviewLoading ? 'Reviewing...' : 'Review all evidence (AI)'}
+                    </button>
+                    {evidenceReviewError && (
+                      <div className="comp-ai-error" role="alert">{evidenceReviewError}</div>
+                    )}
+                    {evidenceReview && (
+                      <div className="comp-ai-analyze-result comp-ai-info-card">
+                        <h4>Evidence review</h4>
+                        <p className="comp-ai-analyze-summary">{evidenceReview.summary}</p>
+                        {evidenceReview.gaps && evidenceReview.gaps.length > 0 && (
+                          <div className="comp-ai-review-gaps">
+                            <strong>Gaps:</strong>
+                            <ul>
+                              {evidenceReview.gaps.map((g, i) => (
+                                <li key={i}>{g}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {evidenceReview.suggested_fixes && evidenceReview.suggested_fixes.length > 0 && (
+                          <div className="comp-ai-review-fixes">
+                            <strong>Suggested fixes:</strong>
+                            <ul>
+                              {evidenceReview.suggested_fixes.map((f, i) => (
+                                <li key={i}>{f}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {evidenceReview.model_used && (
+                          <p className="comp-ai-analyze-model">Model: {evidenceReview.model_used}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -796,6 +995,65 @@ function CompAIControls() {
                     {ghSubmitting ? 'Collecting...' : 'Collect evidence'}
                   </button>
                 </form>
+
+                <div className="comp-ai-evidence-form">
+                  <h3>Scan documents (Phase C)</h3>
+                  <p className="comp-ai-form-hint">Batch add evidence: paste URLs (one per line) or upload multiple files. Select a control above first.</p>
+                  {scanError && <p className="comp-ai-error">{scanError}</p>}
+                  {scanResult && (
+                    <p className="comp-ai-success">
+                      Created {scanResult.created} evidence item(s). IDs: {scanResult.evidence_ids?.join(', ') || '—'}
+                    </p>
+                  )}
+                  <form onSubmit={handleScanUrls}>
+                    <h4>From URLs</h4>
+                    <div className="form-group">
+                      <label htmlFor="scan-urls">URLs (one per line) *</label>
+                      <textarea
+                        id="scan-urls"
+                        value={scanUrls}
+                        onChange={(e) => setScanUrls(e.target.value)}
+                        placeholder={'https://example.com/policy.pdf\nhttps://example.com/sop.docx'}
+                        rows={4}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="scan-type">Type</label>
+                      <select id="scan-type" value={scanType} onChange={(e) => setScanType(e.target.value)}>
+                        <option value="document">Document</option>
+                        <option value="policy">Policy</option>
+                        <option value="spreadsheet">Spreadsheet</option>
+                      </select>
+                    </div>
+                    <button type="submit" className="comp-ai-submit-btn" disabled={scanUrlsSubmitting || !scanUrls.trim()}>
+                      {scanUrlsSubmitting ? 'Scanning...' : 'Scan URLs'}
+                    </button>
+                  </form>
+                  <form onSubmit={handleScanBatch} style={{ marginTop: '1rem' }}>
+                    <h4>Upload multiple files</h4>
+                    <div className="form-group">
+                      <label htmlFor="scan-batch-type">Type</label>
+                      <select id="scan-batch-type" value={scanBatchType} onChange={(e) => setScanBatchType(e.target.value)}>
+                        <option value="document">Document</option>
+                        <option value="policy">Policy</option>
+                        <option value="spreadsheet">Spreadsheet</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="scan-batch-files">Files * (max 20)</label>
+                      <input
+                        id="scan-batch-files"
+                        type="file"
+                        multiple
+                        accept=".pdf,.txt,.csv"
+                        onChange={(e) => setScanBatchFiles(e.target.files ? Array.from(e.target.files) : [])}
+                      />
+                    </div>
+                    <button type="submit" className="comp-ai-submit-btn" disabled={scanBatchSubmitting || scanBatchFiles.length === 0}>
+                      {scanBatchSubmitting ? 'Uploading...' : `Upload ${scanBatchFiles.length || 0} file(s)`}
+                    </button>
+                  </form>
+                </div>
               </div>
             </>
           )}

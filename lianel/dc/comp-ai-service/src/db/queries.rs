@@ -108,7 +108,7 @@ fn row_naive_to_utc(naive: NaiveDateTime) -> DateTime<Utc> {
 pub async fn list_controls(pool: &PgPool) -> Result<Vec<Control>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT id, internal_id, name, description, category, created_at
+        SELECT id, internal_id, name, description, category, external_id, created_at
         FROM comp_ai.controls
         ORDER BY internal_id
         "#,
@@ -125,6 +125,7 @@ pub async fn list_controls(pool: &PgPool) -> Result<Vec<Control>, sqlx::Error> {
             name: row.get("name"),
             description: row.get("description"),
             category: row.get("category"),
+            external_id: row.get("external_id"),
             created_at: row_naive_to_utc(created_at_naive),
         });
     }
@@ -138,7 +139,7 @@ pub async fn get_control_with_requirements(
 ) -> Result<Option<ControlWithRequirements>, sqlx::Error> {
     let control_row = sqlx::query(
         r#"
-        SELECT id, internal_id, name, description, category, created_at
+        SELECT id, internal_id, name, description, category, external_id, created_at
         FROM comp_ai.controls WHERE id = $1
         "#,
     )
@@ -157,12 +158,13 @@ pub async fn get_control_with_requirements(
         name: crow.get("name"),
         description: crow.get("description"),
         category: crow.get("category"),
+        external_id: crow.get("external_id"),
         created_at: row_naive_to_utc(created_at_naive),
     };
 
     let req_rows = sqlx::query(
         r#"
-        SELECT r.code, r.title, f.slug AS framework_slug
+        SELECT r.code, r.title, f.slug AS framework_slug, r.external_id AS requirement_external_id
         FROM comp_ai.requirements r
         JOIN comp_ai.frameworks f ON f.id = r.framework_id
         JOIN comp_ai.control_requirements cr ON cr.requirement_id = r.id
@@ -180,6 +182,7 @@ pub async fn get_control_with_requirements(
             code: row.get("code"),
             title: row.get("title"),
             framework_slug: row.get("framework_slug"),
+            external_id: row.get("requirement_external_id"),
         })
         .collect();
 
@@ -189,8 +192,42 @@ pub async fn get_control_with_requirements(
         name: control.name,
         description: control.description,
         category: control.category,
+        external_id: control.external_id,
         created_at: control.created_at,
         requirements,
+    }))
+}
+
+/// G8: Update control external_id (Vanta alignment). Returns updated control or None if not found.
+pub async fn update_control_external_id(
+    pool: &PgPool,
+    control_id: i64,
+    external_id: Option<&str>,
+) -> Result<Option<Control>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        UPDATE comp_ai.controls SET external_id = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING id, internal_id, name, description, category, external_id, created_at
+        "#,
+    )
+    .bind(control_id)
+    .bind(external_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(r) = row else {
+        return Ok(None);
+    };
+    let created_at_naive: NaiveDateTime = r.get("created_at");
+    Ok(Some(Control {
+        id: r.get("id"),
+        internal_id: r.get("internal_id"),
+        name: r.get("name"),
+        description: r.get("description"),
+        category: r.get("category"),
+        external_id: r.get("external_id"),
+        created_at: row_naive_to_utc(created_at_naive),
     }))
 }
 
@@ -333,7 +370,7 @@ pub async fn get_evidence_by_id(pool: &PgPool, id: i64) -> Result<Option<Evidenc
 pub async fn list_controls_without_evidence(pool: &PgPool) -> Result<Vec<Control>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT c.id, c.internal_id, c.name, c.description, c.category, c.created_at
+        SELECT c.id, c.internal_id, c.name, c.description, c.category, c.external_id, c.created_at
         FROM comp_ai.controls c
         LEFT JOIN comp_ai.evidence e ON e.control_id = c.id
         WHERE e.id IS NULL
@@ -352,6 +389,7 @@ pub async fn list_controls_without_evidence(pool: &PgPool) -> Result<Vec<Control
             name: row.get("name"),
             description: row.get("description"),
             category: row.get("category"),
+            external_id: row.get("external_id"),
             created_at: row_naive_to_utc(created_at_naive),
         });
     }
@@ -554,7 +592,7 @@ pub async fn create_evidence(
 pub async fn list_control_tests(pool: &PgPool, control_id: i64) -> Result<Vec<ControlTest>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+        SELECT id, control_id, name, test_type, schedule, config, last_run_at, last_result, last_details, created_at, updated_at
         FROM comp_ai.control_tests
         WHERE control_id = $1
         ORDER BY name
@@ -575,6 +613,7 @@ pub async fn list_control_tests(pool: &PgPool, control_id: i64) -> Result<Vec<Co
             name: row.get("name"),
             test_type: row.get("test_type"),
             schedule: row.get("schedule"),
+            config: row.get("config"),
             last_run_at: last_run_at.map(row_naive_to_utc),
             last_result: row.get("last_result"),
             last_details: row.get("last_details"),
@@ -590,7 +629,7 @@ pub async fn list_all_control_tests(pool: &PgPool, control_id: Option<i64>) -> R
     let rows = if let Some(cid) = control_id {
         sqlx::query(
             r#"
-            SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+            SELECT id, control_id, name, test_type, schedule, config, last_run_at, last_result, last_details, created_at, updated_at
             FROM comp_ai.control_tests
             WHERE control_id = $1
             ORDER BY control_id, name
@@ -600,7 +639,7 @@ pub async fn list_all_control_tests(pool: &PgPool, control_id: Option<i64>) -> R
     } else {
         sqlx::query(
             r#"
-            SELECT id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+            SELECT id, control_id, name, test_type, schedule, config, last_run_at, last_result, last_details, created_at, updated_at
             FROM comp_ai.control_tests
             ORDER BY control_id, name
             "#,
@@ -620,6 +659,7 @@ pub async fn list_all_control_tests(pool: &PgPool, control_id: Option<i64>) -> R
             name: row.get("name"),
             test_type: row.get("test_type"),
             schedule: row.get("schedule"),
+            config: row.get("config"),
             last_run_at: last_run_at.map(row_naive_to_utc),
             last_result: row.get("last_result"),
             last_details: row.get("last_details"),
@@ -642,7 +682,7 @@ pub async fn record_control_test_result(
         UPDATE comp_ai.control_tests
         SET last_run_at = CURRENT_TIMESTAMP, last_result = $2, last_details = $3, updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
-        RETURNING id, control_id, name, test_type, schedule, last_run_at, last_result, last_details, created_at, updated_at
+        RETURNING id, control_id, name, test_type, schedule, config, last_run_at, last_result, last_details, created_at, updated_at
         "#,
     )
     .bind(test_id)
@@ -660,6 +700,7 @@ pub async fn record_control_test_result(
         name: row.get("name"),
         test_type: row.get("test_type"),
         schedule: row.get("schedule"),
+        config: row.get("config"),
         last_run_at: last_run_at.map(row_naive_to_utc),
         last_result: row.get("last_result"),
         last_details: row.get("last_details"),

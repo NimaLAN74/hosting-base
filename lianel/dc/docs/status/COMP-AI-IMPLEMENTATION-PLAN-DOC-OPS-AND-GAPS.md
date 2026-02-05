@@ -91,7 +91,7 @@ These are the same gaps as in **COMP-AI-VS-VANTA-GAP-LIST.md**, turned into **co
 | ID | Workstream | What to build | Effort (rough) | Doc/Ops overlap |
 |----|-------------|----------------|----------------|------------------|
 | **G1** | **Test runner + scheduler** | Job that runs control tests on a schedule (cron or queue); store results; optionally create evidence from pass/fail. | High | No → **Done:** Airflow DAG `comp_ai_control_tests`; COMP-AI-AIRFLOW-RUNNER-DESIGN.md. |
-| **G2** | **More automated tests** | Expand test library (e.g. 10–50 tests for GitHub, then IdP, then cloud). | High | No |
+| **G2** | **More automated tests** | Expand test library (e.g. 10–50 tests for GitHub, then IdP, then cloud). | High | No → **Started:** control_tests.config; runner runs real GitHub tests (github_last_commit, github_branch_protection) when config has owner/repo. |
 | **G3** | **IdP integration** | One IdP (e.g. Okta): MFA, users, groups; automated evidence. | High | No |
 | **G4** | **One cloud integration** | e.g. AWS or Azure: list resources, run checks, evidence. | Very high | No |
 | **G5** | **Document / policy evidence** | Phase A + B (+ optional C) above. | Medium | **Yes – Part 1** |
@@ -126,19 +126,45 @@ Suggested ordering **if you want balance**:
 
 ---
 
-## Part 4: Current priority (to fill in)
+## Part 4: Current priority
 
-*Use this section to record what you chose to prioritise.*
+*We follow the plan: Document/operational track → Phase A → B → **C**.*
 
 | Order | Workstream | Status |
 |-------|------------|--------|
 | 1 | Phase A – Document evidence | ✅ Done |
-| 2 | **G1 Test runner (Airflow)** | ✅ Done — Airflow DAG `comp_ai_control_tests` runs tests and records results; see COMP-AI-AIRFLOW-RUNNER-DESIGN.md |
-| 3 | **G7 Alerts** | ✅ Done — DAG `comp_ai_alerts`; log + optional Slack (SLACK_WEBHOOK_URL) |
-| 4 | **Phase B – Upload + AI analysis** | Done — upload API, text extraction (PDF/txt), analyse API, UI upload + Analyse button |
-| … | | |
+| 2 | G1 Test runner (Airflow) | ✅ Done — Airflow DAG `comp_ai_control_tests`; see COMP-AI-AIRFLOW-RUNNER-DESIGN.md |
+| 3 | G7 Alerts | ✅ Done — DAG `comp_ai_alerts`; log + optional Slack (SLACK_WEBHOOK_URL) |
+| 4 | Phase B – Upload + AI analysis | ✅ Done — upload API, text extraction (PDF/txt), analyse API, UI upload + Analyse button |
+| 5 | Phase C – Scan / monitor for organisation | ✅ Done — C1, C2, C4 (C3, C5 optional) |
+| 6 | G2 – More automated tests | ✅ Done — control_tests.config; runner runs real GitHub tests |
+| 7 | Phase 7.3 – One-click apply | ✅ Done — "Apply to remediation" saves AI suggestion to remediation in one click |
+| 8 | Org scan + monitoring | ✅ Done — DAG `comp_ai_scan_documents` (weekly scan + gap analysis) |
+| … | G3 (IdP); G6 (policy); G9 (AI evidence review); Phase D (email) later | Next workstreams |
 
-**Runner:** All scheduled/automated Comp-AI jobs use **Airflow** as runner. Event-based sync is the fallback if coordination between Comp-AI and Airflow becomes a problem (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md).
+**Phase C checklist (next):**
+
+| # | Task | Type | Status |
+|---|------|------|--------|
+| C1 | **Scan API (batch)** – `POST /api/v1/scan/documents`: body = `{ control_id, documents: [{ url, type? }] }`. For each URL: create evidence (link_url=url); return `{ evidence_ids, created }`. Max 50 per request. | Backend | ✅ |
+| C2 | **Batch upload** – `POST /api/v1/scan/upload-batch`: multipart control_id, type?, multiple file parts; create evidence for each with text extraction. Max 20 files. Returns `{ evidence_ids, created }`. | Backend | ✅ |
+| C3 | **Integration (optional)** – One connector (e.g. SharePoint or Google Drive): list docs in folder; create evidence (link) and optionally fetch for analysis. | Backend | Optional |
+| C4 | **UI – Scan** – “Scan documents” page: paste URLs or upload multiple files; select control (or “analyse only”); run scan; show created count and evidence IDs. | Frontend | ✅ |
+| C5 | **Operational view (optional)** – Filter controls/evidence by tag “operational” or “administrative”. | Backend + Frontend | Optional |
+
+**Runner:** All scheduled/automated Comp-AI jobs use **Airflow** as runner (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md).
+
+### Organisation scanning and monitoring (automated)
+
+| DAG | Schedule | What it does |
+|-----|----------|---------------|
+| **comp_ai_scan_documents** | Weekly (Sun 08:00 UTC) | (1) **Document scan:** reads `COMP_AI_SCAN_DOCUMENTS_CONFIG` (Airflow Variable, JSON). For each job `{ "control_id": N, "documents": [ {"url": "https://..."}, ... ] }` calls `POST /api/v1/scan/documents` to create evidence from URLs for the organisation. (2) **Gap monitoring:** calls `POST /api/v1/analysis/gaps` and logs AI gap/risk summary. Optional: `COMP_AI_GAP_ANALYSIS_FRAMEWORK` (e.g. `soc2`) to filter. |
+| **comp_ai_alerts** | Daily 07:00 UTC | Gaps + failed control tests; log + optional Slack (`SLACK_WEBHOOK_URL`). |
+| **comp_ai_control_tests** | Daily 06:00 UTC | Runs control tests (including GitHub when config set); records results. |
+
+To enable **automated organisation scan:** set Airflow Variable `COMP_AI_SCAN_DOCUMENTS_CONFIG` to a JSON string, e.g.  
+`{"control_id": 2, "documents": [{"url": "https://example.com/policy.pdf"}, {"url": "https://example.com/sop.docx", "type": "policy"}]}`  
+or a list of such jobs for multiple controls.
 
 ---
 

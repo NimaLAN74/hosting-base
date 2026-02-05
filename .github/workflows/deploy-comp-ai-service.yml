@@ -87,7 +87,8 @@ jobs:
                    lianel/dc/database/migrations/016_comp_ai_expand_frameworks.sql \
                    lianel/dc/database/migrations/017_comp_ai_control_tests.sql \
                    lianel/dc/database/migrations/018_comp_ai_ensure_demo_seed.sql \
-                   lianel/dc/database/migrations/019_comp_ai_evidence_upload.sql; do
+                   lianel/dc/database/migrations/019_comp_ai_evidence_upload.sql \
+                   lianel/dc/database/migrations/020_comp_ai_control_tests_config.sql; do
             echo "Running $f"
             PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$f"
           done
@@ -440,8 +441,8 @@ jobs:
             -o ConnectTimeout=30 \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/scripts/deployment/run-comp-ai-migrations.sh lianel/dc/database/migrations/009_create_comp_ai_schema.sql lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql lianel/dc/database/migrations/012_comp_ai_grants.sql lianel/dc/database/migrations/013_comp_ai_seed_iso27001.sql lianel/dc/database/migrations/014_comp_ai_remediation_tasks.sql lianel/dc/database/migrations/015_comp_ai_seed_gdpr.sql lianel/dc/database/migrations/016_comp_ai_expand_frameworks.sql lianel/dc/database/migrations/017_comp_ai_control_tests.sql lianel/dc/database/migrations/018_comp_ai_ensure_demo_seed.sql lianel/dc/database/migrations/019_comp_ai_evidence_upload.sql && cd lianel/dc && COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh"
-          echo "✅ comp_ai migrations (009–019) applied"
+            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/scripts/deployment/run-comp-ai-migrations.sh lianel/dc/database/migrations/009_create_comp_ai_schema.sql lianel/dc/database/migrations/010_comp_ai_controls_evidence.sql lianel/dc/database/migrations/011_comp_ai_seed_soc2.sql lianel/dc/database/migrations/012_comp_ai_grants.sql lianel/dc/database/migrations/013_comp_ai_seed_iso27001.sql lianel/dc/database/migrations/014_comp_ai_remediation_tasks.sql lianel/dc/database/migrations/015_comp_ai_seed_gdpr.sql lianel/dc/database/migrations/016_comp_ai_expand_frameworks.sql lianel/dc/database/migrations/017_comp_ai_control_tests.sql lianel/dc/database/migrations/018_comp_ai_ensure_demo_seed.sql lianel/dc/database/migrations/019_comp_ai_evidence_upload.sql lianel/dc/database/migrations/020_comp_ai_control_tests_config.sql && cd lianel/dc && COMP_AI_MIGRATION_USER=postgres bash scripts/deployment/run-comp-ai-migrations.sh"
+          echo "✅ comp_ai migrations (009–020) applied"
 
       - name: Verify Deployment
         env:

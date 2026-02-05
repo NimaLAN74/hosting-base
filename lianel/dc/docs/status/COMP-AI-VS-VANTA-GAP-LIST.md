@@ -64,7 +64,7 @@
 |-----|--------|----------------|-----------------|
 | **AI reviews evidence** | Flags gaps, suggests fixes (e.g. code snippets) | We have AI remediation **suggest** per control (and Phase 7.1 UI); no “review all evidence” or code suggestions | Medium |
 | **AI gap/risk analysis** | Prioritisation, risk view | Planned (Phase 7.2); not built | Low–medium |
-| **Structured “apply” from AI** | One-click apply suggestions | Not implemented (Phase 7.3 optional) | Low |
+| **Structured “apply” from AI** | One-click apply suggestions | Phase 7.3: "Apply to remediation" one-click apply ✅ | Low |
 
 ### 2.6 Frameworks and control set
 

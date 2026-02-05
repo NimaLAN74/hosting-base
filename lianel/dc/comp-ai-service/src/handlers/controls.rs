@@ -14,12 +14,15 @@ use crate::models::{
     GitHubEvidenceRequest, ControlExportEntry, AuditExport, RemediationTask, UpsertRemediationRequest,
     RequirementListItem, ControlTest, RecordTestResultRequest,
     RemediationSuggestRequest, RemediationSuggestResponse,
-    GapAnalysisRequest, GapAnalysisResponse, EvidenceAnalyzeResponse,
+    GapAnalysisRequest, GapAnalysisResponse, EvidenceAnalyzeResponse, EvidenceReviewResponse,
+    ScanDocumentsRequest, ScanDocumentsResponse,
+    ControlPolicyMappingResponse, ControlPolicyMappingEntry, PolicyRef, SystemDescriptionResponse,
+    PatchControlRequest,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
-    upsert_remediation, list_requirements,
+    upsert_remediation, list_requirements, update_control_external_id,
     list_control_tests, list_all_control_tests, record_control_test_result,
 };
 use crate::inference;
@@ -145,6 +148,68 @@ pub async fn get_control(
     Ok(Json(c))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/controls/{id}",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    request_body = PatchControlRequest,
+    responses(
+        (status = 200, description = "Control updated (external_id)", body = ControlWithRequirements),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Control not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn patch_control(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<PatchControlRequest>,
+) -> Result<Json<ControlWithRequirements>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let external_id = body.external_id.as_deref();
+    let updated = update_control_external_id(pool, id, external_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("update_control_external_id failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to update control"})),
+            )
+        })?;
+
+    let Some(_) = updated else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Control not found"})),
+        ));
+    };
+
+    let control = get_control_with_requirements(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_control_with_requirements failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get control"})),
+            )
+        })?;
+
+    let Some(c) = control else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Control not found"})),
+        ));
+    };
+
+    Ok(Json(c))
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct ExportQuery {
     pub format: Option<String>,
@@ -220,6 +285,7 @@ pub async fn get_controls_export(
             name: c.name.clone(),
             description: c.description.clone(),
             category: c.category.clone(),
+            external_id: c.external_id.clone(),
             created_at: c.created_at,
             requirements: vec![],
         });
@@ -925,6 +991,133 @@ pub async fn get_evidence(
     Ok(Json(evidence))
 }
 
+/// Policy/document evidence types included in control–policy mapping (G6).
+const POLICY_EVIDENCE_TYPES: &[&str] = &["policy", "document"];
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/controls/policy-mapping",
+    tag = "controls",
+    responses(
+        (status = 200, description = "Control–policy mapping", body = ControlPolicyMappingResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_control_policy_mapping(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<ControlPolicyMappingResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let controls = list_controls(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_controls failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list controls"})),
+            )
+        })?;
+
+    let all_evidence = list_evidence(pool, None, 1000, 0)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_evidence failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list evidence"})),
+            )
+        })?;
+
+    let policy_evidence: Vec<_> = all_evidence
+        .into_iter()
+        .filter(|e| POLICY_EVIDENCE_TYPES.contains(&e.r#type.as_str()))
+        .collect();
+
+    let mut by_control: std::collections::HashMap<i64, Vec<PolicyRef>> = std::collections::HashMap::new();
+    for ev in policy_evidence {
+        let ref_ = PolicyRef {
+            id: ev.id,
+            r#type: ev.r#type,
+            source: ev.source,
+            link_url: ev.link_url,
+            file_name: ev.file_name,
+        };
+        by_control.entry(ev.control_id).or_default().push(ref_);
+    }
+
+    let mapping: Vec<ControlPolicyMappingEntry> = controls
+        .into_iter()
+        .map(|c| {
+            let policies = by_control.remove(&c.id).unwrap_or_default();
+            ControlPolicyMappingEntry {
+                control_id: c.id,
+                internal_id: c.internal_id,
+                name: c.name,
+                policies,
+            }
+        })
+        .collect();
+
+    Ok(Json(ControlPolicyMappingResponse { mapping }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/system-description",
+    tag = "controls",
+    responses(
+        (status = 200, description = "SOC 2 System Description template", body = SystemDescriptionResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_system_description(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<SystemDescriptionResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, _pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let template = r#"# System Description (SOC 2)
+
+**Organisation:** {{organisation_name}}
+**System / service in scope:** {{system_name}}
+**As of date:** {{as_of_date}}
+
+## 1. Overview
+
+This document describes the system and the control environment in scope for the service organisation’s SOC 2 examination. It is intended to support auditors and stakeholders in understanding the boundaries of the system and the controls that apply.
+
+## 2. System boundaries
+
+- **In scope:** {{system_name}} and supporting processes (access, change management, risk assessment, monitoring).
+- **Out of scope:** (Specify any excluded subsystems or third-party services.)
+
+## 3. Control environment
+
+The organisation maintains controls aligned to SOC 2 Trust Services Criteria (Security, Availability, Processing Integrity, Confidentiality, Privacy as applicable). Controls are documented and evidence is collected and reviewed. Control–policy mapping is available via the compliance platform (e.g. GET /api/v1/controls/policy-mapping).
+
+## 4. Placeholders
+
+Replace the placeholders above with your organisation name, system name, and the date of the description. You may extend this template with additional sections (e.g. infrastructure, data flows, third parties) as required by your auditor.
+"#.to_string();
+
+    let placeholders = vec![
+        "{{organisation_name}}".to_string(),
+        "{{system_name}}".to_string(),
+        "{{as_of_date}}".to_string(),
+    ];
+
+    Ok(Json(SystemDescriptionResponse { template, placeholders }))
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/evidence",
@@ -1241,6 +1434,139 @@ pub async fn post_evidence_analyze(
     }))
 }
 
+/// G9: Review all evidence for a control – AI flags gaps and suggests fixes.
+#[utoipa::path(
+    post,
+    path = "/api/v1/controls/{id}/evidence/review",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Control ID")),
+    responses(
+        (status = 200, description = "AI review of evidence for this control", body = EvidenceReviewResponse),
+        (status = 404, description = "Control not found"),
+        (status = 503, description = "Ollama not available")
+    )
+)]
+pub async fn post_control_evidence_review(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<EvidenceReviewResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let control = get_control_with_requirements(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_control_with_requirements failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to get control"})))
+        })?
+        .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Control not found"}))))?;
+
+    let evidence_list = list_evidence(pool, Some(id), 500, 0)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_evidence failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to list evidence"})))
+        })?;
+
+    let req_codes: Vec<String> = control
+        .requirements
+        .iter()
+        .map(|r| format!("{} ({})", r.code, r.framework_slug))
+        .collect();
+    let evidence_context: String = evidence_list
+        .iter()
+        .filter_map(|e| {
+            let text = e.extracted_text.as_deref().filter(|s| !s.trim().is_empty())?;
+            let excerpt: String = text.chars().take(2000).collect();
+            Some(format!(
+                "- Evidence id={} type={}: {}",
+                e.id,
+                e.r#type,
+                if excerpt.len() < text.chars().count() {
+                    format!("{}...", excerpt)
+                } else {
+                    excerpt
+                }
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let evidence_context = if evidence_context.is_empty() {
+        "(No evidence with extracted text yet. Upload documents and use Analyse to add content.)".to_string()
+    } else {
+        evidence_context
+    };
+
+    let system_prompt = format!(
+        "You are a compliance analyst. Review all evidence collected for the following control.\n\n\
+         Control: {} [{}]\nDescription: {}\n\
+         Mapped requirements: {}\n\n\
+         Evidence collected (with extracted text):\n{}\n\n\
+         Provide: (1) A short summary of how well the evidence supports the control. \
+         (2) List any gaps or missing evidence (as bullet points). (3) Suggest concrete fixes or additional evidence to collect (as bullet points). \
+         Be concise and actionable.",
+        control.name,
+        control.internal_id,
+        control.description.as_deref().unwrap_or("(none)"),
+        req_codes.join(", "),
+        evidence_context
+    );
+
+    let (base_url, model) = match (config.comp_ai_ollama_url.as_deref(), config.comp_ai_ollama_model.as_deref()) {
+        (Some(u), Some(m)) => (u, m),
+        _ => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Ollama not configured; set COMP_AI_OLLAMA_URL and COMP_AI_OLLAMA_MODEL"})),
+            ));
+        }
+    };
+
+    let result = inference::generate(
+        base_url,
+        model,
+        "Summarise support level, list gaps, and suggest fixes.",
+        config.comp_ai_max_tokens,
+        config.comp_ai_temperature,
+        Some(&system_prompt),
+    )
+    .await;
+
+    let (summary, model_used) = match result {
+        Ok((s, _)) => (s.trim().to_string(), model.to_string()),
+        Err(e) => {
+            tracing::error!("Ollama evidence review failed: {}", e);
+            if config.comp_ai_ollama_fallback_to_mock {
+                return Ok(Json(EvidenceReviewResponse {
+                    summary: format!(
+                        "[Mock] Review evidence for control {} manually. Gaps and suggested fixes: ensure all requirements {} are covered by evidence. Error: {}",
+                        control.internal_id,
+                        req_codes.join(", "),
+                        e
+                    ),
+                    gaps: None,
+                    suggested_fixes: None,
+                    model_used: "mock".to_string(),
+                }));
+            }
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "AI review failed", "detail": e.to_string()})),
+            ));
+        }
+    };
+
+    Ok(Json(EvidenceReviewResponse {
+        summary,
+        gaps: None,
+        suggested_fixes: None,
+        model_used,
+    }))
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/integrations/github/evidence",
@@ -1340,6 +1666,250 @@ pub async fn post_github_evidence(
             id,
             control_id: body.control_id,
             collected_at: Utc::now(),
+        }),
+    ))
+}
+
+/// Phase C1: Batch create evidence from document URLs (scan documents).
+const SCAN_DOCUMENTS_MAX: usize = 50;
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/scan/documents",
+    tag = "controls",
+    request_body = ScanDocumentsRequest,
+    responses(
+        (status = 200, description = "Evidence created for each document URL", body = ScanDocumentsResponse),
+        (status = 400, description = "Invalid request or too many documents"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_scan_documents(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<ScanDocumentsRequest>,
+) -> Result<(StatusCode, Json<ScanDocumentsResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    if body.documents.len() > SCAN_DOCUMENTS_MAX {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Too many documents",
+                "detail": format!("Maximum {} documents per request", SCAN_DOCUMENTS_MAX)
+            })),
+        ));
+    }
+
+    let mut evidence_ids = Vec::with_capacity(body.documents.len());
+    for item in &body.documents {
+        let url = item.url.trim();
+        if url.is_empty() {
+            continue;
+        }
+        let ev_type = item
+            .r#type
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("document");
+        let source = format!("Scan: {}", url);
+        match create_evidence(
+            pool,
+            body.control_id,
+            ev_type,
+            Some(&source),
+            Some(url),
+            Some(url),
+            Some(user.sub.as_str()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        {
+            Ok(id) => evidence_ids.push(id),
+            Err(e) => {
+                tracing::error!("create_evidence (scan) failed for url {}: {}", url, e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to create evidence for one or more documents",
+                        "detail": format!("Created {} before error", evidence_ids.len())
+                    })),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(ScanDocumentsResponse {
+            created: evidence_ids.len(),
+            evidence_ids,
+        }),
+    ))
+}
+
+/// Phase C2: Batch upload multiple files; create evidence for each (with text extraction).
+const SCAN_UPLOAD_BATCH_MAX: usize = 20;
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/scan/upload-batch",
+    tag = "controls",
+    responses(
+        (status = 200, description = "Evidence created for each file", body = ScanDocumentsResponse),
+        (status = 400, description = "Invalid request or no files"),
+        (status = 401, description = "Unauthorized"),
+        (status = 413, description = "File too large"),
+        (status = 503, description = "Upload not configured: COMP_AI_EVIDENCE_STORAGE_PATH"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_scan_upload_batch(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<ScanDocumentsResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let storage_path = match &config.comp_ai_evidence_storage_path {
+        Some(p) => p.clone(),
+        None => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Upload not configured: set COMP_AI_EVIDENCE_STORAGE_PATH"})),
+            ));
+        }
+    };
+    let max_bytes = config.comp_ai_evidence_max_file_bytes;
+
+    let mut control_id: Option<i64> = None;
+    let mut evidence_type_default: String = "document".to_string();
+    let mut files: Vec<(String, String, Vec<u8>)> = Vec::new(); // (file_name, content_type, bytes)
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        tracing::warn!("multipart next_field: {}", e);
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid multipart"})))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "control_id" {
+            if let Ok(data) = field.bytes().await {
+                if let Ok(s) = std::str::from_utf8(&data) {
+                    control_id = s.trim().parse().ok();
+                }
+            }
+        } else if name == "type" {
+            if let Ok(data) = field.bytes().await {
+                if let Ok(s) = std::str::from_utf8(&data) {
+                    let t = s.trim();
+                    if !t.is_empty() {
+                        evidence_type_default = t.to_string();
+                    }
+                }
+            }
+        } else if name == "file" || name.starts_with("file") {
+            let file_name = field.file_name().map(String::from).unwrap_or_else(|| "upload".to_string());
+            let content_type = field.content_type().map(|c| c.to_string()).unwrap_or_else(|| "application/octet-stream".to_string());
+            if let Ok(data) = field.bytes().await {
+                let bytes = data.to_vec();
+                if bytes.len() as u64 > max_bytes {
+                    return Err((
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Json(serde_json::json!({"error": "File too large", "max_bytes": max_bytes, "file": file_name})),
+                    ));
+                }
+                files.push((file_name, content_type, bytes));
+            }
+        }
+    }
+
+    let control_id = control_id.ok_or((
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": "control_id required"})),
+    ))?;
+    if files.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "At least one file required"})),
+        ));
+    }
+    if files.len() > SCAN_UPLOAD_BATCH_MAX {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Too many files",
+                "detail": format!("Maximum {} files per request", SCAN_UPLOAD_BATCH_MAX)
+            })),
+        ));
+    }
+
+    let _ = std::fs::create_dir_all(&storage_path);
+    let mut evidence_ids = Vec::with_capacity(files.len());
+    let mut saved_paths: Vec<std::path::PathBuf> = Vec::new();
+
+    for (file_name, content_type, file_bytes) in files {
+        let extracted_text = extract_text_from_file(&content_type, &file_bytes);
+        let safe_name: String = file_name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
+        let rel_path = format!("{}_{}", Uuid::new_v4().simple(), safe_name);
+        let full_path = std::path::Path::new(&storage_path).join(&rel_path);
+        if std::fs::write(&full_path, &file_bytes).is_err() {
+            for p in saved_paths {
+                let _ = std::fs::remove_file(&p);
+            }
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to save file", "file": file_name})),
+            ));
+        }
+        saved_paths.push(full_path.clone());
+
+        match create_evidence(
+            pool,
+            control_id,
+            &evidence_type_default,
+            Some(&file_name),
+            None,
+            None,
+            Some(user.sub.as_str()),
+            Some(&rel_path),
+            Some(&file_name),
+            Some(&content_type),
+            extracted_text.as_deref(),
+        )
+        .await
+        {
+            Ok(id) => evidence_ids.push(id),
+            Err(e) => {
+                tracing::error!("create_evidence (upload-batch) failed for {}: {}", file_name, e);
+                for p in &saved_paths {
+                    let _ = std::fs::remove_file(p);
+                }
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to create evidence for one or more files",
+                        "detail": format!("Created {} before error", evidence_ids.len())
+                    })),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(ScanDocumentsResponse {
+            created: evidence_ids.len(),
+            evidence_ids,
         }),
     ))
 }
