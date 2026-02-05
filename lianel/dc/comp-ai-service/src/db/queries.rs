@@ -104,17 +104,39 @@ fn row_naive_to_utc(naive: NaiveDateTime) -> DateTime<Utc> {
     DateTime::<Utc>::from_utc(naive, Utc)
 }
 
-/// List all controls (no pagination for now)
+/// List all controls (no pagination for now). C5: optional category filter (e.g. operational, administrative).
 pub async fn list_controls(pool: &PgPool) -> Result<Vec<Control>, sqlx::Error> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, internal_id, name, description, category, external_id, created_at
-        FROM comp_ai.controls
-        ORDER BY internal_id
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    list_controls_filtered(pool, None).await
+}
+
+/// List controls optionally filtered by category (C5 operational view).
+pub async fn list_controls_filtered(
+    pool: &PgPool,
+    category: Option<&str>,
+) -> Result<Vec<Control>, sqlx::Error> {
+    let rows = if let Some(cat) = category.filter(|s| !s.is_empty()) {
+        sqlx::query(
+            r#"
+            SELECT id, internal_id, name, description, category, external_id, created_at
+            FROM comp_ai.controls
+            WHERE category = $1
+            ORDER BY internal_id
+            "#,
+        )
+        .bind(cat)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT id, internal_id, name, description, category, external_id, created_at
+            FROM comp_ai.controls
+            ORDER BY internal_id
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+    };
 
     let mut out = Vec::new();
     for row in rows {
@@ -198,7 +220,7 @@ pub async fn get_control_with_requirements(
     }))
 }
 
-/// G8: Update control external_id (Vanta alignment). Returns updated control or None if not found.
+/// G8: Update control external_id (align with external control sets). Returns updated control or None if not found.
 pub async fn update_control_external_id(
     pool: &PgPool,
     control_id: i64,
