@@ -27,7 +27,6 @@ use crate::utils::{format_eu_date, parse_eu_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use chrono::Utc;
 use axum_extra::extract::Multipart;
-use std::path::Path;
 use uuid::Uuid;
 use crate::handlers::comp_ai::ResponseCache;
 
@@ -996,7 +995,7 @@ fn extract_text_from_file(content_type: &str, bytes: &[u8]) -> Option<String> {
         return std::str::from_utf8(bytes).ok().map(String::from);
     }
     if ct == "application/pdf" {
-        return pdf_extract::extract_from_bytes(bytes).ok().filter(|s| !s.is_empty());
+        return pdf_extract::extract_from_bytes(bytes).ok().filter(|s: &String| !s.is_empty());
     }
     // Fallback: try utf-8
     std::str::from_utf8(bytes).ok().map(String::from)
@@ -1097,7 +1096,7 @@ pub async fn post_evidence_upload(
     let safe_name: String = file_name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
     let rel_path = format!("{}_{}", Uuid::new_v4().simple(), safe_name);
     let _ = std::fs::create_dir_all(&storage_path);
-    let full_path = Path::new(&storage_path).join(&rel_path);
+    let full_path = std::path::Path::new(&storage_path).join(&rel_path);
     if std::fs::write(&full_path, &file_bytes).is_err() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1169,12 +1168,12 @@ pub async fn post_evidence_analyze(
         })?
         .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Evidence not found"}))))?;
 
-    let text = evidence.extracted_text.as_deref().filter(|s| !s.trim().is_empty()).ok_or((
+    let text = evidence.extracted_text.as_deref().filter(|s: &&str| !s.trim().is_empty()).ok_or((
         StatusCode::BAD_REQUEST,
         Json(serde_json::json!({"error": "No extracted text for this evidence; upload a document with text (PDF or plain text) first"})),
     ))?;
 
-    let controls = list_controls(pool, None, 500, 0).await.map_err(|e| {
+    let controls = list_controls(pool).await.map_err(|e| {
         tracing::error!("list_controls failed: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load controls"})))
     })?;
