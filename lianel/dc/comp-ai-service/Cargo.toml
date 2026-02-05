@@ -28,3 +28,6 @@ uuid = { version = "1.6", features = ["v4"] }
 # G4: AWS IAM integration (evidence)
 aws-config = "1.4"
 aws-sdk-iam = "1.4"
+urlencoding = "2.1"
+# C3: Google Drive – JWT for service account
+jsonwebtoken = "9"
