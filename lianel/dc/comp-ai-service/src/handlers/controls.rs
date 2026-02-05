@@ -1747,7 +1747,7 @@ pub async fn post_okta_evidence(
                     "error": "Invalid evidence_type",
                     "detail": "Use 'org_summary', 'users_snapshot', or 'groups_snapshot'"
                 })),
-            );
+            ));
         }
     };
 
@@ -1817,7 +1817,7 @@ pub async fn post_aws_evidence(
                     "error": "Invalid evidence_type",
                     "detail": "Use 'iam_summary'"
                 })),
-            );
+            ));
         }
     };
 
