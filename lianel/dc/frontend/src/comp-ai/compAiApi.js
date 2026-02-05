@@ -83,8 +83,10 @@ export const compAiApi = {
   },
 
   // Phase 4: Controls & Evidence
-  async getControls() {
-    const res = await authenticatedFetch('/api/v1/controls');
+  /** GET /api/v1/controls. Optional category (C5): e.g. operational, administrative. */
+  async getControls({ category } = {}) {
+    const qs = category && String(category).trim() ? `?category=${encodeURIComponent(String(category).trim())}` : '';
+    const res = await authenticatedFetch(`/api/v1/controls${qs}`);
     if (!res.ok) throw new Error('Failed to fetch controls');
     return res.json();
   },
@@ -128,6 +130,13 @@ export const compAiApi = {
   async getControlsGaps() {
     const res = await authenticatedFetch('/api/v1/controls/gaps');
     if (!res.ok) throw new Error('Failed to fetch gaps');
+    return res.json();
+  },
+
+  /** GET /api/v1/tests – list control tests (for status dashboard). */
+  async getTests() {
+    const res = await authenticatedFetch('/api/v1/tests');
+    if (!res.ok) throw new Error('Failed to fetch tests');
     return res.json();
   },
 
@@ -298,6 +307,62 @@ export const compAiApi = {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || data.detail || 'Failed to collect AWS evidence');
+    }
+    return res.json();
+  },
+
+  /** D3: Collect email metadata from M365 (Microsoft Graph). body: { control_id, limit? }. Returns { created, evidence_ids }. */
+  async postM365Evidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/m365/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect M365 email evidence');
+    }
+    return res.json();
+  },
+
+  /** C3: List files in Google Drive folder and create evidence (one per file). body: { control_id, folder_id?, limit? }. */
+  async postDriveEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/drive/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect Drive evidence');
+    }
+    return res.json();
+  },
+
+  /** SharePoint: List files in site/document library and create evidence (one per file). body: { control_id, site_id, drive_id?, folder_path?, limit? }. */
+  async postSharepointEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/sharepoint/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect SharePoint evidence');
+    }
+    return res.json();
+  },
+
+  /** D4: Store DLP or compliance scan result as one evidence item. body: { control_id, summary, scan_date?, details?, link_url? }. */
+  async postDlpEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/dlp/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to save DLP evidence');
     }
     return res.json();
   },

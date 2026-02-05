@@ -214,4 +214,18 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 **G8 (Vanta control set alignment):** Per-control external_id in Controls UI; **bulk set** via "G8: Align with external control set" (paste `internal_id,external_id` lines) and **POST /api/v1/controls/bulk-external-id**. See runbook **COMP-AI-G8-VANTA-ALIGNMENT.md**.
 
-**Next Action**: See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md for remaining workstreams (e.g. G9 evidence review — done; more G4 evidence types or Azure as optional).
+**Phase D (Email evidence):** D1–D2 done: email in evidence type selector; UI hint when type=email (“From: X; Subject: Y; Date” and optional link to mail archive). D3 (M365/Google integration) and D4 (DLP) optional.
+
+**D3 (M365 email):** POST /api/v1/integrations/m365/evidence – list recent email metadata from Microsoft Graph, one evidence per message. Config: M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET, M365_MAILBOX_USER_ID. UI: “Collect M365 email evidence” in Controls.
+
+**D4 (DLP scan):** POST /api/v1/integrations/dlp/evidence – store one evidence item for a DLP/compliance scan (summary, optional date, details, link). UI: “Record DLP / compliance scan result” form in Controls.
+
+**C3 (Google Drive):** POST /api/v1/integrations/drive/evidence – list files in a Drive folder, one evidence per file (link only). Config: GOOGLE_DRIVE_CREDENTIALS_PATH, GOOGLE_DRIVE_FOLDER_ID. See COMP-AI-C3-DRIVE.md. UI: “Collect from Google Drive (folder)” in Controls.
+
+**SharePoint:** POST /api/v1/integrations/sharepoint/evidence – list files in a SharePoint site/document library, one evidence per file (link only). Uses same M365 app (Sites.Read.All). See COMP-AI-SHAREPOINT.md. UI: “Collect from SharePoint (document library)” in Controls.
+
+**C5 (Operational view):** GET /api/v1/controls?category=operational (or administrative). UI: Category filter dropdown (All | Operational | Administrative) in Controls. Set control `category` in DB to use the filter.
+
+**G7 Alerts (hardened):** DAG `comp_ai_alerts` – retry get_gaps/get_tests once on failure; Slack message includes “View controls” link (optional COMP_AI_APP_URL). Monitoring page shows Compliance status card (gaps count, failed tests count) with link to Controls.
+
+**Next Action**: See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md. Remaining optional: more G4 evidence types or Azure (deferred).

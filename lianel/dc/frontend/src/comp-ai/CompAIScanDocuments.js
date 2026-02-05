@@ -139,10 +139,10 @@ function CompAIScanDocuments() {
                 <p className="comp-ai-form-hint">Paste one URL per line. Max 50 per run.</p>
                 {scanError && <p className="comp-ai-error" role="alert">{scanError}</p>}
                 {scanResult && (
-                  <div className="comp-ai-scan-result comp-ai-success">
-                    <p>Created <strong>{scanResult.created}</strong> evidence item(s).</p>
+                  <div className="comp-ai-scan-result comp-ai-success" role="status">
+                    <p><strong>Created {scanResult.created} evidence item(s).</strong></p>
                     {scanResult.evidence_ids && scanResult.evidence_ids.length > 0 && (
-                      <p className="comp-ai-meta">IDs: {scanResult.evidence_ids.join(', ')}</p>
+                      <p className="comp-ai-meta">Evidence IDs: {scanResult.evidence_ids.join(', ')}</p>
                     )}
                     {selectedControl && (
                       <p>

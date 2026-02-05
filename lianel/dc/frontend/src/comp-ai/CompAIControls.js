@@ -36,6 +36,23 @@ function CompAIControls() {
   const [oktaSubmitting, setOktaSubmitting] = useState(false);
   const [awsEvidenceType, setAwsEvidenceType] = useState('iam_summary');
   const [awsSubmitting, setAwsSubmitting] = useState(false);
+  const [m365Submitting, setM365Submitting] = useState(false);
+  const [m365Limit, setM365Limit] = useState(50);
+  const [dlpSummary, setDlpSummary] = useState('');
+  const [dlpScanDate, setDlpScanDate] = useState('');
+  const [dlpDetails, setDlpDetails] = useState('');
+  const [dlpLinkUrl, setDlpLinkUrl] = useState('');
+  const [dlpSubmitting, setDlpSubmitting] = useState(false);
+  // C3: Google Drive
+  const [driveFolderId, setDriveFolderId] = useState('');
+  const [driveLimit, setDriveLimit] = useState(50);
+  const [driveSubmitting, setDriveSubmitting] = useState(false);
+  // SharePoint (document library)
+  const [sharepointSiteId, setSharepointSiteId] = useState('');
+  const [sharepointDriveId, setSharepointDriveId] = useState('');
+  const [sharepointFolderPath, setSharepointFolderPath] = useState('');
+  const [sharepointLimit, setSharepointLimit] = useState(50);
+  const [sharepointSubmitting, setSharepointSubmitting] = useState(false);
 
   // Phase B: file upload
   const [uploadFile, setUploadFile] = useState(null);
@@ -83,10 +100,12 @@ function CompAIControls() {
   const [bulkExternalIdResult, setBulkExternalIdResult] = useState(null);
   const [bulkExternalIdError, setBulkExternalIdError] = useState(null);
   const [scanError, setScanError] = useState(null);
+  // C5: operational view – filter controls by category
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   useEffect(() => {
     loadControls();
-  }, []);
+  }, [categoryFilter]);
 
   useEffect(() => {
     if (selectedControl) {
@@ -114,7 +133,8 @@ function CompAIControls() {
     setLoading(true);
     setError(null);
     try {
-      const list = await compAiApi.getControls();
+      const params = categoryFilter.trim() ? { category: categoryFilter.trim() } : {};
+      const list = await compAiApi.getControls(params);
       setControls(Array.isArray(list) ? list : []);
     } catch (err) {
       setError(err.message || 'Failed to load controls');
@@ -475,6 +495,96 @@ function CompAIControls() {
     }
   };
 
+  const handleCollectM365Evidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl) return;
+    setM365Submitting(true);
+    clearMessages();
+    try {
+      const limit = Math.min(100, Math.max(1, Number(m365Limit) || 50));
+      const data = await compAiApi.postM365Evidence({
+        control_id: selectedControl.id,
+        limit,
+      });
+      setSuccess(`M365: created ${data.created} email evidence item(s).`);
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to collect M365 email evidence');
+    } finally {
+      setM365Submitting(false);
+    }
+  };
+
+  const handleCollectDriveEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl) return;
+    setDriveSubmitting(true);
+    clearMessages();
+    try {
+      const limit = Math.min(100, Math.max(1, Number(driveLimit) || 50));
+      const data = await compAiApi.postDriveEvidence({
+        control_id: selectedControl.id,
+        folder_id: driveFolderId.trim() || undefined,
+        limit,
+      });
+      setSuccess(`Drive: created ${data.created} evidence item(s).`);
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to collect Drive evidence');
+    } finally {
+      setDriveSubmitting(false);
+    }
+  };
+
+  const handleCollectSharepointEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl || !sharepointSiteId.trim()) return;
+    setSharepointSubmitting(true);
+    clearMessages();
+    try {
+      const limit = Math.min(100, Math.max(1, Number(sharepointLimit) || 50));
+      const data = await compAiApi.postSharepointEvidence({
+        control_id: selectedControl.id,
+        site_id: sharepointSiteId.trim(),
+        drive_id: sharepointDriveId.trim() || undefined,
+        folder_path: sharepointFolderPath.trim() || undefined,
+        limit,
+      });
+      setSuccess(`SharePoint: created ${data.created} evidence item(s).`);
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to collect SharePoint evidence');
+    } finally {
+      setSharepointSubmitting(false);
+    }
+  };
+
+  const handleSubmitDlpEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl || !dlpSummary.trim()) return;
+    setDlpSubmitting(true);
+    clearMessages();
+    try {
+      await compAiApi.postDlpEvidence({
+        control_id: selectedControl.id,
+        summary: dlpSummary.trim(),
+        scan_date: dlpScanDate.trim() || undefined,
+        details: dlpDetails.trim() || undefined,
+        link_url: dlpLinkUrl.trim() || undefined,
+      });
+      setSuccess('DLP/compliance scan result saved as evidence.');
+      setDlpSummary('');
+      setDlpScanDate('');
+      setDlpDetails('');
+      setDlpLinkUrl('');
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to save DLP evidence');
+    } finally {
+      setDlpSubmitting(false);
+    }
+  };
+
   const handleScanUrls = async (e) => {
     e.preventDefault();
     if (!selectedControl || !scanUrls.trim()) return;
@@ -678,10 +788,25 @@ function CompAIControls() {
           </div>
 
           <div className="comp-ai-controls-section">
-            <h2>Controls</h2>
+            <div className="comp-ai-controls-header-row">
+              <h2>Controls</h2>
+              <label className="comp-ai-category-filter">
+                <span>Category (C5 operational view)</span>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="comp-ai-select"
+                  aria-label="Filter controls by category"
+                >
+                  <option value="">All</option>
+                  <option value="operational">Operational</option>
+                  <option value="administrative">Administrative</option>
+                </select>
+              </label>
+            </div>
             {loading && <div className="comp-ai-loading">Loading controls...</div>}
             {!loading && controls.length === 0 && (
-              <p className="comp-ai-empty">No controls found. Run Phase 4 migrations (009, 010, 011) on the database.</p>
+              <p className="comp-ai-empty">No controls found. {categoryFilter ? 'Try "All" or set control category in the database.' : 'Run Phase 4 migrations (009, 010, 011) on the database.'}</p>
             )}
             {!loading && controls.length > 0 && (
               <ul className="comp-ai-controls-list">
@@ -963,6 +1088,9 @@ function CompAIControls() {
                 <form onSubmit={handleAddManualEvidence} className="comp-ai-evidence-form">
                   <h3>Manual evidence</h3>
                   <p className="comp-ai-form-hint">For operational/admin: use Document, Policy, Spreadsheet, or Email and paste a link (SharePoint, Drive, etc.).</p>
+                  {manualType === 'email' && (
+                    <p className="comp-ai-form-hint comp-ai-email-hint">For email evidence use Source like &quot;From: X; Subject: Y; Date&quot; and optionally add a link to the mail archive.</p>
+                  )}
                   <div className="form-group">
                     <label htmlFor="manual-type">Type *</label>
                     <select
@@ -1133,6 +1261,151 @@ function CompAIControls() {
                   </div>
                   <button type="submit" className="comp-ai-submit-btn" disabled={awsSubmitting}>
                     {awsSubmitting ? 'Collecting...' : 'Collect AWS evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleCollectM365Evidence} className="comp-ai-evidence-form">
+                  <h3>Collect from M365 (email metadata) — D3</h3>
+                  <p className="comp-ai-form-hint">Requires M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET, M365_MAILBOX_USER_ID on the server. Creates one evidence row per recent email (From; Subject; Date; link).</p>
+                  <div className="form-group">
+                    <label htmlFor="m365-limit">Max emails to import (1–100)</label>
+                    <input
+                      id="m365-limit"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={m365Limit}
+                      onChange={(e) => setM365Limit(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={m365Submitting}>
+                    {m365Submitting ? 'Collecting...' : 'Collect M365 email evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleSubmitDlpEvidence} className="comp-ai-evidence-form">
+                  <h3>Record DLP / compliance scan result — D4</h3>
+                  <p className="comp-ai-form-hint">Store one evidence item for a DLP or compliance scan (e.g. &quot;No violation&quot; or &quot;3 items flagged&quot;). No external DLP call.</p>
+                  <div className="form-group">
+                    <label htmlFor="dlp-summary">Summary *</label>
+                    <input
+                      id="dlp-summary"
+                      type="text"
+                      value={dlpSummary}
+                      onChange={(e) => setDlpSummary(e.target.value)}
+                      placeholder="e.g. No violation; or 3 items flagged"
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="dlp-scan-date">Scan date (optional)</label>
+                    <input
+                      id="dlp-scan-date"
+                      type="date"
+                      value={dlpScanDate}
+                      onChange={(e) => setDlpScanDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="dlp-details">Details (optional)</label>
+                    <input
+                      id="dlp-details"
+                      type="text"
+                      value={dlpDetails}
+                      onChange={(e) => setDlpDetails(e.target.value)}
+                      placeholder="Report reference or notes"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="dlp-link">Link to report (optional)</label>
+                    <input
+                      id="dlp-link"
+                      type="url"
+                      value={dlpLinkUrl}
+                      onChange={(e) => setDlpLinkUrl(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={dlpSubmitting || !dlpSummary.trim()}>
+                    {dlpSubmitting ? 'Saving...' : 'Save DLP evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleCollectDriveEvidence} className="comp-ai-evidence-form">
+                  <h3>Collect from Google Drive (folder) — C3</h3>
+                  <p className="comp-ai-form-hint">Requires GOOGLE_DRIVE_CREDENTIALS_PATH and GOOGLE_DRIVE_FOLDER_ID (or folder ID below). Creates one evidence per file (link only).</p>
+                  <div className="form-group">
+                    <label htmlFor="drive-folder-id">Folder ID (optional if env set)</label>
+                    <input
+                      id="drive-folder-id"
+                      type="text"
+                      value={driveFolderId}
+                      onChange={(e) => setDriveFolderId(e.target.value)}
+                      placeholder="Drive folder ID"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="drive-limit">Max files (1–100)</label>
+                    <input
+                      id="drive-limit"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={driveLimit}
+                      onChange={(e) => setDriveLimit(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={driveSubmitting}>
+                    {driveSubmitting ? 'Collecting...' : 'Collect Drive evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleCollectSharepointEvidence} className="comp-ai-evidence-form">
+                  <h3>Collect from SharePoint (document library)</h3>
+                  <p className="comp-ai-form-hint">Uses same M365 app (M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET). App needs Sites.Read.All. Creates one evidence per file (link only).</p>
+                  <div className="form-group">
+                    <label htmlFor="sharepoint-site-id">Site ID *</label>
+                    <input
+                      id="sharepoint-site-id"
+                      type="text"
+                      value={sharepointSiteId}
+                      onChange={(e) => setSharepointSiteId(e.target.value)}
+                      placeholder="e.g. contoso.sharepoint.com,{site-id},{web-id}"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="sharepoint-drive-id">Drive ID (optional; uses default library)</label>
+                    <input
+                      id="sharepoint-drive-id"
+                      type="text"
+                      value={sharepointDriveId}
+                      onChange={(e) => setSharepointDriveId(e.target.value)}
+                      placeholder="Document library ID"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="sharepoint-folder-path">Folder path (optional)</label>
+                    <input
+                      id="sharepoint-folder-path"
+                      type="text"
+                      value={sharepointFolderPath}
+                      onChange={(e) => setSharepointFolderPath(e.target.value)}
+                      placeholder="e.g. Shared Documents/Policies"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="sharepoint-limit">Max items (1–100)</label>
+                    <input
+                      id="sharepoint-limit"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={sharepointLimit}
+                      onChange={(e) => setSharepointLimit(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={sharepointSubmitting || !sharepointSiteId.trim()}>
+                    {sharepointSubmitting ? 'Collecting...' : 'Collect SharePoint evidence'}
                   </button>
                 </form>
 

@@ -18,9 +18,12 @@ use crate::models::{
     ScanDocumentsRequest, ScanDocumentsResponse,
     ControlPolicyMappingResponse, ControlPolicyMappingEntry, PolicyRef, SystemDescriptionResponse,
     PatchControlRequest, BulkExternalIdRequest, BulkExternalIdResponse, OktaEvidenceRequest, AwsEvidenceRequest,
+    M365EvidenceRequest, M365EvidenceResponse, DlpEvidenceRequest,
+    DriveEvidenceRequest, DriveEvidenceResponse,
+    SharepointEvidenceRequest, SharepointEvidenceResponse,
 };
 use crate::db::queries::{
-    list_controls, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
+    list_controls, list_controls_filtered, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
     list_controls_without_evidence, list_remediation_tasks, get_remediation_by_control_id,
     upsert_remediation, list_requirements, update_control_external_id,
     list_control_tests, list_all_control_tests, record_control_test_result,
@@ -32,6 +35,9 @@ use crate::integrations::okta::{
     fetch_okta_org_summary, fetch_okta_users_snapshot, fetch_okta_groups_snapshot,
 };
 use crate::integrations::aws::fetch_aws_iam_summary;
+use crate::integrations::m365::fetch_m365_email_list;
+use crate::integrations::drive::fetch_drive_file_list;
+use crate::integrations::sharepoint::fetch_sharepoint_file_list;
 use chrono::Utc;
 use axum_extra::extract::Multipart;
 use uuid::Uuid;
@@ -78,10 +84,17 @@ pub struct RequirementsQuery {
     pub framework: Option<String>,
 }
 
+/// C5: Optional category filter for GET /api/v1/controls (e.g. operational, administrative).
+#[derive(Debug, serde::Deserialize)]
+pub struct ControlsQuery {
+    pub category: Option<String>,
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/controls",
     tag = "controls",
+    params(("category" = Option<String>, Query, description = "C5: Filter by category (e.g. operational, administrative)")),
     responses(
         (status = 200, description = "List of controls", body = Vec<Control>),
         (status = 401, description = "Unauthorized"),
@@ -91,16 +104,17 @@ pub struct RequirementsQuery {
 pub async fn get_controls(
     headers: axum::http::HeaderMap,
     State(state): State<AppState>,
+    Query(q): Query<ControlsQuery>,
 ) -> Result<Json<Vec<Control>>, (StatusCode, Json<serde_json::Value>)> {
     let (config, pool, _) = &state;
     let _user = extract_user(&headers, config.clone())
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
 
-    let controls = list_controls(pool)
+    let controls = list_controls_filtered(pool, q.category.as_deref())
         .await
         .map_err(|e| {
-            tracing::error!("list_controls failed: {}", e);
+            tracing::error!("list_controls_filtered failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "Failed to list controls"})),
@@ -1901,6 +1915,431 @@ pub async fn post_aws_evidence(
     Ok((
         StatusCode::CREATED,
         Json(CreateEvidenceResponse { id, control_id: body.control_id, collected_at: Utc::now() }),
+    ))
+}
+
+/// D3: Collect email metadata from M365 (Microsoft Graph) and create one evidence row per message.
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/m365/evidence",
+    tag = "controls",
+    request_body = M365EvidenceRequest,
+    responses(
+        (status = 200, description = "Evidence created for each email (metadata only)", body = M365EvidenceResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "M365 integration not configured or API error"),
+    )
+)]
+pub async fn post_m365_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<M365EvidenceRequest>,
+) -> Result<(StatusCode, Json<M365EvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let tenant_id = config
+        .m365_tenant_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "M365 integration not configured",
+                "detail": "Set M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET, M365_MAILBOX_USER_ID"
+            })),
+        ))?;
+    let client_id = config
+        .m365_client_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "M365 integration not configured", "detail": "Set M365_CLIENT_ID"})),
+        ))?;
+    let client_secret = config
+        .m365_client_secret
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "M365 integration not configured", "detail": "Set M365_CLIENT_SECRET"})),
+        ))?;
+    let mailbox_user_id = config
+        .m365_mailbox_user_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "M365 integration not configured", "detail": "Set M365_MAILBOX_USER_ID"})),
+        ))?;
+
+    let limit = body.limit.unwrap_or(50);
+
+    let emails = fetch_m365_email_list(
+        tenant_id,
+        client_id,
+        client_secret,
+        mailbox_user_id,
+        limit,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("M365 email list failed: {}", e);
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": "Failed to fetch M365 email list",
+                "detail": e.to_string()
+            })),
+        )
+    })?;
+
+    let mut evidence_ids = Vec::with_capacity(emails.len());
+    for ev in &emails {
+        match create_evidence(
+            pool,
+            body.control_id,
+            "email",
+            Some(ev.source.as_str()),
+            None,
+            ev.link_url.as_deref(),
+            Some(user.sub.as_str()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        {
+            Ok(id) => evidence_ids.push(id),
+            Err(e) => {
+                tracing::error!("create_evidence (M365) failed: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to save one or more email evidence",
+                        "detail": format!("Created {} before error", evidence_ids.len())
+                    })),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(M365EvidenceResponse {
+            created: evidence_ids.len(),
+            evidence_ids,
+        }),
+    ))
+}
+
+/// D4: Store a DLP or compliance scan result as one evidence item (no external DLP call).
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/dlp/evidence",
+    tag = "controls",
+    request_body = DlpEvidenceRequest,
+    responses(
+        (status = 201, description = "DLP/scan result stored as evidence", body = CreateEvidenceResponse),
+        (status = 400, description = "Invalid request (e.g. empty summary)"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_dlp_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<DlpEvidenceRequest>,
+) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let summary = body.summary.trim();
+    if summary.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "summary is required and must be non-empty"})),
+        ));
+    }
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let scan_date = body
+        .scan_date
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| today.as_str());
+    let source = format!("DLP/compliance scan {}: {}", scan_date, summary);
+
+    let id = create_evidence(
+        pool,
+        body.control_id,
+        "dlp_scan",
+        Some(&source),
+        body.details.as_deref(),
+        body.link_url.as_deref(),
+        Some(user.sub.as_str()),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("create_evidence (DLP) failed: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to save evidence"})),
+        )
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateEvidenceResponse {
+            id,
+            control_id: body.control_id,
+            collected_at: Utc::now(),
+        }),
+    ))
+}
+
+/// C3: List files in Google Drive folder and create one evidence row per file (link only).
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/drive/evidence",
+    tag = "controls",
+    request_body = DriveEvidenceRequest,
+    responses(
+        (status = 200, description = "Evidence created for each file", body = DriveEvidenceResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "Drive integration not configured or API error"),
+    )
+)]
+pub async fn post_drive_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<DriveEvidenceRequest>,
+) -> Result<(StatusCode, Json<DriveEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let credentials_path = config
+        .google_drive_credentials_path
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "Google Drive integration not configured",
+                "detail": "Set GOOGLE_DRIVE_CREDENTIALS_PATH and GOOGLE_DRIVE_FOLDER_ID"
+            })),
+        ))?;
+
+    let folder_id = body
+        .folder_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| config.google_drive_folder_id.as_deref())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Folder ID required",
+                "detail": "Set folder_id in request or GOOGLE_DRIVE_FOLDER_ID"
+            })),
+        ))?;
+
+    let limit = body.limit.unwrap_or(50);
+
+    let files = fetch_drive_file_list(credentials_path, folder_id, limit)
+        .await
+        .map_err(|e| {
+            tracing::error!("Drive file list failed: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "error": "Failed to fetch Drive file list",
+                    "detail": e.to_string()
+                })),
+            )
+        })?;
+
+    let mut evidence_ids = Vec::with_capacity(files.len());
+    for ev in &files {
+        match create_evidence(
+            pool,
+            body.control_id,
+            "document",
+            Some(ev.source.as_str()),
+            None,
+            ev.link_url.as_deref(),
+            Some(user.sub.as_str()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        {
+            Ok(id) => evidence_ids.push(id),
+            Err(e) => {
+                tracing::error!("create_evidence (Drive) failed: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to save one or more Drive evidence",
+                        "detail": format!("Created {} before error", evidence_ids.len())
+                    })),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(DriveEvidenceResponse {
+            created: evidence_ids.len(),
+            evidence_ids,
+        }),
+    ))
+}
+
+/// SharePoint: List files in a site/document library and create one evidence row per file (link only).
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/sharepoint/evidence",
+    tag = "controls",
+    request_body = SharepointEvidenceRequest,
+    responses(
+        (status = 200, description = "Evidence created for each file", body = SharepointEvidenceResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "SharePoint integration not configured or API error"),
+    )
+)]
+pub async fn post_sharepoint_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<SharepointEvidenceRequest>,
+) -> Result<(StatusCode, Json<SharepointEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let tenant_id = config
+        .m365_tenant_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "SharePoint integration not configured",
+                "detail": "Set M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET (same app needs Sites.Read.All)"
+            })),
+        ))?;
+    let client_id = config
+        .m365_client_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "SharePoint integration not configured",
+                "detail": "Set M365_CLIENT_ID"
+            })),
+        ))?;
+    let client_secret = config
+        .m365_client_secret
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "SharePoint integration not configured",
+                "detail": "Set M365_CLIENT_SECRET"
+            })),
+        ))?;
+
+    let site_id = body.site_id.trim();
+    if site_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "site_id is required",
+                "detail": "Provide SharePoint site ID (e.g. from site URL or Graph)"
+            })),
+        ));
+    }
+
+    let limit = body.limit.unwrap_or(50);
+
+    let files = fetch_sharepoint_file_list(
+        tenant_id,
+        client_id,
+        client_secret,
+        site_id,
+        body.drive_id.as_deref(),
+        body.folder_path.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("SharePoint file list failed: {}", e);
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": "Failed to fetch SharePoint file list",
+                "detail": e.to_string()
+            })),
+        )
+    })?;
+
+    let mut evidence_ids = Vec::with_capacity(files.len());
+    for ev in &files {
+        match create_evidence(
+            pool,
+            body.control_id,
+            "document",
+            Some(ev.source.as_str()),
+            None,
+            ev.link_url.as_deref(),
+            Some(user.sub.as_str()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        {
+            Ok(id) => evidence_ids.push(id),
+            Err(e) => {
+                tracing::error!("create_evidence (SharePoint) failed: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to save one or more SharePoint evidence",
+                        "detail": format!("Created {} before error", evidence_ids.len())
+                    })),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(SharepointEvidenceResponse {
+            created: evidence_ids.len(),
+            evidence_ids,
+        }),
     ))
 }
 

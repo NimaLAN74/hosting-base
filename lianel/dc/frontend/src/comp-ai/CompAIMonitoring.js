@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
 import { formatDateTimeEU } from '../services/dateFormat';
@@ -9,12 +10,42 @@ function CompAIMonitoring() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastChecked, setLastChecked] = useState(null);
+  const [gapsCount, setGapsCount] = useState(null);
+  const [failedTestsCount, setFailedTestsCount] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(true);
 
   useEffect(() => {
     checkHealth();
-    // Auto-refresh every 30 seconds
     const interval = setInterval(checkHealth, 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchStatus() {
+      setStatusLoading(true);
+      try {
+        const [gaps, tests] = await Promise.all([
+          compAiApi.getControlsGaps().catch(() => []),
+          compAiApi.getTests().catch(() => []),
+        ]);
+        if (!cancelled) {
+          setGapsCount(Array.isArray(gaps) ? gaps.length : 0);
+          const failed = Array.isArray(tests)
+            ? tests.filter((t) => (t.last_result || '').toLowerCase() === 'fail').length
+            : 0;
+          setFailedTestsCount(failed);
+        }
+      } finally {
+        if (!cancelled) setStatusLoading(false);
+      }
+    }
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const checkHealth = async () => {
@@ -92,6 +123,28 @@ function CompAIMonitoring() {
               </div>
             </div>
           )}
+
+          <div className="comp-ai-health-cards" style={{ marginTop: '1.5rem' }}>
+            <div className="comp-ai-health-card">
+              <div className="comp-ai-health-card-header">
+                <h3>Compliance status (G7)</h3>
+                <Link to="/comp-ai/controls" className="comp-ai-refresh-btn">View controls</Link>
+              </div>
+              <div className="comp-ai-health-card-content">
+                {statusLoading ? (
+                  <p>Loading…</p>
+                ) : (
+                  <>
+                    <p><strong>Gaps</strong> (controls with no evidence): {gapsCount ?? '—'}</p>
+                    <p><strong>Failed control tests:</strong> {failedTestsCount ?? '—'}</p>
+                    {(gapsCount > 0 || failedTestsCount > 0) && (
+                      <p className="comp-ai-form-hint">Address gaps and failed tests in <Link to="/comp-ai/controls">Controls</Link>. Daily alerts (Slack) use the same data.</p>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="comp-ai-monitoring-info">
             <h3>Monitoring Information</h3>

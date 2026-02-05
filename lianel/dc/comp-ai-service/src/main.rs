@@ -31,7 +31,7 @@ use handlers::controls::{
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
     post_remediation_suggest, post_analysis_gaps,
     get_control_tests, get_tests, post_test_result,
-    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review,     post_github_evidence, post_okta_evidence, post_aws_evidence,
+    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review,     post_github_evidence, post_okta_evidence, post_aws_evidence, post_m365_evidence, post_dlp_evidence, post_drive_evidence, post_sharepoint_evidence,
     post_scan_documents, post_scan_upload_batch,
     get_control_policy_mapping, get_system_description,
     post_bulk_external_id,
@@ -71,6 +71,10 @@ use sqlx::PgPool;
         handlers::controls::post_github_evidence,
         handlers::controls::post_okta_evidence,
         handlers::controls::post_aws_evidence,
+        handlers::controls::post_m365_evidence,
+        handlers::controls::post_dlp_evidence,
+        handlers::controls::post_drive_evidence,
+        handlers::controls::post_sharepoint_evidence,
         handlers::controls::post_scan_documents,
         handlers::controls::post_scan_upload_batch,
         handlers::controls::get_control_policy_mapping,
@@ -116,6 +120,13 @@ use sqlx::PgPool;
         models::BulkExternalIdRequest,
         models::BulkExternalIdResponse,
         models::BulkExternalIdItem,
+        models::M365EvidenceRequest,
+        models::M365EvidenceResponse,
+        models::DlpEvidenceRequest,
+        models::DriveEvidenceRequest,
+        models::DriveEvidenceResponse,
+        models::SharepointEvidenceRequest,
+        models::SharepointEvidenceResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -208,6 +219,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
         .route("/api/v1/integrations/okta/evidence", axum::routing::post(post_okta_evidence))
         .route("/api/v1/integrations/aws/evidence", axum::routing::post(post_aws_evidence))
+        .route("/api/v1/integrations/m365/evidence", axum::routing::post(post_m365_evidence))
+        .route("/api/v1/integrations/dlp/evidence", axum::routing::post(post_dlp_evidence))
+        .route("/api/v1/integrations/drive/evidence", axum::routing::post(post_drive_evidence))
+        .route("/api/v1/integrations/sharepoint/evidence", axum::routing::post(post_sharepoint_evidence))
         .route("/api/v1/scan/documents", axum::routing::post(post_scan_documents))
         .route("/api/v1/scan/upload-batch", axum::routing::post(post_scan_upload_batch))
         .layer(rate_limit_layer)

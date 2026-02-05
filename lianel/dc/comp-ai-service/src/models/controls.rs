@@ -154,6 +154,73 @@ pub struct AwsEvidenceRequest {
     pub evidence_type: String,
 }
 
+/// D3: Request to collect email evidence from M365 (Microsoft Graph). Creates one evidence row per message (metadata only).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct M365EvidenceRequest {
+    pub control_id: i64,
+    /// Max number of recent messages to import (default 50, max 100).
+    pub limit: Option<u32>,
+}
+
+/// D3: Response after importing M365 email metadata as evidence.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct M365EvidenceResponse {
+    pub created: usize,
+    pub evidence_ids: Vec<i64>,
+}
+
+/// C3: Request to list files from Google Drive folder and create evidence (one per file).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DriveEvidenceRequest {
+    pub control_id: i64,
+    /// Folder ID (optional; defaults to GOOGLE_DRIVE_FOLDER_ID).
+    pub folder_id: Option<String>,
+    /// Max files to import (default 50, max 100).
+    pub limit: Option<u32>,
+}
+
+/// C3: Response after creating evidence from Drive file list.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DriveEvidenceResponse {
+    pub created: usize,
+    pub evidence_ids: Vec<i64>,
+}
+
+/// SharePoint: Request to list files in a site/document library and create evidence (one per file).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SharepointEvidenceRequest {
+    pub control_id: i64,
+    /// SharePoint site ID (e.g. from site URL or Graph).
+    pub site_id: String,
+    /// Drive ID (document library); optional – uses default drive if omitted.
+    pub drive_id: Option<String>,
+    /// Folder path relative to drive root (e.g. "Shared Documents/Policies"); optional.
+    pub folder_path: Option<String>,
+    /// Max items to import (default 50, max 100).
+    pub limit: Option<u32>,
+}
+
+/// SharePoint: Response after creating evidence from file list.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SharepointEvidenceResponse {
+    pub created: usize,
+    pub evidence_ids: Vec<i64>,
+}
+
+/// D4: DLP or compliance scan result – store as one evidence item (e.g. "DLP scan 2026-01-15: no violation").
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DlpEvidenceRequest {
+    pub control_id: i64,
+    /// Short summary (e.g. "No violation" or "3 items flagged").
+    pub summary: String,
+    /// Optional scan date (ISO date); defaults to today.
+    pub scan_date: Option<String>,
+    /// Optional details or report reference.
+    pub details: Option<String>,
+    /// Optional link to full report.
+    pub link_url: Option<String>,
+}
+
 /// One control with requirements and evidence for audit export (Phase 5).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ControlExportEntry {

@@ -101,7 +101,7 @@ function CompAIAuditDocs() {
           <section className="comp-ai-controls-section comp-ai-audit-docs-section">
             <h2>System Description (SOC 2)</h2>
             <p className="comp-ai-form-hint">
-              Use the template below for your SOC 2 system description. Fill the placeholders and copy or download.
+              Use the template below for your SOC 2 system description. Set organisation name, system name, and as-of date above, then click &quot;Fill template&quot;. Copy or download the result.
             </p>
             {loadingDesc && <div className="comp-ai-loading">Loading template...</div>}
             {errorDesc && <p className="comp-ai-error" role="alert">{errorDesc}</p>}

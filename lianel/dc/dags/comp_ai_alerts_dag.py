@@ -7,12 +7,14 @@ and open gaps. Logs a summary; optionally sends to Slack if SLACK_WEBHOOK_URL
 
 Requires Airflow Variables: COMP_AI_BASE_URL, COMP_AI_TOKEN.
 Optional: SLACK_WEBHOOK_URL for Slack notifications.
+Optional: COMP_AI_APP_URL (e.g. https://www.lianel.se) for links in Slack.
 See COMP-AI-AIRFLOW-RUNNER-DESIGN.md.
 """
 from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -26,6 +28,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
 from comp_ai_client import get_gaps, get_tests
 
 log = logging.getLogger(__name__)
+
+
+def _get_variable(key: str, default: str | None = None) -> str | None:
+    try:
+        from airflow.sdk import Variable
+        return Variable.get(key, default=default)
+    except Exception:
+        return default
+
+
+def _get_app_url() -> str:
+    """Base URL for 'View controls' link in Slack (optional)."""
+    return (
+        os.environ.get("COMP_AI_APP_URL")
+        or _get_variable("COMP_AI_APP_URL")
+        or "https://www.lianel.se"
+    ).rstrip("/")
 
 default_args = {
     'owner': 'lianel',
@@ -61,23 +80,36 @@ def _get_slack_webhook_url() -> str | None:
         return None
 
 
+def _fetch_with_retry(get_fn, name: str, max_attempts: int = 2):
+    """Call get_fn(); on failure retry once after 5s."""
+    for attempt in range(max_attempts):
+        try:
+            return get_fn()
+        except Exception as e:
+            log.warning("%s attempt %s failed: %s", name, attempt + 1, e)
+            if attempt + 1 < max_attempts:
+                time.sleep(5)
+            else:
+                log.exception("%s failed after %s attempts", name, max_attempts)
+                raise
+    return None
+
+
 def run_alerts(**context):
     """Fetch gaps and tests; build summary; log and optionally send to Slack."""
     gaps = []
     failed_tests = []
     error_msg = None
     try:
-        gaps = get_gaps()
+        gaps = _fetch_with_retry(get_gaps, "get_gaps")
     except Exception as e:
         error_msg = str(e)
-        log.exception("get_gaps failed")
     try:
-        tests = get_tests()
-        failed_tests = [t for t in tests if (t.get('last_result') or '').lower() == 'fail']
+        tests = _fetch_with_retry(get_tests, "get_tests")
+        failed_tests = [t for t in (tests or []) if (t.get('last_result') or '').lower() == 'fail']
     except Exception as e:
         if not error_msg:
             error_msg = str(e)
-        log.exception("get_tests failed")
 
     gap_count = len(gaps) if isinstance(gaps, list) else 0
     fail_count = len(failed_tests)
@@ -112,19 +144,23 @@ def run_alerts(**context):
 
     # Optional: send to Slack (only if there are issues or we always report)
     webhook = _get_slack_webhook_url()
+    controls_url = f"{_get_app_url()}/comp-ai/controls"
     if webhook:
-        # Send when there are issues, or send a short "all clear" on schedule
         if has_issues:
             payload = {
                 "text": summary,
                 "blocks": [
                     {"type": "section", "text": {"type": "mrkdwn", "text": f"*Comp-AI Alerts*\n{summary}"}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f"<{controls_url}|View controls>"}},
                 ],
             }
         else:
             payload = {
                 "text": "Comp-AI: No gaps, no failed tests.",
-                "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "Comp-AI: No gaps, no failed tests."}}],
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "Comp-AI: No gaps, no failed tests."}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f"<{controls_url}|View controls>"}},
+                ],
             }
         try:
             r = requests.post(webhook, json=payload, timeout=10)
