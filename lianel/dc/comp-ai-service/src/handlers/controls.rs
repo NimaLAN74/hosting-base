@@ -17,7 +17,7 @@ use crate::models::{
     GapAnalysisRequest, GapAnalysisResponse, EvidenceAnalyzeResponse, EvidenceReviewResponse,
     ScanDocumentsRequest, ScanDocumentsResponse,
     ControlPolicyMappingResponse, ControlPolicyMappingEntry, PolicyRef, SystemDescriptionResponse,
-    PatchControlRequest,
+    PatchControlRequest, OktaEvidenceRequest, AwsEvidenceRequest,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
@@ -28,6 +28,10 @@ use crate::db::queries::{
 use crate::inference;
 use crate::utils::{format_eu_date, parse_eu_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
+use crate::integrations::okta::{
+    fetch_okta_org_summary, fetch_okta_users_snapshot, fetch_okta_groups_snapshot,
+};
+use crate::integrations::aws::fetch_aws_iam_summary;
 use chrono::Utc;
 use axum_extra::extract::Multipart;
 use uuid::Uuid;
@@ -1667,6 +1671,178 @@ pub async fn post_github_evidence(
             control_id: body.control_id,
             collected_at: Utc::now(),
         }),
+    ))
+}
+
+/// G3: Collect evidence from Okta IdP and link to control.
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/okta/evidence",
+    tag = "controls",
+    request_body = OktaEvidenceRequest,
+    responses(
+        (status = 201, description = "Evidence collected from Okta and linked to control", body = CreateEvidenceResponse),
+        (status = 400, description = "Invalid request or evidence_type"),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "Okta integration not configured or API error"),
+    )
+)]
+pub async fn post_okta_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<OktaEvidenceRequest>,
+) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let domain = config
+        .okta_domain
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "Okta integration not configured",
+                "detail": "Set OKTA_DOMAIN and OKTA_API_TOKEN to collect evidence from Okta"
+            })),
+        ))?;
+    let token = config
+        .okta_api_token
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "Okta integration not configured",
+                "detail": "Set OKTA_API_TOKEN"
+            })),
+        ))?;
+
+    let evidence_type_trim = body.evidence_type.trim().to_lowercase();
+    let evidence = match evidence_type_trim.as_str() {
+        "org_summary" => fetch_okta_org_summary(domain, token)
+            .await
+            .map_err(|e| {
+                tracing::error!("Okta org_summary failed: {}", e);
+                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Failed to fetch Okta org", "detail": e.to_string()})))
+            })?,
+        "users_snapshot" => fetch_okta_users_snapshot(domain, token)
+            .await
+            .map_err(|e| {
+                tracing::error!("Okta users_snapshot failed: {}", e);
+                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Failed to fetch Okta users", "detail": e.to_string()})))
+            })?,
+        "groups_snapshot" => fetch_okta_groups_snapshot(domain, token)
+            .await
+            .map_err(|e| {
+                tracing::error!("Okta groups_snapshot failed: {}", e);
+                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Failed to fetch Okta groups", "detail": e.to_string()})))
+            })?,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Invalid evidence_type",
+                    "detail": "Use 'org_summary', 'users_snapshot', or 'groups_snapshot'"
+                })),
+            );
+        }
+    };
+
+    let id = create_evidence(
+        pool,
+        body.control_id,
+        &evidence.evidence_type,
+        Some(&evidence.source),
+        Some(&evidence.description),
+        evidence.link_url.as_deref(),
+        Some(user.sub.as_str()),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("create_evidence (Okta) failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to save evidence"})))
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateEvidenceResponse { id, control_id: body.control_id, collected_at: Utc::now() }),
+    ))
+}
+
+/// G4: Collect evidence from AWS IAM and link to control.
+#[utoipa::path(
+    post,
+    path = "/api/v1/integrations/aws/evidence",
+    tag = "controls",
+    request_body = AwsEvidenceRequest,
+    responses(
+        (status = 201, description = "Evidence collected from AWS IAM and linked to control", body = CreateEvidenceResponse),
+        (status = 400, description = "Invalid request or evidence_type"),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "AWS integration not configured or API error"),
+    )
+)]
+pub async fn post_aws_evidence(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<AwsEvidenceRequest>,
+) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let evidence_type_trim = body.evidence_type.trim().to_lowercase();
+    let evidence = match evidence_type_trim.as_str() {
+        "iam_summary" => fetch_aws_iam_summary(config.aws_region.as_deref())
+            .await
+            .map_err(|e| {
+                tracing::error!("AWS iam_summary failed: {}", e);
+                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                    "error": "Failed to fetch AWS IAM summary",
+                    "detail": e.to_string()
+                })))
+            })?,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Invalid evidence_type",
+                    "detail": "Use 'iam_summary'"
+                })),
+            );
+        }
+    };
+
+    let id = create_evidence(
+        pool,
+        body.control_id,
+        &evidence.evidence_type,
+        Some(&evidence.source),
+        Some(&evidence.description),
+        evidence.link_url.as_deref(),
+        Some(user.sub.as_str()),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("create_evidence (AWS) failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to save evidence"})))
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateEvidenceResponse { id, control_id: body.control_id, collected_at: Utc::now() }),
     ))
 }
 

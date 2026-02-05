@@ -98,7 +98,7 @@ export const compAiApi = {
     return res.json();
   },
 
-  /** G8: Update control external_id (e.g. Vanta Control Set alignment). body: { external_id: string | null } */
+  /** G8: Update control external_id (align with external control sets / frameworks). body: { external_id: string | null } */
   async patchControl(id, body) {
     const res = await authenticatedFetch(`/api/v1/controls/${id}`, {
       method: 'PATCH',
@@ -270,6 +270,34 @@ export const compAiApi = {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || data.detail || 'Failed to collect GitHub evidence');
+    }
+    return res.json();
+  },
+
+  /** G3: Collect evidence from Okta IdP. body: { control_id, evidence_type } */
+  async postOktaEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/okta/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect Okta evidence');
+    }
+    return res.json();
+  },
+
+  /** G4: Collect evidence from AWS IAM. body: { control_id, evidence_type } */
+  async postAwsEvidence(body) {
+    const res = await authenticatedFetch('/api/v1/integrations/aws/evidence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Failed to collect AWS evidence');
     }
     return res.json();
   },

@@ -11,7 +11,7 @@ pub struct Control {
     pub name: String,
     pub description: Option<String>,
     pub category: Option<String>,
-    /// G8: External control ID (e.g. Vanta Control Set) for alignment.
+    /// G8: External control ID for alignment with external control sets / frameworks.
     pub external_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -41,7 +41,7 @@ pub struct ControlWithRequirements {
     pub name: String,
     pub description: Option<String>,
     pub category: Option<String>,
-    /// G8: External control ID (e.g. Vanta Control Set).
+    /// G8: External control ID (e.g. from a framework or control set).
     pub external_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub requirements: Vec<RequirementRef>,
@@ -52,7 +52,7 @@ pub struct RequirementRef {
     pub code: String,
     pub title: Option<String>,
     pub framework_slug: String,
-    /// G8: External requirement ID (e.g. Vanta Control Set).
+    /// G8: External requirement ID (e.g. from a framework or control set).
     pub external_id: Option<String>,
 }
 
@@ -135,6 +135,22 @@ pub struct GitHubEvidenceRequest {
     pub owner: String,
     pub repo: String,
     /// "last_commit" or "branch_protection"
+    pub evidence_type: String,
+}
+
+/// G3: Request to collect evidence from Okta IdP.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OktaEvidenceRequest {
+    pub control_id: i64,
+    /// "org_summary" | "users_snapshot" | "groups_snapshot"
+    pub evidence_type: String,
+}
+
+/// G4: Request to collect evidence from AWS IAM.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AwsEvidenceRequest {
+    pub control_id: i64,
+    /// "iam_summary" (only option for now)
     pub evidence_type: String,
 }
 
@@ -264,7 +280,7 @@ pub struct ControlPolicyMappingEntry {
     pub policies: Vec<PolicyRef>,
 }
 
-/// G8: Update control external_id (Vanta alignment).
+/// G8: Update control external_id (align with external control sets).
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PatchControlRequest {
     pub external_id: Option<String>,

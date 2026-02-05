@@ -36,6 +36,16 @@ pub struct AppConfig {
     pub comp_ai_response_cache_max_entries: u64,
     /// Optional GitHub token for integrations (evidence collection).
     pub github_token: Option<String>,
+    /// G3: Okta IdP integration. Domain (e.g. dev-12345.okta.com).
+    pub okta_domain: Option<String>,
+    /// G3: Okta API token (admin). Required for Okta evidence collection.
+    pub okta_api_token: Option<String>,
+    /// G4: AWS region for IAM evidence (e.g. us-east-1).
+    pub aws_region: Option<String>,
+    /// G4: AWS access key for IAM (optional if using instance role / env default).
+    pub aws_access_key_id: Option<String>,
+    /// G4: AWS secret key for IAM (optional if using instance role / env default).
+    pub aws_secret_access_key: Option<String>,
     /// Base directory for uploaded evidence files (Phase B). If unset, upload is disabled.
     pub comp_ai_evidence_storage_path: Option<String>,
     /// Max upload size in bytes (default 10 MB).
@@ -117,6 +127,11 @@ impl AppConfig {
                 .parse()
                 .unwrap_or(1000),
             github_token: env::var("GITHUB_TOKEN").ok(),
+            okta_domain: env::var("OKTA_DOMAIN").ok(),
+            okta_api_token: env::var("OKTA_API_TOKEN").ok(),
+            aws_region: env::var("AWS_REGION").ok(),
+            aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").ok(),
+            aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").ok(),
             comp_ai_evidence_storage_path: env::var("COMP_AI_EVIDENCE_STORAGE_PATH").ok(),
             comp_ai_evidence_max_file_bytes: env::var("COMP_AI_EVIDENCE_MAX_FILE_BYTES")
                 .unwrap_or_else(|_| "10485760".to_string()) // 10 MiB

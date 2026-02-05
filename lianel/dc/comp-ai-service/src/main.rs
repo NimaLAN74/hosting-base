@@ -31,7 +31,7 @@ use handlers::controls::{
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
     post_remediation_suggest, post_analysis_gaps,
     get_control_tests, get_tests, post_test_result,
-    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review, post_github_evidence,
+    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review,     post_github_evidence, post_okta_evidence, post_aws_evidence,
     post_scan_documents, post_scan_upload_batch,
     get_control_policy_mapping, get_system_description,
 };
@@ -67,6 +67,8 @@ use sqlx::PgPool;
         handlers::controls::post_evidence_analyze,
         handlers::controls::post_control_evidence_review,
         handlers::controls::post_github_evidence,
+        handlers::controls::post_okta_evidence,
+        handlers::controls::post_aws_evidence,
         handlers::controls::post_scan_documents,
         handlers::controls::post_scan_upload_batch,
         handlers::controls::get_control_policy_mapping,
@@ -89,6 +91,8 @@ use sqlx::PgPool;
         models::CreateEvidenceRequest,
         models::CreateEvidenceResponse,
         models::GitHubEvidenceRequest,
+        models::OktaEvidenceRequest,
+        models::AwsEvidenceRequest,
         models::ControlExportEntry,
         models::AuditExport,
         models::RemediationTask,
@@ -196,6 +200,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/evidence/:id/analyze", axum::routing::post(post_evidence_analyze))
         .route("/api/v1/controls/:id/evidence/review", axum::routing::post(post_control_evidence_review))
         .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
+        .route("/api/v1/integrations/okta/evidence", axum::routing::post(post_okta_evidence))
+        .route("/api/v1/integrations/aws/evidence", axum::routing::post(post_aws_evidence))
         .route("/api/v1/scan/documents", axum::routing::post(post_scan_documents))
         .route("/api/v1/scan/upload-batch", axum::routing::post(post_scan_upload_batch))
         .layer(rate_limit_layer)

@@ -32,6 +32,10 @@ function CompAIControls() {
   const [ghRepo, setGhRepo] = useState('');
   const [ghEvidenceType, setGhEvidenceType] = useState('last_commit');
   const [ghSubmitting, setGhSubmitting] = useState(false);
+  const [oktaEvidenceType, setOktaEvidenceType] = useState('org_summary');
+  const [oktaSubmitting, setOktaSubmitting] = useState(false);
+  const [awsEvidenceType, setAwsEvidenceType] = useState('iam_summary');
+  const [awsSubmitting, setAwsSubmitting] = useState(false);
 
   // Phase B: file upload
   const [uploadFile, setUploadFile] = useState(null);
@@ -398,6 +402,44 @@ function CompAIControls() {
     }
   };
 
+  const handleCollectOktaEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl) return;
+    setOktaSubmitting(true);
+    clearMessages();
+    try {
+      await compAiApi.postOktaEvidence({
+        control_id: selectedControl.id,
+        evidence_type: oktaEvidenceType,
+      });
+      setSuccess('Okta evidence collected and linked.');
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to collect Okta evidence');
+    } finally {
+      setOktaSubmitting(false);
+    }
+  };
+
+  const handleCollectAwsEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl) return;
+    setAwsSubmitting(true);
+    clearMessages();
+    try {
+      await compAiApi.postAwsEvidence({
+        control_id: selectedControl.id,
+        evidence_type: awsEvidenceType,
+      });
+      setSuccess('AWS evidence collected and linked.');
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Failed to collect AWS evidence');
+    } finally {
+      setAwsSubmitting(false);
+    }
+  };
+
   const handleScanUrls = async (e) => {
     e.preventDefault();
     if (!selectedControl || !scanUrls.trim()) return;
@@ -609,13 +651,13 @@ function CompAIControls() {
                     <p><strong>{controlDetail.internal_id}</strong> — {controlDetail.name}</p>
                     {controlDetail.description && <p className="comp-ai-control-desc">{controlDetail.description}</p>}
                     <div className="comp-ai-external-id">
-                      <label htmlFor="external-id">External ID (e.g. Vanta)</label>
+                      <label htmlFor="external-id">External ID</label>
                       <input
                         id="external-id"
                         type="text"
                         value={externalIdEdit}
                         onChange={(e) => setExternalIdEdit(e.target.value)}
-                        placeholder={controlDetail.external_id || 'e.g. vanta-control-id'}
+                        placeholder={controlDetail.external_id || 'e.g. SOC2-CC6.1 or framework control ID'}
                       />
                       <button
                         type="button"
@@ -996,6 +1038,44 @@ function CompAIControls() {
                   </button>
                 </form>
 
+                <form onSubmit={handleCollectOktaEvidence} className="comp-ai-evidence-form">
+                  <h3>Collect from Okta (IdP) — G3</h3>
+                  <p className="comp-ai-form-hint">Requires OKTA_DOMAIN and OKTA_API_TOKEN configured on the server.</p>
+                  <div className="form-group">
+                    <label htmlFor="okta-type">Evidence type</label>
+                    <select
+                      id="okta-type"
+                      value={oktaEvidenceType}
+                      onChange={(e) => setOktaEvidenceType(e.target.value)}
+                    >
+                      <option value="org_summary">Org summary</option>
+                      <option value="users_snapshot">Users snapshot</option>
+                      <option value="groups_snapshot">Groups snapshot</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={oktaSubmitting}>
+                    {oktaSubmitting ? 'Collecting...' : 'Collect Okta evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleCollectAwsEvidence} className="comp-ai-evidence-form">
+                  <h3>Collect from AWS (IAM) — G4</h3>
+                  <p className="comp-ai-form-hint">Requires AWS credentials (env or AWS_REGION). Uses default credential chain.</p>
+                  <div className="form-group">
+                    <label htmlFor="aws-type">Evidence type</label>
+                    <select
+                      id="aws-type"
+                      value={awsEvidenceType}
+                      onChange={(e) => setAwsEvidenceType(e.target.value)}
+                    >
+                      <option value="iam_summary">IAM account summary</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={awsSubmitting}>
+                    {awsSubmitting ? 'Collecting...' : 'Collect AWS evidence'}
+                  </button>
+                </form>
+
                 <div className="comp-ai-evidence-form">
                   <h3>Scan documents (Phase C)</h3>
                   <p className="comp-ai-form-hint">Batch add evidence: paste URLs (one per line) or upload multiple files. Select a control above first.</p>
@@ -1063,8 +1143,8 @@ function CompAIControls() {
           <div className="comp-ai-info-card">
             <h3>Controls & Evidence</h3>
             <p>
-              Select a control to view requirements and evidence. Add evidence manually or collect from GitHub
-              (last commit or branch protection). Use <strong>Download for audit</strong> to export a full
+              Select a control to view requirements and evidence. Add evidence manually or collect from GitHub,
+              Okta (IdP), or AWS (IAM). Use <strong>Download for audit</strong> to export a full
               JSON for auditors; use <strong>Show gaps</strong> to list controls with no evidence.
             </p>
           </div>
