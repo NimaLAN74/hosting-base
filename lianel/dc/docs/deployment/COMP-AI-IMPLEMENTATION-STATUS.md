@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
 **Date**: January 2026  
-**Status**: ✅ **Phases 1–5 Complete** · ✅ **Phase 6 Complete** · ✅ **Phase 7 + G7 Alerts Complete**
+**Status**: ✅ **Phases 1–7 Complete** · ✅ **G7 Alerts** · ✅ **Phase B (Upload + AI analysis) Complete**
 
 ---
 
@@ -204,4 +204,6 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 **Phase 7 (AI risk/remediation):** 7.1 (remediation suggest UI) and **7.2 (AI gap/risk analysis)** done: `POST /api/v1/analysis/gaps`, “Analyse my gaps” button in Controls view, summary card. **G7 Alerts:** DAG `comp_ai_alerts` runs daily at 07:00 UTC; logs gaps and failed tests; optional Slack via `SLACK_WEBHOOK_URL`.
 
-**Next Action**: Optional 7.3 (structured apply) or 7.4 (retaliation/whistleblower). Document/ops Phase A done; G1 Test runner and G7 Alerts via Airflow (COMP-AI-AIRFLOW-RUNNER-DESIGN.md). Set Airflow Variables `COMP_AI_BASE_URL`, `COMP_AI_TOKEN`; optional `SLACK_WEBHOOK_URL` for alerts. See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.
+**Phase B (Document upload + AI analysis):** Migration 019 (evidence file_path, file_name, content_type, extracted_text); config `COMP_AI_EVIDENCE_STORAGE_PATH`, `COMP_AI_EVIDENCE_MAX_FILE_BYTES`; `POST /api/v1/evidence/upload` (multipart), `POST /api/v1/evidence/:id/analyze` (Ollama); text extraction (PDF + txt via pdf-extract); UI: “Upload file” form and “Analyse” button per evidence with extracted text.
+
+**Next Action**: Deploy Phase B (run migration 019, set `COMP_AI_EVIDENCE_STORAGE_PATH` on server). Then optional: Phase C (scan/documents), 7.3 (structured apply), or 7.4 (retaliation/whistleblower). See STRATEGY-COMP-AI-VANTA-ROADMAP.md and COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.

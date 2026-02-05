@@ -26,6 +26,9 @@ use crate::inference;
 use crate::utils::{format_eu_date, parse_eu_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use chrono::Utc;
+use axum_extra::extract::Multipart;
+use std::path::Path;
+use uuid::Uuid;
 use crate::handlers::comp_ai::ResponseCache;
 
 type AppState = (Arc<AppConfig>, PgPool, ResponseCache);
@@ -961,6 +964,10 @@ pub async fn post_evidence(
         body.description.as_deref(),
         body.link_url.as_deref(),
         Some(user.sub.as_str()),
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .map_err(|e| {
@@ -979,6 +986,260 @@ pub async fn post_evidence(
             collected_at: Utc::now(),
         }),
     ))
+}
+
+/// Extract plain text from file bytes for AI analysis (Phase B). Supports txt and PDF.
+fn extract_text_from_file(content_type: &str, bytes: &[u8]) -> Option<String> {
+    let ct = content_type.to_lowercase();
+    let ct = ct.split(';').next().unwrap_or(&ct).trim();
+    if ct == "text/plain" || ct.ends_with("text") {
+        return std::str::from_utf8(bytes).ok().map(String::from);
+    }
+    if ct == "application/pdf" {
+        return pdf_extract::extract_from_bytes(bytes).ok().filter(|s| !s.is_empty());
+    }
+    // Fallback: try utf-8
+    std::str::from_utf8(bytes).ok().map(String::from)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/evidence/upload",
+    tag = "controls",
+    responses(
+        (status = 201, description = "Evidence created from upload", body = CreateEvidenceResponse),
+        (status = 400, description = "Invalid request or COMP_AI_EVIDENCE_STORAGE_PATH not set"),
+        (status = 401, description = "Unauthorized"),
+        (status = 413, description = "File too large"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_evidence_upload(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<CreateEvidenceResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let storage_path = match &config.comp_ai_evidence_storage_path {
+        Some(p) => p.clone(),
+        None => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Upload not configured: set COMP_AI_EVIDENCE_STORAGE_PATH"})),
+            ));
+        }
+    };
+    let max_bytes = config.comp_ai_evidence_max_file_bytes;
+
+    let mut control_id: Option<i64> = None;
+    let mut evidence_type: Option<String> = None;
+    let mut file_name: Option<String> = None;
+    let mut content_type: Option<String> = None;
+    let mut file_bytes: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        tracing::warn!("multipart next_field: {}", e);
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid multipart"})))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "control_id" {
+            if let Ok(data) = field.bytes().await {
+                if let Ok(s) = std::str::from_utf8(&data) {
+                    control_id = s.trim().parse().ok();
+                }
+            }
+        } else if name == "type" {
+            if let Ok(data) = field.bytes().await {
+                evidence_type = std::str::from_utf8(&data).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+            }
+        } else if name == "file" {
+            file_name = field.file_name().map(String::from);
+            content_type = field.content_type().map(|c| c.to_string());
+            if let Ok(data) = field.bytes().await {
+                if data.len() as u64 > max_bytes {
+                    return Err((
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Json(serde_json::json!({"error": "File too large", "max_bytes": max_bytes})),
+                    ));
+                }
+                file_bytes = Some(data.to_vec());
+            }
+        }
+    }
+
+    let control_id = control_id.ok_or((
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": "control_id required"})),
+    ))?;
+    let evidence_type = evidence_type.unwrap_or_else(|| "document".to_string());
+    let (file_bytes, file_name, content_type) = match file_bytes {
+        Some(b) => (b, file_name.unwrap_or_else(|| "upload".to_string()), content_type.unwrap_or_else(|| "application/octet-stream".to_string())),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "file field required"})),
+            ));
+        }
+    };
+
+    let allowed = ["application/pdf", "text/plain", "text/csv", "application/octet-stream"];
+    let ct_lower = content_type.to_lowercase();
+    let ct_base = ct_lower.split(';').next().unwrap_or(&ct_lower).trim();
+    if !allowed.contains(&ct_base) && !ct_base.ends_with("text") {
+        tracing::info!("Upload content-type {} not in allowed list; storing anyway", ct_base);
+    }
+
+    let extracted_text = extract_text_from_file(&content_type, &file_bytes);
+    let safe_name: String = file_name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
+    let rel_path = format!("{}_{}", Uuid::new_v4().simple(), safe_name);
+    let _ = std::fs::create_dir_all(&storage_path);
+    let full_path = Path::new(&storage_path).join(&rel_path);
+    if std::fs::write(&full_path, &file_bytes).is_err() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to save file"})),
+        ));
+    }
+
+    let id = create_evidence(
+        pool,
+        control_id,
+        &evidence_type,
+        Some(&file_name),
+        None,
+        None,
+        Some(user.sub.as_str()),
+        Some(&rel_path),
+        Some(&file_name),
+        Some(&content_type),
+        extracted_text.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("create_evidence (upload) failed: {}", e);
+        let _ = std::fs::remove_file(&full_path);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create evidence"})),
+        )
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateEvidenceResponse {
+            id,
+            control_id,
+            collected_at: Utc::now(),
+        }),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/evidence/{id}/analyze",
+    tag = "controls",
+    params(("id" = i64, Path, description = "Evidence ID")),
+    responses(
+        (status = 200, description = "AI analysis summary", body = EvidenceAnalyzeResponse),
+        (status = 400, description = "No extracted text for this evidence"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Evidence not found"),
+        (status = 503, description = "Ollama not available")
+    )
+)]
+pub async fn post_evidence_analyze(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<EvidenceAnalyzeResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let evidence = get_evidence_by_id(pool, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_evidence_by_id failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load evidence"})))
+        })?
+        .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Evidence not found"}))))?;
+
+    let text = evidence.extracted_text.as_deref().filter(|s| !s.trim().is_empty()).ok_or((
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": "No extracted text for this evidence; upload a document with text (PDF or plain text) first"})),
+    ))?;
+
+    let controls = list_controls(pool, None, 500, 0).await.map_err(|e| {
+        tracing::error!("list_controls failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to load controls"})))
+    })?;
+    let control_summary: String = controls
+        .iter()
+        .take(50)
+        .map(|c| format!("- id={} {} ({})", c.id, c.name, c.internal_id))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prompt_prefix = format!(
+        "You are a compliance analyst. Below is extracted text from a document (evidence). \
+         Suggest which controls (from the list) this evidence might support, and any gaps.\n\n\
+         Controls:\n{}\n\nDocument text (excerpt):",
+        control_summary
+    );
+    let excerpt: String = text.chars().take(8000).collect();
+    let user_prompt = format!("Summarise: (1) which controls this evidence supports and why; (2) any gaps or missing evidence to note. Document excerpt:\n\n{}", excerpt);
+
+    let (base_url, model) = match (config.comp_ai_ollama_url.as_deref(), config.comp_ai_ollama_model.as_deref()) {
+        (Some(u), Some(m)) => (u, m),
+        _ => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Ollama not configured; set COMP_AI_OLLAMA_URL and COMP_AI_OLLAMA_MODEL"})),
+            ));
+        }
+    };
+
+    let result = inference::generate(
+        base_url,
+        model,
+        &user_prompt,
+        config.comp_ai_max_tokens,
+        config.comp_ai_temperature,
+        Some(&prompt_prefix),
+    )
+    .await;
+
+    let (summary, model_used) = match result {
+        Ok((s, _)) => (s, model.to_string()),
+        Err(e) => {
+            tracing::error!("Ollama generate failed: {}", e);
+            if config.comp_ai_ollama_fallback_to_mock {
+                let mock = format!("[Mock] This document could support controls related to its content. Review controls list and map manually. Error: {}", e);
+                return Ok(Json(EvidenceAnalyzeResponse {
+                    summary: mock,
+                    suggested_control_ids: None,
+                    gaps: None,
+                    model_used: "mock".to_string(),
+                }));
+            }
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "AI analysis failed", "detail": e.to_string()})),
+            ));
+        }
+    };
+
+    Ok(Json(EvidenceAnalyzeResponse {
+        summary,
+        suggested_control_ids: None,
+        gaps: None,
+        model_used,
+    }))
 }
 
 #[utoipa::path(
@@ -1060,6 +1321,10 @@ pub async fn post_github_evidence(
         Some(&evidence.description),
         evidence.link_url.as_deref(),
         Some(user.sub.as_str()),
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .map_err(|e| {

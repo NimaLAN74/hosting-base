@@ -135,7 +135,7 @@ Suggested ordering **if you want balance**:
 | 1 | Phase A – Document evidence | ✅ Done |
 | 2 | **G1 Test runner (Airflow)** | ✅ Done — Airflow DAG `comp_ai_control_tests` runs tests and records results; see COMP-AI-AIRFLOW-RUNNER-DESIGN.md |
 | 3 | **G7 Alerts** | ✅ Done — DAG `comp_ai_alerts`; log + optional Slack (SLACK_WEBHOOK_URL) |
-| 4 | *(e.g. Phase B – Upload + AI analysis)* | Not started |
+| 4 | **Phase B – Upload + AI analysis** | Done — upload API, text extraction (PDF/txt), analyse API, UI upload + Analyse button |
 | … | | |
 
 **Runner:** All scheduled/automated Comp-AI jobs use **Airflow** as runner. Event-based sync is the fallback if coordination between Comp-AI and Airflow becomes a problem (see COMP-AI-AIRFLOW-RUNNER-DESIGN.md).

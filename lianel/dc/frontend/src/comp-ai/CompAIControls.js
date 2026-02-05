@@ -33,6 +33,15 @@ function CompAIControls() {
   const [ghEvidenceType, setGhEvidenceType] = useState('last_commit');
   const [ghSubmitting, setGhSubmitting] = useState(false);
 
+  // Phase B: file upload
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadType, setUploadType] = useState('document');
+  const [uploadSubmitting, setUploadSubmitting] = useState(false);
+  // Phase B: document analyse
+  const [analyzeResult, setAnalyzeResult] = useState(null);
+  const [analyzeLoadingId, setAnalyzeLoadingId] = useState(null);
+  const [analyzeError, setAnalyzeError] = useState(null);
+
   // Remediation (Phase 5)
   const [remediationTask, setRemediationTask] = useState(null);
   const [remediationLoading, setRemediationLoading] = useState(false);
@@ -326,6 +335,39 @@ function CompAIControls() {
     }
   };
 
+  const handleUploadEvidence = async (e) => {
+    e.preventDefault();
+    if (!selectedControl || !uploadFile) return;
+    setUploadSubmitting(true);
+    setAnalyzeError(null);
+    setAnalyzeResult(null);
+    clearMessages();
+    try {
+      await compAiApi.postEvidenceUpload(selectedControl.id, uploadType, uploadFile);
+      setSuccess('File uploaded and linked as evidence.');
+      setUploadFile(null);
+      loadEvidence(selectedControl.id);
+    } catch (err) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploadSubmitting(false);
+    }
+  };
+
+  const handleAnalyzeEvidence = async (ev) => {
+    setAnalyzeLoadingId(ev.id);
+    setAnalyzeError(null);
+    setAnalyzeResult(null);
+    try {
+      const data = await compAiApi.postEvidenceAnalyze(ev.id);
+      setAnalyzeResult({ evidenceId: ev.id, ...data });
+    } catch (err) {
+      setAnalyzeError(err.message || 'Analysis failed');
+    } finally {
+      setAnalyzeLoadingId(null);
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return formatDateTimeEU(dateString);
@@ -578,6 +620,7 @@ function CompAIControls() {
                       <li key={ev.id} className="comp-ai-evidence-item">
                         <span className="comp-ai-evidence-type">{ev.type}</span>
                         {ev.source && <span> — {ev.source}</span>}
+                        {ev.file_name && <span> ({ev.file_name})</span>}
                         {ev.description && <p className="comp-ai-evidence-desc">{ev.description}</p>}
                         {ev.link_url && (
                           <a href={ev.link_url} target="_blank" rel="noopener noreferrer" className="comp-ai-evidence-link">
@@ -585,9 +628,31 @@ function CompAIControls() {
                           </a>
                         )}
                         <span className="comp-ai-evidence-date">{formatDate(ev.collected_at)}</span>
+                        {(ev.extracted_text || ev.file_name) && (
+                          <button
+                            type="button"
+                            className="comp-ai-secondary-btn comp-ai-analyze-btn"
+                            onClick={() => handleAnalyzeEvidence(ev)}
+                            disabled={analyzeLoadingId === ev.id}
+                          >
+                            {analyzeLoadingId === ev.id ? 'Analysing...' : 'Analyse'}
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
+                )}
+                {analyzeError && (
+                  <div className="comp-ai-error" role="alert">{analyzeError}</div>
+                )}
+                {analyzeResult && (
+                  <div className="comp-ai-analyze-result comp-ai-info-card">
+                    <h4>Document analysis</h4>
+                    <p className="comp-ai-analyze-summary">{analyzeResult.summary}</p>
+                    {analyzeResult.model_used && (
+                      <p className="comp-ai-analyze-model">Model: {analyzeResult.model_used}</p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -658,6 +723,36 @@ function CompAIControls() {
                   </div>
                   <button type="submit" className="comp-ai-submit-btn" disabled={manualSubmitting}>
                     {manualSubmitting ? 'Adding...' : 'Add evidence'}
+                  </button>
+                </form>
+
+                <form onSubmit={handleUploadEvidence} className="comp-ai-evidence-form">
+                  <h3>Upload file (Phase B)</h3>
+                  <p className="comp-ai-form-hint">PDF or text file. Text is extracted for AI analysis. Requires COMP_AI_EVIDENCE_STORAGE_PATH on server.</p>
+                  <div className="form-group">
+                    <label htmlFor="upload-type">Type</label>
+                    <select
+                      id="upload-type"
+                      value={uploadType}
+                      onChange={(e) => setUploadType(e.target.value)}
+                    >
+                      <option value="document">Document</option>
+                      <option value="policy">Policy</option>
+                      <option value="spreadsheet">Spreadsheet</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="upload-file">File *</label>
+                    <input
+                      id="upload-file"
+                      type="file"
+                      accept=".pdf,.txt,.csv"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="comp-ai-submit-btn" disabled={uploadSubmitting || !uploadFile}>
+                    {uploadSubmitting ? 'Uploading...' : 'Upload file'}
                   </button>
                 </form>
 

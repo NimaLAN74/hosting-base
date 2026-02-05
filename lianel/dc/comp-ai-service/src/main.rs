@@ -31,7 +31,7 @@ use handlers::controls::{
     get_requirements, get_remediation, get_control_remediation, put_control_remediation,
     post_remediation_suggest, post_analysis_gaps,
     get_control_tests, get_tests, post_test_result,
-    get_evidence, post_evidence, post_github_evidence,
+    get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_github_evidence,
 };
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
@@ -60,6 +60,8 @@ use sqlx::PgPool;
         handlers::controls::post_test_result,
         handlers::controls::get_evidence,
         handlers::controls::post_evidence,
+        handlers::controls::post_evidence_upload,
+        handlers::controls::post_evidence_analyze,
         handlers::controls::post_github_evidence,
     ),
     components(schemas(
@@ -87,6 +89,7 @@ use sqlx::PgPool;
         models::RemediationSuggestResponse,
         models::GapAnalysisRequest,
         models::GapAnalysisResponse,
+        models::EvidenceAnalyzeResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -170,6 +173,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/controls/:id", get(get_control))
         .route("/api/v1/remediation", get(get_remediation))
         .route("/api/v1/evidence", get(get_evidence).post(post_evidence))
+        .route("/api/v1/evidence/upload", axum::routing::post(post_evidence_upload))
+        .route("/api/v1/evidence/:id/analyze", axum::routing::post(post_evidence_analyze))
         .route("/api/v1/integrations/github/evidence", axum::routing::post(post_github_evidence))
         .layer(rate_limit_layer)
         .with_state((config.clone(), pool, response_cache));

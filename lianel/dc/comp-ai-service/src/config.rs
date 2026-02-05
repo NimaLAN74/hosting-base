@@ -36,6 +36,10 @@ pub struct AppConfig {
     pub comp_ai_response_cache_max_entries: u64,
     /// Optional GitHub token for integrations (evidence collection).
     pub github_token: Option<String>,
+    /// Base directory for uploaded evidence files (Phase B). If unset, upload is disabled.
+    pub comp_ai_evidence_storage_path: Option<String>,
+    /// Max upload size in bytes (default 10 MB).
+    pub comp_ai_evidence_max_file_bytes: u64,
 }
 
 impl AppConfig {
@@ -113,6 +117,11 @@ impl AppConfig {
                 .parse()
                 .unwrap_or(1000),
             github_token: env::var("GITHUB_TOKEN").ok(),
+            comp_ai_evidence_storage_path: env::var("COMP_AI_EVIDENCE_STORAGE_PATH").ok(),
+            comp_ai_evidence_max_file_bytes: env::var("COMP_AI_EVIDENCE_MAX_FILE_BYTES")
+                .unwrap_or_else(|_| "10485760".to_string()) // 10 MiB
+                .parse()
+                .unwrap_or(10 * 1024 * 1024),
         })
     }
 }

@@ -247,7 +247,8 @@ pub async fn list_evidence(
     let rows = if let Some(cid) = control_id {
         sqlx::query(
             r#"
-            SELECT id, control_id, type, source, description, link_url, collected_at, created_by
+            SELECT id, control_id, type, source, description, link_url, collected_at, created_by,
+                   file_path, file_name, content_type, extracted_text
             FROM comp_ai.evidence
             WHERE control_id = $1
             ORDER BY collected_at DESC
@@ -260,7 +261,8 @@ pub async fn list_evidence(
     } else {
         sqlx::query(
             r#"
-            SELECT id, control_id, type, source, description, link_url, collected_at, created_by
+            SELECT id, control_id, type, source, description, link_url, collected_at, created_by,
+                   file_path, file_name, content_type, extracted_text
             FROM comp_ai.evidence
             ORDER BY collected_at DESC
             LIMIT $1 OFFSET $2
@@ -284,9 +286,47 @@ pub async fn list_evidence(
             link_url: row.get("link_url"),
             collected_at: row_naive_to_utc(collected_at_naive),
             created_by: row.get("created_by"),
+            file_path: row.get("file_path"),
+            file_name: row.get("file_name"),
+            content_type: row.get("content_type"),
+            extracted_text: row.get("extracted_text"),
         });
     }
     Ok(out)
+}
+
+/// Get a single evidence by id (for analyse).
+pub async fn get_evidence_by_id(pool: &PgPool, id: i64) -> Result<Option<EvidenceItem>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, control_id, type, source, description, link_url, collected_at, created_by,
+               file_path, file_name, content_type, extracted_text
+        FROM comp_ai.evidence
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let collected_at_naive: NaiveDateTime = row.get("collected_at");
+    Ok(Some(EvidenceItem {
+        id: row.get("id"),
+        control_id: row.get("control_id"),
+        r#type: row.get("type"),
+        source: row.get("source"),
+        description: row.get("description"),
+        link_url: row.get("link_url"),
+        collected_at: row_naive_to_utc(collected_at_naive),
+        created_by: row.get("created_by"),
+        file_path: row.get("file_path"),
+        file_name: row.get("file_name"),
+        content_type: row.get("content_type"),
+        extracted_text: row.get("extracted_text"),
+    }))
 }
 
 /// Controls that have no evidence (Phase 5 gaps).
@@ -471,7 +511,7 @@ pub async fn upsert_remediation(
     })
 }
 
-/// Create an evidence record and link to control
+/// Create an evidence record and link to control (Phase B: optional file_path, file_name, content_type, extracted_text).
 pub async fn create_evidence(
     pool: &PgPool,
     control_id: i64,
@@ -480,11 +520,15 @@ pub async fn create_evidence(
     description: Option<&str>,
     link_url: Option<&str>,
     created_by: Option<&str>,
+    file_path: Option<&str>,
+    file_name: Option<&str>,
+    content_type: Option<&str>,
+    extracted_text: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
     let row = sqlx::query(
         r#"
-        INSERT INTO comp_ai.evidence (control_id, type, source, description, link_url, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO comp_ai.evidence (control_id, type, source, description, link_url, created_by, file_path, file_name, content_type, extracted_text)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, collected_at
         "#,
     )
@@ -494,6 +538,10 @@ pub async fn create_evidence(
     .bind(description)
     .bind(link_url)
     .bind(created_by)
+    .bind(file_path)
+    .bind(file_name)
+    .bind(content_type)
+    .bind(extracted_text)
     .fetch_one(pool)
     .await?;
 

@@ -195,6 +195,33 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** Phase B: upload file (PDF or text). Multipart: control_id, type, file. */
+  async postEvidenceUpload(controlId, type, file) {
+    const form = new FormData();
+    form.append('control_id', String(controlId));
+    form.append('type', type);
+    form.append('file', file);
+    const res = await authenticatedFetch('/api/v1/evidence/upload', {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Upload failed');
+    }
+    return res.json();
+  },
+
+  /** Phase B: AI analyse document (evidence must have extracted text). */
+  async postEvidenceAnalyze(evidenceId) {
+    const res = await authenticatedFetch(`/api/v1/evidence/${evidenceId}/analyze`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Analysis failed');
+    }
+    return res.json();
+  },
+
   async postGitHubEvidence(body) {
     const res = await authenticatedFetch('/api/v1/integrations/github/evidence', {
       method: 'POST',

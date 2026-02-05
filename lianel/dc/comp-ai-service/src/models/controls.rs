@@ -70,6 +70,12 @@ pub struct EvidenceItem {
     pub link_url: Option<String>,
     pub collected_at: DateTime<Utc>,
     pub created_by: Option<String>,
+    /// Phase B: path under evidence storage (uploaded file).
+    pub file_path: Option<String>,
+    pub file_name: Option<String>,
+    pub content_type: Option<String>,
+    /// Extracted text for AI analysis (set after upload or analyse).
+    pub extracted_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -181,5 +187,14 @@ pub struct GapAnalysisRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GapAnalysisResponse {
     pub summary: String,
+    pub model_used: String,
+}
+
+/// Response for document analyse (Phase B).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EvidenceAnalyzeResponse {
+    pub summary: String,
+    pub suggested_control_ids: Option<Vec<i64>>,
+    pub gaps: Option<Vec<String>>,
     pub model_used: String,
 }
