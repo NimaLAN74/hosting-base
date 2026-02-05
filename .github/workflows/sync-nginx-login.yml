@@ -130,7 +130,18 @@ jobs:
 
       - name: Verify theme CSS (200 + text/css) – fail job if wrong
         run: |
-          bash lianel/dc/scripts/monitoring/verify-keycloak-www-resources.sh || { echo "❌ Theme CSS not 200/text/css; deploy or config is wrong"; exit 1; }
+          echo "Waiting 15s for Keycloak to be ready..."
+          sleep 15
+          for attempt in 1 2 3; do
+            echo "Theme CSS verification attempt $attempt..."
+            if bash lianel/dc/scripts/monitoring/verify-keycloak-www-resources.sh; then
+              echo "✅ Theme CSS OK"
+              exit 0
+            fi
+            [ $attempt -lt 3 ] && echo "Retry in 20s..." && sleep 20
+          done
+          echo "❌ Theme CSS not 200/text/css after 3 attempts; deploy or config may be wrong"
+          exit 1
 
       - name: Verify /auth/ goes to Keycloak
         env:
