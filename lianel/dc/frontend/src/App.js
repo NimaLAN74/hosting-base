@@ -13,6 +13,8 @@ import CompAI from './comp-ai/CompAI';
 import CompAIHistory from './comp-ai/CompAIHistory';
 import CompAIMonitoring from './comp-ai/CompAIMonitoring';
 import CompAIControls from './comp-ai/CompAIControls';
+import CompAIAuditDocs from './comp-ai/CompAIAuditDocs';
+import CompAIScanDocuments from './comp-ai/CompAIScanDocuments';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -49,6 +51,8 @@ function App() {
             <Route path="/comp-ai/controls" element={<CompAIControls />} />
             <Route path="/comp-ai/history" element={<CompAIHistory />} />
             <Route path="/comp-ai/monitoring" element={<CompAIMonitoring />} />
+            <Route path="/comp-ai/audit-docs" element={<CompAIAuditDocs />} />
+            <Route path="/comp-ai/scan" element={<CompAIScanDocuments />} />
             <Route
               path="/admin/users"
               element={

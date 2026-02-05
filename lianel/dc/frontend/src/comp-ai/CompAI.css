@@ -682,8 +682,15 @@
   margin-bottom: 12px;
 }
 
+.comp-ai-suggestion-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .comp-ai-use-suggestion-btn {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .comp-ai-evidence-desc {
@@ -702,6 +709,28 @@
   margin-top: 6px;
   font-size: 12px;
   color: #888;
+}
+
+.comp-ai-analyze-btn {
+  margin-left: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.comp-ai-analyze-result {
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.comp-ai-analyze-summary {
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.comp-ai-analyze-model {
+  font-size: 12px;
+  color: #888;
+  margin: 0;
 }
 
 .comp-ai-forms {
@@ -790,6 +819,131 @@
 
 .comp-ai-info-card a:hover {
   text-decoration: underline;
+}
+
+/* G6 Audit docs (System Description + policy mapping) */
+.comp-ai-audit-docs-container {
+  grid-template-columns: 1fr 280px;
+}
+
+.comp-ai-audit-docs-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.comp-ai-audit-docs-section h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.25rem;
+  color: #333;
+}
+
+.comp-ai-audit-docs-fill-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.comp-ai-audit-docs-fill-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.comp-ai-audit-docs-fill-form label span {
+  font-size: 12px;
+  color: #555;
+}
+
+.comp-ai-audit-docs-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.comp-ai-audit-docs-template {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 16px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.comp-ai-audit-docs-mapping-table-wrap {
+  overflow-x: auto;
+}
+
+.comp-ai-audit-docs-mapping-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.comp-ai-audit-docs-mapping-table th,
+.comp-ai-audit-docs-mapping-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.comp-ai-audit-docs-mapping-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #444;
+}
+
+.comp-ai-audit-docs-policy-list {
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.comp-ai-audit-docs-policy-list li {
+  margin: 4px 0;
+}
+
+/* Phase C4 Scan documents page */
+.comp-ai-scan-container {
+  grid-template-columns: 1fr 280px;
+}
+
+.comp-ai-scan-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.comp-ai-scan-section h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.25rem;
+  color: #333;
+}
+
+.comp-ai-scan-control-select {
+  min-width: 320px;
+  margin-top: 4px;
+}
+
+.comp-ai-scan-result {
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.comp-ai-scan-result a {
+  color: #667eea;
+}
+
+.comp-ai-file-input {
+  display: block;
+  margin-top: 4px;
 }
 
 /* Responsive Design */

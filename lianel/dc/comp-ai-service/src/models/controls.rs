@@ -286,6 +286,26 @@ pub struct PatchControlRequest {
     pub external_id: Option<String>,
 }
 
+/// G8: One item for bulk external_id update (by internal_id).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BulkExternalIdItem {
+    pub internal_id: String,
+    pub external_id: Option<String>,
+}
+
+/// G8: Bulk set external_id on controls (align with Vanta or other control sets).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BulkExternalIdRequest {
+    pub updates: Vec<BulkExternalIdItem>,
+}
+
+/// G8: Result of bulk external_id update.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BulkExternalIdResponse {
+    pub updated: u32,
+    pub not_found: Vec<String>,
+}
+
 /// Control–policy mapping response (G6).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ControlPolicyMappingResponse {

@@ -34,6 +34,7 @@ use handlers::controls::{
     get_evidence, post_evidence, post_evidence_upload, post_evidence_analyze, post_control_evidence_review,     post_github_evidence, post_okta_evidence, post_aws_evidence,
     post_scan_documents, post_scan_upload_batch,
     get_control_policy_mapping, get_system_description,
+    post_bulk_external_id,
 };
 use db::create_pool;
 use rate_limit::{RateLimitLayer, RateLimitState};
@@ -50,6 +51,7 @@ use sqlx::PgPool;
         handlers::controls::get_controls,
         handlers::controls::get_control,
         handlers::controls::patch_control,
+        handlers::controls::post_bulk_external_id,
         handlers::controls::get_controls_export,
         handlers::controls::get_controls_gaps,
         handlers::controls::get_requirements,
@@ -111,6 +113,9 @@ use sqlx::PgPool;
         models::PolicyRef,
         models::SystemDescriptionResponse,
         models::PatchControlRequest,
+        models::BulkExternalIdRequest,
+        models::BulkExternalIdResponse,
+        models::BulkExternalIdItem,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -194,6 +199,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/controls/:id/tests", get(get_control_tests))
         .route("/api/v1/tests", get(get_tests))
         .route("/api/v1/controls/:id", get(get_control).patch(patch_control))
+        .route("/api/v1/controls/bulk-external-id", axum::routing::post(post_bulk_external_id))
         .route("/api/v1/remediation", get(get_remediation))
         .route("/api/v1/evidence", get(get_evidence).post(post_evidence))
         .route("/api/v1/evidence/upload", axum::routing::post(post_evidence_upload))

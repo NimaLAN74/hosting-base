@@ -185,10 +185,49 @@ def post_github_evidence(
     return resp.json()
 
 
+def post_okta_evidence(
+    base_url: str,
+    token: str,
+    control_id: int,
+    evidence_type: str,
+) -> dict[str, Any]:
+    """POST /api/v1/integrations/okta/evidence. evidence_type: org_summary | users_snapshot | groups_snapshot."""
+    url = f"{base_url}/api/v1/integrations/okta/evidence"
+    body = {"control_id": control_id, "evidence_type": evidence_type}
+    resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def post_aws_evidence(
+    base_url: str,
+    token: str,
+    control_id: int,
+    evidence_type: str,
+) -> dict[str, Any]:
+    """POST /api/v1/integrations/aws/evidence. evidence_type: iam_summary."""
+    url = f"{base_url}/api/v1/integrations/aws/evidence"
+    body = {"control_id": control_id, "evidence_type": evidence_type}
+    resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# G3/G4: test_type -> evidence_type for Okta and AWS
+_OKTA_TEST_TYPE_TO_EVIDENCE = {
+    "okta_org_summary": "org_summary",
+    "okta_users_snapshot": "users_snapshot",
+    "okta_groups_snapshot": "groups_snapshot",
+}
+_AWS_TEST_TYPE_TO_EVIDENCE = {"aws_iam_summary": "iam_summary"}
+
+
 def run_test_and_record(test: dict[str, Any], base_url: str, token: str) -> dict[str, Any]:
     """
     Run a single control test and record result via API.
     G2: Real execution for github_last_commit / github_branch_protection when test has config.owner/repo.
+    G3: Okta – okta_org_summary, okta_users_snapshot, okta_groups_snapshot.
+    G4: AWS – aws_iam_summary.
     Otherwise stub (pass with placeholder details).
     """
     test_id = test["id"]
@@ -217,6 +256,36 @@ def run_test_and_record(test: dict[str, Any], base_url: str, token: str) -> dict
                 log.warning("GitHub test %s (%s) failed: %s", name, test_type, details)
             return post_test_result(base_url, token, control_id, test_id, result, details)
         log.info("Test %s has type %s but no config.owner/repo; skipping real run", name, test_type)
+
+    # G3: Okta integration tests
+    if test_type in _OKTA_TEST_TYPE_TO_EVIDENCE:
+        evidence_type = _OKTA_TEST_TYPE_TO_EVIDENCE[test_type]
+        try:
+            data = post_okta_evidence(base_url, token, control_id, evidence_type)
+            result = "pass"
+            details = f"Okta evidence collected; id={data.get('id', '?')}"
+            log.info("Okta test %s (%s): %s", name, test_type, details)
+        except requests.RequestException as e:
+            result = "fail"
+            resp = getattr(e, "response", None)
+            details = (resp.text[:500] if resp is not None and getattr(resp, "text", None) else str(e))[:500]
+            log.warning("Okta test %s (%s) failed: %s", name, test_type, details)
+        return post_test_result(base_url, token, control_id, test_id, result, details)
+
+    # G4: AWS integration tests
+    if test_type in _AWS_TEST_TYPE_TO_EVIDENCE:
+        evidence_type = _AWS_TEST_TYPE_TO_EVIDENCE[test_type]
+        try:
+            data = post_aws_evidence(base_url, token, control_id, evidence_type)
+            result = "pass"
+            details = f"AWS evidence collected; id={data.get('id', '?')}"
+            log.info("AWS test %s (%s): %s", name, test_type, details)
+        except requests.RequestException as e:
+            result = "fail"
+            resp = getattr(e, "response", None)
+            details = (resp.text[:500] if resp is not None and getattr(resp, "text", None) else str(e))[:500]
+            log.warning("AWS test %s (%s) failed: %s", name, test_type, details)
+        return post_test_result(base_url, token, control_id, test_id, result, details)
 
     # Stub for other test types (manual, integration without config, etc.)
     result = "pass"

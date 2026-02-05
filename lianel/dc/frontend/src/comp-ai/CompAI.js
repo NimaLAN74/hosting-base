@@ -187,6 +187,8 @@ function CompAI() {
               <li>Ask clear, focused questions</li>
               <li>Check request history for past queries</li>
               <li><Link to="/comp-ai/controls">Controls &amp; Evidence</Link> — map controls and attach evidence</li>
+              <li><Link to="/comp-ai/audit-docs">Audit docs</Link> — System Description &amp; policy mapping</li>
+              <li><Link to="/comp-ai/scan">Scan documents</Link> — batch URLs or upload</li>
             </ul>
           </div>
         </div>

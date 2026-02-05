@@ -316,6 +316,20 @@ export const compAiApi = {
     return res.json();
   },
 
+  /** G8: Bulk set external_id on controls (by internal_id). Body: { updates: [ { internal_id, external_id } ] }. */
+  async patchBulkExternalId(updates) {
+    const res = await authenticatedFetch('/api/v1/controls/bulk-external-id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || 'Bulk update failed');
+    }
+    return res.json();
+  },
+
   /** Phase C2: batch upload multiple files; creates evidence for each. */
   async postScanUploadBatch(controlId, type, files) {
     const form = new FormData();

@@ -1,3 +1,4 @@
+# Build and deploy Comp-AI (Rust) via CI only. No local cargo build required.
 name: Deploy Comp AI Service to Production
 
 on:

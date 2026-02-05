@@ -1,6 +1,6 @@
 # Comp AI Implementation Status
 **Date**: January 2026  
-**Status**: ✅ **Phases 1–7 Complete** · ✅ **G7 Alerts** · ✅ **Phase B (Upload + AI analysis) Complete**
+**Status**: ✅ **Phases 1–7 Complete** · ✅ **G7 Alerts** · ✅ **Phase B (Upload + AI analysis)** · ✅ **G3 IdP (Okta)** · ✅ **G4 Cloud (AWS IAM)**
 
 ---
 
@@ -206,4 +206,12 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 **Phase B (Document upload + AI analysis):** Migration 019 (evidence file_path, file_name, content_type, extracted_text); config `COMP_AI_EVIDENCE_STORAGE_PATH`, `COMP_AI_EVIDENCE_MAX_FILE_BYTES`; `POST /api/v1/evidence/upload` (multipart), `POST /api/v1/evidence/:id/analyze` (Ollama); text extraction (PDF + txt via pdf-extract); UI: “Upload file” form and “Analyse” button per evidence with extracted text.
 
-**Next Action**: Phase C (scan + org DAG) and 7.3 (apply) done. See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md for next workstreams (G3 IdP, G6 policy, G9 AI evidence review, etc.).
+**G3 (IdP – Okta)** and **G4 (Cloud – AWS IAM)** are implemented: `POST /api/v1/integrations/okta/evidence` (evidence_type: org_summary, users_snapshot, groups_snapshot) and `POST /api/v1/integrations/aws/evidence` (evidence_type: iam_summary). Config: `OKTA_DOMAIN`, `OKTA_API_TOKEN`; AWS uses default credential chain and optional `AWS_REGION`. See runbook **COMP-AI-INTEGRATIONS-OKTA-AWS.md** for setup. Control tests DAG supports test types `okta_org_summary`, `okta_users_snapshot`, `okta_groups_snapshot`, `aws_iam_summary` when tests have the right config.
+
+**G6 (Policy / System Description):** UI at **Comp AI → Audit docs** (`/comp-ai/audit-docs`): SOC 2 System Description template with fillable placeholders (organisation, system, date), Copy/Download .md, and control–policy mapping table. Backend APIs already in place.
+
+**Phase C4 (Scan UI):** Dedicated **Scan documents** page at `/comp-ai/scan`: select control, paste URLs or upload multiple files, run scan; shows created count and evidence IDs. Sidebar links from Controls and Audit docs.
+
+**G8 (Vanta control set alignment):** Per-control external_id in Controls UI; **bulk set** via "G8: Align with external control set" (paste `internal_id,external_id` lines) and **POST /api/v1/controls/bulk-external-id**. See runbook **COMP-AI-G8-VANTA-ALIGNMENT.md**.
+
+**Next Action**: See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md for remaining workstreams (e.g. G9 evidence review — done; more G4 evidence types or Azure as optional).

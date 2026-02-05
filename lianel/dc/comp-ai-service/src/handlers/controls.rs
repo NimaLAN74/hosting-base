@@ -17,7 +17,7 @@ use crate::models::{
     GapAnalysisRequest, GapAnalysisResponse, EvidenceAnalyzeResponse, EvidenceReviewResponse,
     ScanDocumentsRequest, ScanDocumentsResponse,
     ControlPolicyMappingResponse, ControlPolicyMappingEntry, PolicyRef, SystemDescriptionResponse,
-    PatchControlRequest, OktaEvidenceRequest, AwsEvidenceRequest,
+    PatchControlRequest, BulkExternalIdRequest, BulkExternalIdResponse, OktaEvidenceRequest, AwsEvidenceRequest,
 };
 use crate::db::queries::{
     list_controls, get_control_with_requirements, list_evidence, create_evidence, get_evidence_by_id,
@@ -212,6 +212,64 @@ pub async fn patch_control(
     };
 
     Ok(Json(c))
+}
+
+/// G8: Bulk set external_id on controls by internal_id (align with Vanta or other control sets).
+#[utoipa::path(
+    post,
+    path = "/api/v1/controls/bulk-external-id",
+    tag = "controls",
+    request_body = BulkExternalIdRequest,
+    responses(
+        (status = 200, description = "Bulk update result", body = BulkExternalIdResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn post_bulk_external_id(
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<BulkExternalIdRequest>,
+) -> Result<Json<BulkExternalIdResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let (config, pool, _) = &state;
+    let _user = extract_user(&headers, config.clone())
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))))?;
+
+    let controls = list_controls(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_controls (bulk external_id) failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list controls"})),
+            )
+        })?;
+
+    let by_internal_id: std::collections::HashMap<&str, i64> = controls
+        .iter()
+        .map(|c| (c.internal_id.as_str(), c.id))
+        .collect();
+
+    let mut updated = 0u32;
+    let mut not_found = Vec::new();
+    for item in &body.updates {
+        let internal_id = item.internal_id.trim();
+        if internal_id.is_empty() {
+            continue;
+        }
+        match by_internal_id.get(internal_id) {
+            Some(&id) => {
+                let ext = item.external_id.as_deref();
+                if let Ok(Some(_)) = update_control_external_id(pool, id, ext).await {
+                    updated += 1;
+                }
+            }
+            None => not_found.push(item.internal_id.clone()),
+        }
+    }
+
+    Ok(Json(BulkExternalIdResponse { updated, not_found }))
 }
 
 #[derive(Debug, serde::Deserialize)]

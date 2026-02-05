@@ -77,6 +77,11 @@ function CompAIControls() {
   const [scanBatchType, setScanBatchType] = useState('document');
   const [scanBatchSubmitting, setScanBatchSubmitting] = useState(false);
   const [scanResult, setScanResult] = useState(null);
+  // G8: bulk set external_id (Vanta alignment)
+  const [bulkExternalIdText, setBulkExternalIdText] = useState('');
+  const [bulkExternalIdSubmitting, setBulkExternalIdSubmitting] = useState(false);
+  const [bulkExternalIdResult, setBulkExternalIdResult] = useState(null);
+  const [bulkExternalIdError, setBulkExternalIdError] = useState(null);
   const [scanError, setScanError] = useState(null);
 
   useEffect(() => {
@@ -239,6 +244,36 @@ function CompAIControls() {
       setGapAnalysisError(err.message || 'Failed to analyse gaps');
     } finally {
       setGapAnalysisLoading(false);
+    }
+  };
+
+  const handleBulkExternalId = async (e) => {
+    e.preventDefault();
+    const lines = bulkExternalIdText.split(/\n/).map((s) => s.trim()).filter(Boolean);
+    const updates = lines.map((line) => {
+      const idx = line.indexOf(',');
+      const internal_id = idx >= 0 ? line.slice(0, idx).trim() : line;
+      const external_id = idx >= 0 ? line.slice(idx + 1).trim() || null : null;
+      return { internal_id, external_id: external_id || undefined };
+    });
+    if (updates.length === 0) {
+      setBulkExternalIdError('Enter at least one line: internal_id,external_id');
+      return;
+    }
+    setBulkExternalIdError(null);
+    setBulkExternalIdResult(null);
+    setBulkExternalIdSubmitting(true);
+    try {
+      const data = await compAiApi.patchBulkExternalId(updates);
+      setBulkExternalIdResult(data);
+      if (data.updated > 0) {
+        loadControls();
+        if (selectedControl) loadControlDetail(selectedControl.id);
+      }
+    } catch (err) {
+      setBulkExternalIdError(err.message || 'Bulk update failed');
+    } finally {
+      setBulkExternalIdSubmitting(false);
     }
   };
 
@@ -615,6 +650,31 @@ function CompAIControls() {
                 </ul>
               </div>
             )}
+            <div className="comp-ai-gaps-section comp-ai-bulk-external-id-section">
+              <h3>G8: Align with external control set (e.g. Vanta)</h3>
+              <p className="comp-ai-form-hint">Paste lines <code>internal_id,external_id</code> (one per line). Leave external_id empty to clear. Then click Apply.</p>
+              {bulkExternalIdError && <p className="comp-ai-error" role="alert">{bulkExternalIdError}</p>}
+              {bulkExternalIdResult && (
+                <p className="comp-ai-success">
+                  Updated {bulkExternalIdResult.updated} control(s).
+                  {bulkExternalIdResult.not_found?.length > 0 && ` Not found: ${bulkExternalIdResult.not_found.join(', ')}`}
+                </p>
+              )}
+              <form onSubmit={handleBulkExternalId} className="comp-ai-evidence-form">
+                <label htmlFor="bulk-external-id">internal_id, external_id (one per line)</label>
+                <textarea
+                  id="bulk-external-id"
+                  value={bulkExternalIdText}
+                  onChange={(e) => setBulkExternalIdText(e.target.value)}
+                  placeholder={'CC6.1, vanta-cc6.1\nCC6.2, vanta-cc6.2'}
+                  rows={4}
+                  className="comp-ai-textarea"
+                />
+                <button type="submit" className="comp-ai-secondary-btn" disabled={bulkExternalIdSubmitting}>
+                  {bulkExternalIdSubmitting ? 'Applying...' : 'Apply bulk external IDs'}
+                </button>
+              </form>
+            </div>
           </div>
 
           <div className="comp-ai-controls-section">
@@ -1152,6 +1212,8 @@ function CompAIControls() {
             <h3>Quick links</h3>
             <ul>
               <li><Link to="/comp-ai">Comp AI chat</Link></li>
+              <li><Link to="/comp-ai/audit-docs">Audit docs</Link></li>
+              <li><Link to="/comp-ai/scan">Scan documents</Link></li>
               <li><Link to="/comp-ai/history">Request history</Link></li>
               <li><Link to="/comp-ai/monitoring">Monitoring</Link></li>
             </ul>

@@ -2,7 +2,7 @@
 
 **Purpose:** Use **Airflow** as the single runner for all scheduled and automated Comp-AI jobs (control tests, document scan, gap analysis, etc.). If sync between Comp-AI and Airflow becomes a problem, use an **event-based** solution for coordination.
 
-**Status:** Design agreed; control tests and alerts DAGs implemented.
+**Status:** Design agreed; control tests, alerts, and organisation scan DAGs implemented.
 
 ---
 
@@ -19,8 +19,7 @@
 | Job | DAG / task | Schedule (example) | Comp-AI API used |
 |-----|------------|--------------------|-------------------|
 | **Control tests** | `comp_ai_control_tests` | Daily (or per-test schedule later) | GET /api/v1/tests, POST /api/v1/controls/:id/tests/:test_id/result |
-| **Document scan (Phase C)** | `comp_ai_scan_documents` (future) | On-demand or weekly | POST /api/v1/scan/documents (when implemented) |
-| **Gap / risk analysis** | `comp_ai_gap_analysis` (future) | Weekly or on-demand | POST /api/v1/analysis/gaps (when implemented) |
+| **Organisation scan + monitoring (Phase C)** | `comp_ai_scan_documents` | Weekly Sun 08:00 UTC | POST /api/v1/scan/documents, then POST /api/v1/analysis/gaps |
 | **Alerts (G7)** | `comp_ai_alerts` | Daily 07:00 UTC (after tests) | GET /api/v1/controls/gaps, GET /api/v1/tests; log + optional Slack |
 
 ---
@@ -43,6 +42,22 @@
 - **Option B – Client credentials (recommended):** Set `COMP_AI_BASE_URL` and `COMP_AI_KEYCLOAK_URL`, `COMP_AI_CLIENT_ID`, `COMP_AI_CLIENT_SECRET` (and optionally `COMP_AI_KEYCLOAK_REALM`, default `lianel`). The DAG fetches a fresh token each run via Keycloak; avoids 401 from expiry and non-ASCII in stored token.
 - **Non-ASCII / 401:** If you see “non-ASCII characters” or “401 Unauthorized”, see runbook `COMP-AI-AIRFLOW-401-TOKEN.md` or re-run the token script with ASCII sanitization, or switch to Option B.
 
+### 4.1. Airflow Variables reference
+
+Set these in **Airflow → Admin → Variables** (or via env in the Airflow worker/scheduler). CLI: `airflow variables set KEY value`.
+
+| Variable | Required | Used by | Description |
+|----------|----------|---------|-------------|
+| `COMP_AI_BASE_URL` | Yes | All Comp-AI DAGs | Comp-AI API base URL (e.g. `https://www.lianel.se/api/v1/comp-ai` or `http://comp-ai-service:3002`). No trailing slash. |
+| `COMP_AI_TOKEN` | If no Keycloak | All Comp-AI DAGs | Bearer token for Comp-AI API. ASCII-only. Prefer Keycloak (below) to avoid expiry. |
+| `COMP_AI_KEYCLOAK_URL` | If no token | All Comp-AI DAGs | Keycloak base URL (e.g. `https://auth.lianel.se`). Used with client_credentials to get a fresh token. |
+| `COMP_AI_CLIENT_ID` | If using Keycloak | All Comp-AI DAGs | Keycloak client id (e.g. `comp-ai-service`). |
+| `COMP_AI_CLIENT_SECRET` | If using Keycloak | All Comp-AI DAGs | Keycloak client secret. Prefer Airflow secret backend for this. |
+| `COMP_AI_KEYCLOAK_REALM` | No | All Comp-AI DAGs | Keycloak realm; default `lianel`. |
+| `COMP_AI_SCAN_DOCUMENTS_CONFIG` | No | `comp_ai_scan_documents` | JSON: `{"control_id": N, "documents": [{"url": "..."}]}` or list of such jobs. Unset = no-op. |
+| `COMP_AI_GAP_ANALYSIS_FRAMEWORK` | No | `comp_ai_scan_documents` | Optional framework filter for gap analysis (e.g. `soc2`). |
+| `SLACK_WEBHOOK_URL` | No | `comp_ai_alerts` | Slack webhook URL for alert notifications. Unset = log only. |
+
 ---
 
 ## 5. Implemented: Control tests DAG
@@ -64,10 +79,17 @@
 - **Steps:** `GET /api/v1/controls/gaps`, `GET /api/v1/tests`; filter tests with `last_result == 'fail'`; build summary; log; if `SLACK_WEBHOOK_URL` (Airflow Variable or env) is set, POST summary to Slack (or "No gaps, no failed tests" when clear).
 - **Helper:** `comp_ai_client.get_gaps()`, `get_tests()`.
 
-## 7. Future DAGs (when APIs exist)
+## 7. Implemented: Organisation scan + monitoring DAG (Phase C)
 
-- **comp_ai_scan_documents:** Call `POST /api/v1/scan/documents` (Phase C); schedule weekly or trigger via event.
-- **comp_ai_gap_analysis:** Call `POST /api/v1/analysis/gaps` (Phase 7.2); schedule weekly; optionally feed into alerts.
+- **DAG id:** `comp_ai_scan_documents`
+- **Schedule:** Weekly Sunday 08:00 UTC (`0 8 * * 0`).
+- **Tasks:**
+  1. **run_organisation_document_scan** — Reads Airflow Variable `COMP_AI_SCAN_DOCUMENTS_CONFIG` (JSON). For each job `{ "control_id": N, "documents": [ {"url": "https://..."}, ... ] }` calls `POST /api/v1/scan/documents`. Creates evidence from URLs for the whole organisation. If Variable unset or empty, no-op (0 created).
+  2. **run_gap_analysis_monitoring** — Calls `POST /api/v1/analysis/gaps` (optional filter via `COMP_AI_GAP_ANALYSIS_FRAMEWORK`); logs AI gap/risk summary for monitoring.
+- **Config (Airflow Variables):**
+  - `COMP_AI_SCAN_DOCUMENTS_CONFIG` — JSON: single job `{"control_id": 2, "documents": [{"url": "..."}]}` or list of jobs `[{...}, {...}]`. Max 50 URLs per job (API limit).
+  - `COMP_AI_GAP_ANALYSIS_FRAMEWORK` — Optional; e.g. `soc2` to filter gap analysis by framework.
+- **Helper:** `comp_ai_client.post_scan_documents()`, `post_analysis_gaps()`.
 
 ---
 
@@ -85,4 +107,4 @@ When we need Comp-AI and Airflow to stay in sync in a more reactive way:
 
 - **Implementation plan:** `COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md` (G1 test runner, Phase C scan).
 - **Comp-AI API:** `GET /api/v1/tests`, `POST /api/v1/controls/:id/tests/:test_id/result` (and future scan/analysis endpoints).
-- **Airflow DAGs:** `lianel/dc/dags/comp_ai_control_tests_dag.py`, `lianel/dc/dags/comp_ai_alerts_dag.py`, `lianel/dc/dags/utils/comp_ai_client.py`.
+- **Airflow DAGs:** `comp_ai_control_tests_dag.py`, `comp_ai_alerts_dag.py`, `comp_ai_scan_documents_dag.py`, `lianel/dc/dags/utils/comp_ai_client.py`.
