@@ -23,11 +23,13 @@ export { keycloak };
 // Keycloak initialization options
 // Note: check-sso with iframe won't work cross-domain (auth.lianel.se -> lianel.se).
 // X-Frame-Options blocks the iframe, so we disable it and use token-based persistence.
+// Include offline_access so Keycloak returns a refresh_token; otherwise updateToken() fails with "no refresh token available"
 const initOptions = {
   checkLoginIframe: false,  // DISABLED: X-Frame-Options blocks cross-domain iframe
   enableLogging: true,
   pkceMethod: 'S256',  // REQUIRED: Keycloak 26.4.6 requires PKCE for public clients
-  flow: 'standard'
+  flow: 'standard',
+  scope: 'openid profile email offline_access'
 };
 
 /**
@@ -80,89 +82,82 @@ export const initKeycloak = () => {
           }
         }
 
-        // Keycloak auto-loaded token from sessionStorage/cookie if available
-        if (authenticated && keycloak.token) {
-          console.log('User authenticated, token available');
-          // Store token in localStorage for persistence across sessions
+        const persistTokens = () => {
           try {
             localStorage.setItem('keycloak_token', keycloak.token);
-            localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+            if (keycloak.refreshToken) {
+              localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+            }
             localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
           } catch (e) {
-            console.warn('Could not store token in localStorage:', e);
+            console.warn('Could not persist token in localStorage:', e);
           }
-          
-          // Set up token refresh every minute
-          const refreshInterval = setInterval(() => {
+        };
+
+        const refreshIntervalRef = { current: null };
+        const startRefreshInterval = () => {
+          refreshIntervalRef.current = setInterval(() => {
             keycloak.updateToken(70)
               .then((refreshed) => {
                 if (refreshed) {
                   console.log('Token refreshed');
-                  // Update stored token
-                  try {
-                    localStorage.setItem('keycloak_token', keycloak.token);
-                    localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
-                    localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
-                  } catch (e) {
-                    console.warn('Could not update token in localStorage:', e);
-                  }
+                  persistTokens();
                 }
               })
               .catch((error) => {
                 console.error('Token refresh failed:', error);
-                clearInterval(refreshInterval);
+                if (refreshIntervalRef.current) {
+                  clearInterval(refreshIntervalRef.current);
+                  refreshIntervalRef.current = null;
+                }
               });
-          }, 60000);
-          
+          }, 60000); // Every 60s so we refresh before 5min expiry
+        };
+
+        // Keycloak auto-loaded token from sessionStorage/cookie if available
+        if (authenticated && keycloak.token) {
+          console.log('User authenticated, token available');
+          persistTokens();
+          // Refresh immediately so we have at least 70s validity, then start interval
+          keycloak.updateToken(70)
+            .then((refreshed) => {
+              if (refreshed) persistTokens();
+            })
+            .catch((e) => console.warn('Initial token refresh check:', e));
+          startRefreshInterval();
           resolve(true);
         } else {
-          // Not authenticated - check if we have a stored token
+          // Not authenticated - try restore from localStorage if we have both tokens
           const storedToken = localStorage.getItem('keycloak_token');
-          const tokenTimestamp = localStorage.getItem('keycloak_token_timestamp');
-          const now = Date.now();
-          const tokenAge = tokenTimestamp ? (now - parseInt(tokenTimestamp)) / 1000 : Infinity;
-          
-          // Token valid if less than 5 minutes old (typically expires in 5 min)
-          if (storedToken && tokenAge < 300) {
-            console.log('Restoring token from localStorage (age: ' + Math.round(tokenAge) + 's)');
-            // Manually restore the token
+          const storedRefresh = localStorage.getItem('keycloak_refresh_token');
+          if (storedToken && storedRefresh) {
+            console.log('Attempting to restore session from localStorage');
             keycloak.token = storedToken;
-            keycloak.refreshToken = localStorage.getItem('keycloak_refresh_token') || storedToken;
+            keycloak.refreshToken = storedRefresh;
             keycloak.authenticated = true;
-            
-            // Verify token is still valid by checking expiry
-            try {
-              const parts = storedToken.split('.');
-              if (parts.length === 3) {
-                const payload = JSON.parse(atob(parts[1]));
-                const exp = payload.exp * 1000; // Convert to ms
-                if (exp > now) {
-                  console.log('Restored token is valid, expires in', Math.round((exp - now) / 1000), 'seconds');
-                  // Set up token refresh
-                  setInterval(() => {
-                    keycloak.updateToken(70)
-                      .then((refreshed) => {
-                        if (refreshed) {
-                          console.log('Token refreshed');
-                          try {
-                            localStorage.setItem('keycloak_token', keycloak.token);
-                          } catch (e) {
-                            console.warn('Could not update token:', e);
-                          }
-                        }
-                      })
-                      .catch((error) => console.error('Token refresh failed:', error));
-                  }, 60000);
-                  resolve(true);
-                  return;
-                }
-              }
-            } catch (e) {
-              console.warn('Could not verify stored token:', e);
-            }
+            // Immediately refresh to get a valid access token (handles expired access token)
+            keycloak.updateToken(70)
+              .then((refreshed) => {
+                persistTokens();
+                startRefreshInterval();
+                console.log('Session restored', refreshed ? '(token refreshed)' : '(token still valid)');
+                resolve(true);
+              })
+              .catch((error) => {
+                console.warn('Session restore failed (refresh failed):', error);
+                try {
+                  localStorage.removeItem('keycloak_token');
+                  localStorage.removeItem('keycloak_refresh_token');
+                  localStorage.removeItem('keycloak_token_timestamp');
+                } catch (e) {}
+                keycloak.authenticated = false;
+                keycloak.token = null;
+                keycloak.refreshToken = null;
+                resolve(false);
+              });
+            return;
           }
-          
-          console.log('Not authenticated - no valid token available');
+          console.log('Not authenticated - no stored session');
           resolve(false);
         }
       })
@@ -206,7 +201,7 @@ export const login = (redirectToCurrentPath = true) => {
       client_id: keycloakConfig.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: 'openid profile email',
+      scope: 'openid profile email offline_access',
       prompt: 'login'
     });
     window.location.href = `${keycloakUrl}?${params.toString()}`;
@@ -214,11 +209,17 @@ export const login = (redirectToCurrentPath = true) => {
 
   (async () => {
     try {
-      const loginUrlOrPromise = keycloak.createLoginUrl({ redirectUri, prompt: 'login' });
+      const loginUrlOrPromise = keycloak.createLoginUrl({ redirectUri, prompt: 'login', scope: 'openid profile email offline_access' });
       let loginUrl = await Promise.resolve(loginUrlOrPromise);
       // Keep same-origin: if URL points to auth.lianel.se, use www.lianel.se/auth so login runs via www's proxy.
       if (typeof loginUrl === 'string' && loginUrl.includes('auth.lianel.se') && loginUrl.includes('/realms/')) {
         loginUrl = loginUrl.replace(/https:\/\/auth\.lianel\.se/g, 'https://www.lianel.se/auth');
+      }
+      // Ensure offline_access is in scope so we get a refresh_token (fixes "Unable to update token, no refresh token available")
+      if (typeof loginUrl === 'string' && loginUrl.includes('scope=') && !loginUrl.includes('offline_access')) {
+        loginUrl = loginUrl.replace(/scope=([^&]+)/, (_, s) => 'scope=' + encodeURIComponent(decodeURIComponent(s).replace(/\s+/g, ' ') + ' offline_access'));
+      } else if (typeof loginUrl === 'string' && !loginUrl.includes('scope=')) {
+        loginUrl += (loginUrl.includes('?') ? '&' : '?') + 'scope=' + encodeURIComponent('openid profile email offline_access');
       }
       doRedirect(loginUrl);
     } catch (error) {
@@ -297,12 +298,14 @@ export const hasRole = (role) => {
 };
 
 /**
- * Get authenticated fetch function that includes access token
+ * Get authenticated fetch function that includes access token.
+ * On 401, tries to refresh the token once and retries the request.
  * @param {string} url - URL to fetch
- * @param {object} options - Fetch options
+ * @param {object} options - Fetch options (headers merged; Content-Type default application/json)
+ * @param {boolean} isRetry - Internal: true when this is the retry after refresh
  * @returns {Promise<Response>} Fetch response
  */
-export const authenticatedFetch = async (url, options = {}) => {
+export const authenticatedFetch = async (url, options = {}, isRetry = false) => {
   const token = getToken();
   if (!token) {
     throw new Error('Not authenticated');
@@ -310,14 +313,32 @@ export const authenticatedFetch = async (url, options = {}) => {
 
   const headers = {
     ...options.headers,
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+    'Authorization': `Bearer ${token}`
   };
+  if (!headers['Content-Type'] && options.body instanceof FormData === false) {
+    headers['Content-Type'] = 'application/json';
+  }
 
-  return fetch(url, {
-    ...options,
-    headers
-  });
+  const res = await fetch(url, { ...options, headers });
+
+  // On 401, try refresh once and retry (avoids re-login when refresh was slightly late)
+  if (res.status === 401 && !isRetry && keycloak.refreshToken) {
+    try {
+      const refreshed = await keycloak.updateToken(70);
+      if (refreshed && keycloak.token) {
+        try {
+          localStorage.setItem('keycloak_token', keycloak.token);
+          if (keycloak.refreshToken) localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+          localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+        } catch (e) {}
+        return authenticatedFetch(url, options, true);
+      }
+    } catch (e) {
+      console.warn('authenticatedFetch: refresh on 401 failed', e);
+    }
+  }
+
+  return res;
 };
 
 export default keycloak;

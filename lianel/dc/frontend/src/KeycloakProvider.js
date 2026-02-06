@@ -79,7 +79,6 @@ export const KeycloakProvider = ({ children }) => {
 
     const onTokenExpired = () => {
       console.log('Keycloak onTokenExpired event');
-      // Try to refresh token
       keycloak.updateToken(70)
         .then((refreshed) => {
           if (refreshed) {
@@ -90,6 +89,11 @@ export const KeycloakProvider = ({ children }) => {
           }
         })
         .catch(() => {
+          try {
+            localStorage.removeItem('keycloak_token');
+            localStorage.removeItem('keycloak_refresh_token');
+            localStorage.removeItem('keycloak_token_timestamp');
+          } catch (e) {}
           setAuthenticated(false);
         });
     };
