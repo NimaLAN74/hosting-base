@@ -228,4 +228,11 @@ All Phase 6 deliverables are live: migration 016 (more requirements per framewor
 
 **G7 Alerts (hardened):** DAG `comp_ai_alerts` – retry get_gaps/get_tests once on failure; Slack message includes “View controls” link (optional COMP_AI_APP_URL). Monitoring page shows Compliance status card (gaps count, failed tests count) with link to Controls.
 
-**Next Action**: See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md. Remaining optional: more G4 evidence types or Azure (deferred).
+**Session / refresh_token:** Frontend restores session from `keycloak_token` + `keycloak_refresh_token` in localStorage; calls `updateToken(70)` on login/restore and every 60s; `authenticatedFetch` retries once on 401 after refresh. On refresh failure, Keycloak keys are cleared so a bad session is not restored.
+
+**Session verification (production):** After deploying the frontend with session fixes:
+1. Open the app, log in, use Comp AI (e.g. Controls, Scan, History) for several minutes.
+2. Leave the tab open idle for 5–10 minutes, then click or refresh; you should remain logged in (no redirect to main/login).
+3. If you are sent to login repeatedly, check browser console for token/refresh errors and ensure Keycloak client has refresh tokens enabled.
+
+**Next priorities:** (C) More G4/evidence types; (D) Azure integration (deferred); (E) Ops/runbooks. See COMP-AI-IMPLEMENTATION-PLAN-DOC-OPS-AND-GAPS.md.
