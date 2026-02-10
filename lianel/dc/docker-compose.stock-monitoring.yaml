@@ -1,0 +1,47 @@
+# Stock Monitoring stack. Requires shared network (lianel-network) and Postgres.
+# Nginx: /api/v1/stock-monitoring/ (backend), /stock (UI).
+services:
+  stock-monitoring-service:
+    image: ghcr.io/nimalan74/hosting-base/lianel-stock-monitoring-service:latest
+    container_name: lianel-stock-monitoring-service
+    env_file:
+      - .env
+    environment:
+      PORT: 3003
+      POSTGRES_HOST: ${POSTGRES_HOST:-172.18.0.1}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-lianel_energy}
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.lianel.se}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
+      RUST_LOG: info
+    expose:
+      - "3003"
+    depends_on: []
+    restart: unless-stopped
+    networks:
+      - lianel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  stock-monitoring-ui:
+    image: ghcr.io/nimalan74/hosting-base/lianel-stock-monitoring-ui:latest
+    container_name: lianel-stock-monitoring-ui
+    env_file:
+      - .env
+    environment:
+      PORT: 80
+    expose:
+      - "80"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+
+networks:
+  lianel-network:
+    external: true

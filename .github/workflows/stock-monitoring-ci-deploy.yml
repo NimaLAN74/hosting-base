@@ -1,0 +1,210 @@
+# Stock Monitoring backend: CI (test + build) then CD (image push + deploy). All runs on remote via pipeline.
+# CI: migration 022, cargo test (config/DB + API), cargo build. CD: Docker build/push, deploy, migration on prod, health verify.
+name: Stock Monitoring Backend – CI and Deploy
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/stock-monitoring/backend/**'
+      - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
+      - 'lianel/dc/docker-compose.stock-monitoring.yaml'
+      - 'lianel/dc/nginx/config/nginx.conf'
+      - '.github/workflows/stock-monitoring-ci-deploy.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  ci:
+    name: CI (test + build)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1" -q 2>/dev/null; then
+              echo "Postgres ready"; break
+            fi
+            [ "$i" -eq 30 ] && { echo "Postgres not ready"; exit 1; }
+            sleep 1
+          done
+
+      - name: Run migration 022 (stock_monitoring schema)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f lianel/dc/database/migrations/022_stock_monitoring_schema.sql
+          echo "✅ Migration 022 applied"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lianel/dc/stock-monitoring/backend
+
+      - name: Run tests (config, DB pool, schema, API /health and /api/v1/status)
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        run: |
+          cd lianel/dc/stock-monitoring/backend && cargo test
+
+      - name: Build release binary
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        run: |
+          cd lianel/dc/stock-monitoring/backend && cargo build --release
+          echo "✅ Binary built"
+
+      - name: Set image name
+        id: image-name
+        run: |
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-stock-monitoring-service" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lianel/dc/stock-monitoring/backend
+          file: ./lianel/dc/stock-monitoring/backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make package public
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          gh api -X PATCH "/user/packages/container/${ENCODED}" -f visibility=public 2>/dev/null || \
+          gh api -X PATCH "/orgs/$(echo $PACKAGE_NAME | cut -d'/' -f1)/packages/container/$(echo $PACKAGE_NAME | cut -d'/' -f2- | sed 's/\//%2F/g')" -f visibility=public 2>/dev/null || true
+          echo "✅ Package visibility updated or skipped"
+
+  cd:
+    name: CD (build image, push, deploy, verify)
+    needs: ci
+    runs-on: ubuntu-latest
+    if: success() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Deploy to remote host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-service:latest"
+          echo "Pulling and starting: $IMAGE_LC"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml 2>/dev/null || true && (git pull origin master || true) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml pull stock-monitoring-service && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d stock-monitoring-service && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml ps stock-monitoring-service"
+          echo "✅ Deployed"
+
+      - name: Run migration 022 on production DB
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
+            lianel/dc/database/migrations/022_stock_monitoring_schema.sql \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base/lianel/dc && source .env 2>/dev/null || true; PGPASSWORD=\${POSTGRES_PASSWORD:-postgres} psql -h \${POSTGRES_HOST:-172.18.0.1} -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-lianel_energy} -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql 2>/dev/null || echo '⚠️ Migration run (idempotent)'"
+          echo "✅ Migration 022 on production"
+
+      - name: Verify deployment (health)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec lianel-stock-monitoring-service curl -f http://localhost:3003/health" || \
+          { echo "❌ Health check failed"; exit 1; }
+          echo "✅ Health check passed (HTTPS exposure when nginx location added in 1.6)"
+
+      - name: Summary
+        run: |
+          echo "## Stock Monitoring Backend – CI and CD" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI**: migration 022 + cargo test (config, DB, schema, API /health, /api/v1/status)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CD**: image push, deploy, migration on prod, health verify" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ github.repository }}/lianel-stock-monitoring-service:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY

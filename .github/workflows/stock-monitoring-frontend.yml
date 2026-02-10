@@ -1,0 +1,170 @@
+# Stock Monitoring frontend: CI (test + build) then CD (image push + deploy). All runs on remote via pipeline.
+name: Stock Monitoring Frontend – CI and Deploy
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/stock-monitoring/frontend/**'
+      - 'lianel/dc/docker-compose.stock-monitoring.yaml'
+      - 'lianel/dc/nginx/config/nginx.conf'
+      - '.github/workflows/stock-monitoring-frontend.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  ci:
+    name: CI (test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          cd lianel/dc/stock-monitoring/frontend && npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Run tests
+        run: |
+          cd lianel/dc/stock-monitoring/frontend && npm run test:ci
+
+      - name: Build
+        run: |
+          cd lianel/dc/stock-monitoring/frontend && npm run build
+          echo "✅ Build complete"
+
+  cd:
+    name: CD (build image, push, deploy, verify)
+    needs: ci
+    runs-on: ubuntu-latest
+    if: success() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        id: image-name
+        run: |
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-stock-monitoring-ui" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lianel/dc/stock-monitoring/frontend
+          file: ./lianel/dc/stock-monitoring/frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make package public
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          gh api -X PATCH "/user/packages/container/${ENCODED}" -f visibility=public 2>/dev/null || \
+          gh api -X PATCH "/orgs/$(echo $PACKAGE_NAME | cut -d'/' -f1)/packages/container/$(echo $PACKAGE_NAME | cut -d'/' -f2- | sed 's/\//%2F/g')" -f visibility=public 2>/dev/null || true
+          echo "✅ Package visibility updated or skipped"
+
+      - name: Validate secrets
+        run: |
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Deploy to remote host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-ui:latest"
+          echo "Pulling and starting: $IMAGE_LC"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml 2>/dev/null || true && (git pull origin master || true) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml pull stock-monitoring-ui && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d stock-monitoring-ui && sleep 3 && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml ps stock-monitoring-ui"
+          echo "✅ Deployed"
+
+      - name: Sync nginx config to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
+            lianel/dc/nginx/config/nginx.conf \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/hosting-base/lianel/dc/nginx/config /root/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped'"
+          echo "✅ Nginx config synced"
+
+      - name: Verify deployment (container running + optional live /stock)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          STOCK_UI_URL: ${{ vars.STOCK_UI_URL || 'https://www.lianel.se' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker ps --filter name=lianel-stock-monitoring-ui --format '{{.Status}}' | grep -q Up && echo '✅ Container running'" || { echo "❌ Container not running"; exit 1; }
+          CODE=$(curl -sSf -o /dev/null -w "%{http_code}" --connect-timeout 10 "${STOCK_UI_URL}/stock" 2>/dev/null || echo "000")
+          if [ "$CODE" = "000" ]; then
+            echo "⚠️ Live /stock unreachable from runner (set vars.STOCK_UI_URL; auth may be required)"
+          elif [ "${CODE:0:1}" = "2" ] || [ "${CODE:0:1}" = "3" ]; then
+            echo "✅ Live /stock: HTTP $CODE"
+          else
+            echo "⚠️ Live /stock: HTTP $CODE"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Stock Monitoring Frontend – CI and CD" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI**: npm test:ci + npm run build" >> $GITHUB_STEP_SUMMARY
+          echo "- **CD**: image push, deploy stock-monitoring-ui, nginx sync, verify" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy**: \`${{ secrets.REMOTE_HOST }}\` – UI at \`/stock\`" >> $GITHUB_STEP_SUMMARY
