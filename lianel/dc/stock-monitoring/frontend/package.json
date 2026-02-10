@@ -26,5 +26,8 @@
     "development": [
       "last 1 chrome version"
     ]
+  },
+  "overrides": {
+    "ajv": "^8.12.0"
   }
 }
