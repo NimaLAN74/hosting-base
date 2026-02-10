@@ -11,6 +11,7 @@ on:
       - 'lianel/dc/stock-monitoring/backend/**'
       - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
       - 'lianel/dc/docker-compose.stock-monitoring.yaml'
+      - 'lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh'
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
   workflow_dispatch:
@@ -160,7 +161,21 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH ready"
 
-      - name: Deploy to remote host
+      - name: Copy deploy script and compose to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
+            lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh \
+            lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null && echo \"Updated \$d\"; done"
+          echo "✅ Script and compose synced"
+
+      - name: Deploy to remote host (stock backend only)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -169,10 +184,10 @@ jobs:
         run: |
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-service:latest"
-          echo "Pulling and starting: $IMAGE_LC"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml 2>/dev/null || true && (git pull origin master || true) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml pull stock-monitoring-service && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d stock-monitoring-service && sleep 5 && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml ps stock-monitoring-service"
+          echo "Deploying: $IMAGE_LC"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /tmp/deploy-stock-monitoring-backend.sh '$IMAGE_LC'"
           echo "✅ Deployed"
 
       - name: Run migration 022 on production DB
@@ -184,9 +199,8 @@ jobs:
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
             lianel/dc/database/migrations/022_stock_monitoring_schema.sql \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/hosting-base/lianel/dc && source .env 2>/dev/null || true; PGPASSWORD=\${POSTGRES_PASSWORD:-postgres} psql -h \${POSTGRES_HOST:-172.18.0.1} -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-lianel_energy} -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql 2>/dev/null || echo '⚠️ Migration run (idempotent)'"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "DC_DIR=; for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/.env\" ] && DC_DIR=\"\$d\" && break; done; [ -n \"\$DC_DIR\" ] && . \"\$DC_DIR/.env\" 2>/dev/null; PGPASSWORD=\${POSTGRES_PASSWORD:-postgres} psql -h \${POSTGRES_HOST:-172.18.0.1} -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-lianel_energy} -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql 2>/dev/null || echo '⚠️ Migration (idempotent)'"
           echo "✅ Migration 022 on production"
 
       - name: Verify deployment (health)

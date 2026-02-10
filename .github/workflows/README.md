@@ -83,13 +83,17 @@ The workflow is instrumented so you can follow both the **pipeline** and the **d
 - **Actions**: https://github.com/NimaLAN74/hosting-base/actions  
 - Use the run URL from the “Pipeline context” step to jump to that run’s logs.
 
+### Nginx sync (fix login)
+
+**Every production deploy syncs nginx.** The workflows **Deploy Frontend**, **Deploy Comp AI Service**, and **Deploy Profile Service** copy `lianel/dc/nginx/config/nginx.conf` to the server and reload nginx after the main deploy step. **Deploy Energy Service** is paused (manual trigger only); see `lianel/dc/docs/status/ENERGY-PROJECT-PAUSED.md`. You should not need to run **Sync Nginx (Fix Login)** manually after a normal deploy. Run that workflow only for 502 recovery or when Keycloak/nginx need fixing without a full deploy. See `lianel/dc/docs/runbooks/SYNC-NGINX-FIX-LOGIN.md`.
+
 ### Monitor GH Actions after push / CD
 
 **Follow the pipeline after each push** (the deploy fails from time to time; watching catches failures quickly).
 
-1. **Deploy Comp AI Service** (`deploy-comp-ai-service.yml`): from repo root, after `git push`:
+1. **Deploy Comp AI Service** (`deploy-comp-ai-service.yml`): **manual trigger only** (no push trigger). To deploy Comp AI: run the workflow from the Actions tab, then from repo root:
    ```bash
-   bash .github/scripts/watch-deploy-comp-ai.sh --wait   # follow pipeline until completion (picks run for current commit)
+   bash .github/scripts/watch-deploy-comp-ai.sh --wait   # follow pipeline until completion
    ```
    Without `--wait`: show latest run status and failed logs if the run failed.
    Requires [GitHub CLI](https://cli.github.com/) and `gh auth login`.

@@ -9,6 +9,7 @@ on:
     paths:
       - 'lianel/dc/stock-monitoring/frontend/**'
       - 'lianel/dc/docker-compose.stock-monitoring.yaml'
+      - 'lianel/dc/scripts/deployment/deploy-stock-monitoring-frontend.sh'
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-frontend.yml'
   workflow_dispatch:
@@ -31,7 +32,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd lianel/dc/stock-monitoring/frontend && npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          cd lianel/dc/stock-monitoring/frontend && (npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps)
 
       - name: Run tests
         run: |
@@ -113,7 +114,21 @@ jobs:
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH ready"
 
-      - name: Deploy to remote host
+      - name: Copy deploy script and compose to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
+            lianel/dc/scripts/deployment/deploy-stock-monitoring-frontend.sh \
+            lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /tmp/deploy-stock-monitoring-frontend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null && echo \"Updated \$d\"; done"
+          echo "✅ Script and compose synced"
+
+      - name: Deploy to remote host (stock frontend only)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -122,10 +137,10 @@ jobs:
         run: |
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-ui:latest"
-          echo "Pulling and starting: $IMAGE_LC"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
-            "cd /root/hosting-base && git fetch origin && git checkout origin/master -- lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml 2>/dev/null || true && (git pull origin master || true) && cd lianel/dc && echo '${GITHUB_TOKEN}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml pull stock-monitoring-ui && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d stock-monitoring-ui && sleep 3 && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml ps stock-monitoring-ui"
+          echo "Deploying: $IMAGE_LC"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /tmp/deploy-stock-monitoring-frontend.sh '$IMAGE_LC'"
           echo "✅ Deployed"
 
       - name: Sync nginx config to remote
@@ -134,12 +149,12 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
             lianel/dc/nginx/config/nginx.conf \
-            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx-stock.conf
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "mkdir -p /root/hosting-base/lianel/dc/nginx/config /root/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped'"
+            "for d in /root/hosting-base/lianel/dc/nginx/config /root/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx-stock.conf \"\$d/nginx.conf\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped'"
           echo "✅ Nginx config synced"
 
       - name: Verify deployment (container running + optional live /stock)

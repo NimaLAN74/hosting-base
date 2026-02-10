@@ -1,21 +1,9 @@
 # Build and deploy Comp-AI (Rust) via CI only. No local cargo build required.
+# Deploy is manual only (workflow_dispatch) so pushes (e.g. stock-monitoring, nginx) do not deploy Comp AI.
 name: Deploy Comp AI Service to Production
 
 on:
-  push:
-    branches:
-      - master
-      - main
-    paths:
-      - 'lianel/dc/comp-ai-service/**'
-      - 'lianel/dc/database/migrations/**'
-      - 'lianel/dc/scripts/deployment/run-comp-ai-migrations.sh'
-      - 'lianel/dc/docker-compose.comp-ai.yaml'
-      - 'lianel/dc/docker-compose.yaml'
-      - 'lianel/dc/nginx/config/nginx.conf'
-      - '.github/workflows/deploy-comp-ai-service.yml'
-      - '.github/scripts/watch-deploy-comp-ai.sh'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual only; no push trigger to avoid deploying on unrelated changes
 
 env:
   REGISTRY: ghcr.io
