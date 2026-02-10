@@ -31,8 +31,11 @@ jobs:
           node-version: '18'
 
       - name: Install dependencies
+        env:
+          NODE_ENV: development
         run: |
-          cd lianel/dc/stock-monitoring/frontend && (npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps)
+          cd lianel/dc/stock-monitoring/frontend
+          if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
 
       - name: Run tests
         run: |
