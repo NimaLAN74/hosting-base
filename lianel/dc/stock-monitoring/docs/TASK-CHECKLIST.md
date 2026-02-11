@@ -22,10 +22,10 @@
 
 ## Phase 2 – Watchlists and audit (P0.2, P0.7)
 
-- [ ] **2.1** Backend: watchlist models and DB — Structs and queries for `watchlists` and `watchlist_items`; enforce `user_id`.
-- [ ] **2.2** Backend: watchlist REST API — GET/POST watchlists; GET/POST/DELETE items; all scoped by user.
-- [ ] **2.3** Backend: audit logging — Helper to insert into `audit_log`; call on every watchlist/item create/update/delete.
-- [ ] **2.4** Backend: symbol validation — Validate symbol format and optional EU MIC when adding to watchlist; 400 on invalid.
+- [x] **2.1** Backend: watchlist models and DB — Structs and queries for `watchlists` and `watchlist_items`; enforce `user_id`.
+- [x] **2.2** Backend: watchlist REST API — GET/POST watchlists; GET/POST/DELETE items; all scoped by user.
+- [x] **2.3** Backend: audit logging — Helper to insert into `audit_log`; call on every watchlist/item create/update/delete.
+- [x] **2.4** Backend: symbol validation — Validate symbol format and optional EU MIC when adding to watchlist; 400 on invalid.
 
 **Phase 2 done when:** Watchlist CRUD works via API; every mutation is in `audit_log`; EU symbols validated.
 

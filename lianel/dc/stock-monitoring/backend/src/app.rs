@@ -1,11 +1,11 @@
 //! Axum router and handlers. Exposed for integration tests (oneshot) and main binary.
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
     response::IntoResponse,
-    routing::get,
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,10 @@ pub fn create_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
+        .route("/api/v1/watchlists", get(list_watchlists).post(create_watchlist))
+        .route("/api/v1/watchlists/:watchlist_id", delete(delete_watchlist))
+        .route("/api/v1/watchlists/:watchlist_id/items", get(list_watchlist_items).post(add_watchlist_item))
+        .route("/api/v1/watchlists/:watchlist_id/items/:item_id", delete(delete_watchlist_item))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -406,6 +410,390 @@ fn current_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis() as u64
+}
+
+#[derive(Debug, Serialize)]
+struct WatchlistDto {
+    id: i64,
+    name: String,
+    item_count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWatchlistRequest {
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WatchlistItemDto {
+    id: i64,
+    symbol: String,
+    mic: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AddWatchlistItemRequest {
+    symbol: String,
+    mic: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeleteResult {
+    ok: bool,
+}
+
+async fn list_watchlists(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<Vec<WatchlistDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows = sqlx::query_as::<_, (i64, String, i64)>(
+        r#"
+        SELECT w.id, w.name, COALESCE(COUNT(i.id), 0) AS item_count
+        FROM stock_monitoring.watchlists w
+        LEFT JOIN stock_monitoring.watchlist_items i ON i.watchlist_id = w.id
+        WHERE w.user_id = $1
+        GROUP BY w.id, w.name, w.updated_at
+        ORDER BY w.updated_at DESC, w.id DESC
+        "#,
+    )
+    .bind(&user_id.0)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let out = rows
+        .into_iter()
+        .map(|(id, name, item_count)| WatchlistDto { id, name, item_count })
+        .collect::<Vec<_>>();
+    Ok(Json(out))
+}
+
+async fn create_watchlist(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Json(body): Json<CreateWatchlistRequest>,
+) -> Result<(StatusCode, Json<WatchlistDto>), (StatusCode, Json<serde_json::Value>)> {
+    let name = body.name.trim();
+    if name.is_empty() || name.len() > 255 {
+        return Err(bad_request("Invalid watchlist name"));
+    }
+
+    let inserted = sqlx::query_as::<_, (i64, String)>(
+        r#"
+        INSERT INTO stock_monitoring.watchlists (user_id, name)
+        VALUES ($1, $2)
+        RETURNING id, name
+        "#,
+    )
+    .bind(&user_id.0)
+    .bind(name)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("duplicate key") || msg.contains("unique") {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "Watchlist already exists for this user"
+                })),
+            )
+        } else {
+            internal_error(e)
+        }
+    })?;
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "watchlist.create",
+        Some("watchlist"),
+        Some(&inserted.0.to_string()),
+        Some(serde_json::json!({ "name": inserted.1 })),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(WatchlistDto {
+            id: inserted.0,
+            name: inserted.1,
+            item_count: 0,
+        }),
+    ))
+}
+
+async fn delete_watchlist(
+    State(state): State<AppState>,
+    Path((watchlist_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<DeleteResult>, (StatusCode, Json<serde_json::Value>)> {
+    let deleted = sqlx::query_as::<_, (i64, String)>(
+        r#"
+        DELETE FROM stock_monitoring.watchlists
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, name
+        "#,
+    )
+    .bind(watchlist_id)
+    .bind(&user_id.0)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let Some((id, name)) = deleted else {
+        return Err(not_found("Watchlist not found"));
+    };
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "watchlist.delete",
+        Some("watchlist"),
+        Some(&id.to_string()),
+        Some(serde_json::json!({ "name": name })),
+    )
+    .await;
+
+    Ok(Json(DeleteResult { ok: true }))
+}
+
+async fn list_watchlist_items(
+    State(state): State<AppState>,
+    Path((watchlist_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<Vec<WatchlistItemDto>>, (StatusCode, Json<serde_json::Value>)> {
+    ensure_watchlist_owned(&state.pool, watchlist_id, &user_id.0).await?;
+
+    let rows = sqlx::query_as::<_, (i64, String, Option<String>)>(
+        r#"
+        SELECT i.id, i.symbol, i.mic
+        FROM stock_monitoring.watchlist_items i
+        WHERE i.watchlist_id = $1
+        ORDER BY i.id DESC
+        "#,
+    )
+    .bind(watchlist_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let items = rows
+        .into_iter()
+        .map(|(id, symbol, mic)| WatchlistItemDto { id, symbol, mic })
+        .collect::<Vec<_>>();
+    Ok(Json(items))
+}
+
+async fn add_watchlist_item(
+    State(state): State<AppState>,
+    Path((watchlist_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Json(body): Json<AddWatchlistItemRequest>,
+) -> Result<(StatusCode, Json<WatchlistItemDto>), (StatusCode, Json<serde_json::Value>)> {
+    ensure_watchlist_owned(&state.pool, watchlist_id, &user_id.0).await?;
+
+    let symbol = normalize_symbol(&body.symbol)?;
+    let mic = normalize_mic(body.mic.as_deref())?;
+
+    let inserted = sqlx::query_as::<_, (i64, String, Option<String>)>(
+        r#"
+        INSERT INTO stock_monitoring.watchlist_items (watchlist_id, symbol, mic)
+        VALUES ($1, $2, $3)
+        RETURNING id, symbol, mic
+        "#,
+    )
+    .bind(watchlist_id)
+    .bind(&symbol)
+    .bind(&mic)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("duplicate key") || msg.contains("unique") {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "Symbol already exists in this watchlist"
+                })),
+            )
+        } else {
+            internal_error(e)
+        }
+    })?;
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "watchlist_item.add",
+        Some("watchlist_item"),
+        Some(&inserted.0.to_string()),
+        Some(serde_json::json!({
+            "watchlist_id": watchlist_id,
+            "symbol": inserted.1,
+            "mic": inserted.2
+        })),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(WatchlistItemDto {
+            id: inserted.0,
+            symbol: inserted.1,
+            mic: inserted.2,
+        }),
+    ))
+}
+
+async fn delete_watchlist_item(
+    State(state): State<AppState>,
+    Path((watchlist_id, item_id)): Path<(i64, i64)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<DeleteResult>, (StatusCode, Json<serde_json::Value>)> {
+    ensure_watchlist_owned(&state.pool, watchlist_id, &user_id.0).await?;
+
+    let deleted = sqlx::query_as::<_, (i64, String, Option<String>)>(
+        r#"
+        DELETE FROM stock_monitoring.watchlist_items
+        WHERE id = $1 AND watchlist_id = $2
+        RETURNING id, symbol, mic
+        "#,
+    )
+    .bind(item_id)
+    .bind(watchlist_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let Some((id, symbol, mic)) = deleted else {
+        return Err(not_found("Watchlist item not found"));
+    };
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "watchlist_item.delete",
+        Some("watchlist_item"),
+        Some(&id.to_string()),
+        Some(serde_json::json!({
+            "watchlist_id": watchlist_id,
+            "symbol": symbol,
+            "mic": mic
+        })),
+    )
+    .await;
+
+    Ok(Json(DeleteResult { ok: true }))
+}
+
+async fn ensure_watchlist_owned(
+    pool: &sqlx::PgPool,
+    watchlist_id: i64,
+    user_id: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM stock_monitoring.watchlists WHERE id = $1 AND user_id = $2)",
+    )
+    .bind(watchlist_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(internal_error)?;
+
+    if !exists {
+        return Err(not_found("Watchlist not found"));
+    }
+    Ok(())
+}
+
+fn normalize_symbol(raw: &str) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = raw.trim().to_uppercase();
+    if symbol.is_empty()
+        || symbol.len() > 32
+        || !symbol
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        return Err(bad_request("Invalid symbol format"));
+    }
+    Ok(symbol)
+}
+
+fn normalize_mic(raw: Option<&str>) -> Result<Option<String>, (StatusCode, Json<serde_json::Value>)> {
+    let Some(value) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let mic = value.to_uppercase();
+    // EU-focused allowed MICs for MVP.
+    const ALLOWED_MICS: &[&str] = &[
+        "XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XOSL", "XETR", "XFRA", "XLON", "XSWX", "XMIL",
+        "XMAD", "XSTO", "XHEL", "XCSE", "XICE",
+    ];
+    if mic.len() > 8 || !mic.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(bad_request("Invalid MIC format"));
+    }
+    if !ALLOWED_MICS.contains(&mic.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Unsupported MIC for EU MVP",
+                "detail": format!("MIC {} is not in allowed EU list", mic)
+            })),
+        ));
+    }
+    Ok(Some(mic))
+}
+
+async fn write_audit(
+    pool: &sqlx::PgPool,
+    user_id: Option<&str>,
+    action: &str,
+    resource_type: Option<&str>,
+    resource_id: Option<&str>,
+    details: Option<serde_json::Value>,
+) {
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO stock_monitoring.audit_log (user_id, action, resource_type, resource_id, details)
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        "#,
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id)
+    .bind(details.unwrap_or_else(|| serde_json::json!({})).to_string())
+    .execute(pool)
+    .await;
+}
+
+fn bad_request(message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": message
+        })),
+    )
+}
+
+fn not_found(message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": message
+        })),
+    )
+}
+
+fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({
+            "error": "Internal server error",
+            "detail": err.to_string()
+        })),
+    )
 }
 
 async fn me(
