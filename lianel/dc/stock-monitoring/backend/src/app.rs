@@ -48,7 +48,8 @@ pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
-        .route("/api/v1/quotes", get(quotes));
+        .route("/api/v1/quotes", get(quotes))
+        .route("/internal/alerts/evaluate", post(evaluate_alerts_internal));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -183,6 +184,13 @@ struct QuotesResponse {
     as_of_ms: u64,
     quotes: Vec<QuoteDto>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AlertEvaluationResult {
+    ok: bool,
+    users_evaluated: usize,
+    evaluated_at_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -794,6 +802,36 @@ async fn list_alerts(
         )
         .collect::<Vec<_>>();
     Ok(Json(out))
+}
+
+async fn evaluate_alerts_internal(
+    State(state): State<AppState>,
+) -> Result<Json<AlertEvaluationResult>, (StatusCode, Json<serde_json::Value>)> {
+    let users = evaluate_alerts_all_users(&state).await.map_err(internal_error)?;
+    Ok(Json(AlertEvaluationResult {
+        ok: true,
+        users_evaluated: users,
+        evaluated_at_ms: current_time_ms(),
+    }))
+}
+
+async fn evaluate_alerts_all_users(state: &AppState) -> anyhow::Result<usize> {
+    let user_ids = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT DISTINCT user_id
+        FROM stock_monitoring.alerts
+        WHERE enabled = true
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    for user_id in &user_ids {
+        if let Err(err) = evaluate_alerts_for_user(state, user_id).await {
+            tracing::warn!("Alert evaluation failed for user {}: {}", user_id, err);
+        }
+    }
+    Ok(user_ids.len())
 }
 
 async fn evaluate_alerts_for_user(state: &AppState, user_id: &str) -> anyhow::Result<()> {

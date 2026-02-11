@@ -48,7 +48,7 @@
 - [x] **4.1** Backend: alert model and DB — Queries for alerts (list by user, get, create, update, delete, list by symbol).
 - [x] **4.2** Backend: alerts REST API — GET/POST/PUT/DELETE alerts; enable/disable; audit on changes.
 - [x] **4.3** Backend: alert evaluation — Logic to check price vs conditions; set `notified_at`; write audit_log; prepare for notification.
-- [ ] **4.4** Airflow: alert evaluation DAG — Optional DAG that runs after ingest and triggers backend evaluation (or backend runs it).
+- [x] **4.4** Airflow: alert evaluation DAG — Optional DAG that runs after ingest and triggers backend evaluation (or backend runs it).
 
 **Phase 4 done when:** Alert CRUD works; price conditions are evaluated; triggered alerts recorded for notifications.
 
