@@ -61,6 +61,25 @@ function normalizeAlertFromApi(item) {
   };
 }
 
+function formatMoney(value, currency) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 'n/a';
+  }
+  if (currency && /^[A-Z]{3}$/.test(currency)) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4,
+      }).format(value);
+    } catch {
+      // Fallback below if browser rejects a currency code.
+    }
+  }
+  return value.toFixed(2);
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -85,6 +104,7 @@ function App() {
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [prices, setPrices] = useState({});
+  const [quoteCurrencies, setQuoteCurrencies] = useState({});
   const [quotesAsOf, setQuotesAsOf] = useState(null);
   const [quotesError, setQuotesError] = useState('');
   const [alerts, setAlerts] = useState([]);
@@ -213,6 +233,7 @@ function App() {
     const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
     if (symbols.length === 0) {
       setPrices({});
+      setQuoteCurrencies({});
       setQuotesError('');
       return;
     }
@@ -226,12 +247,18 @@ function App() {
       }
       const payload = await response.json();
       const map = {};
+      const currencyMap = {};
       for (const item of payload.quotes || []) {
         if (item?.symbol && typeof item?.price === 'number') {
-          map[String(item.symbol).toUpperCase()] = item.price;
+          const symbol = String(item.symbol).toUpperCase();
+          map[symbol] = item.price;
+          if (item?.currency) {
+            currencyMap[symbol] = String(item.currency).toUpperCase();
+          }
         }
       }
       setPrices(map);
+      setQuoteCurrencies(currencyMap);
       setQuotesAsOf(payload?.as_of_ms || null);
       setQuotesError('');
     } catch (err) {
@@ -363,7 +390,7 @@ function App() {
           id: `${now}-${alert.id}`,
           createdAt: now,
           severity: 'warning',
-          message: `${alert.symbol} is ${current.toFixed(2)} (${alert.direction} ${alert.target.toFixed(2)})`,
+          message: `${alert.symbol} is ${formatMoney(current, quoteCurrencies[alert.symbol])} (${alert.direction} ${formatMoney(alert.target, quoteCurrencies[alert.symbol])})`,
         });
         return { ...alert, active: true, lastTriggeredAt: now };
       }
@@ -375,7 +402,7 @@ function App() {
     if (fired.length > 0) {
       setNotifications((prev) => [...fired, ...prev].slice(0, 50));
     }
-  }, [prices]);
+  }, [prices, quoteCurrencies]);
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
     () => (status?.database || '').toLowerCase() === 'connected',
@@ -414,6 +441,7 @@ function App() {
         status,
         metrics,
         prices,
+        quoteCurrencies,
         severity: latestCheck?.severity || 'unknown',
       },
       recentChecks: history,
@@ -435,7 +463,7 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? `Copy failed: ${err.message}` : 'Copy failed');
     }
-  }, [health, history, lastUpdated, latestCheck?.severity, metrics, prices, quotesAsOf, status]);
+  }, [health, history, lastUpdated, latestCheck?.severity, metrics, prices, quoteCurrencies, quotesAsOf, status]);
 
   const addSymbol = useCallback(async () => {
     const normalized = symbolInput.toUpperCase().trim();
@@ -959,7 +987,7 @@ function App() {
               {watchlistSymbols.map((symbol) => (
                 <div className="price-input-row" key={`price-${symbol}`}>
                   <span>{symbol}</span>
-                  <strong>{typeof prices[symbol] === 'number' ? prices[symbol].toFixed(2) : 'n/a'}</strong>
+                  <strong>{formatMoney(prices[symbol], quoteCurrencies[symbol])}</strong>
                 </div>
               ))}
             </div>
@@ -1009,7 +1037,7 @@ function App() {
                 {alerts.map((alert) => (
                   <div className={`alert-item ${alert.active ? 'active' : ''}`} key={alert.id}>
                     <div>
-                      <strong>{alert.symbol}</strong> {alert.direction} {alert.target.toFixed(2)}
+                      <strong>{alert.symbol}</strong> {alert.direction} {formatMoney(alert.target, quoteCurrencies[alert.symbol])}
                       <div className="status-meta">
                         {alert.lastTriggeredAt
                           ? `Last triggered: ${new Date(alert.lastTriggeredAt).toLocaleString()}`

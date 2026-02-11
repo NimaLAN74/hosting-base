@@ -755,6 +755,10 @@ async fn list_alerts(
     State(state): State<AppState>,
     axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
 ) -> Result<Json<Vec<AlertDto>>, (StatusCode, Json<serde_json::Value>)> {
+    if let Err(err) = evaluate_alerts_for_user(&state, &user_id.0).await {
+        tracing::warn!("Alert evaluation skipped: {}", err);
+    }
+
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, String, f64, bool, bool)>(
         r#"
         SELECT
@@ -790,6 +794,114 @@ async fn list_alerts(
         )
         .collect::<Vec<_>>();
     Ok(Json(out))
+}
+
+async fn evaluate_alerts_for_user(state: &AppState, user_id: &str) -> anyhow::Result<()> {
+    let alerts = sqlx::query_as::<_, (i64, String, String, f64, bool)>(
+        r#"
+        SELECT
+            id,
+            symbol,
+            condition_type,
+            condition_value::double precision,
+            (notified_at IS NOT NULL) AS was_notified
+        FROM stock_monitoring.alerts
+        WHERE user_id = $1
+          AND enabled = true
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    if alerts.is_empty() {
+        return Ok(());
+    }
+
+    let mut symbols = alerts.iter().map(|(_, symbol, _, _, _)| symbol.clone()).collect::<Vec<_>>();
+    symbols.sort();
+    symbols.dedup();
+    let quotes = fetch_provider_quotes(&state.quote_service.http, &symbols).await?;
+
+    let mut price_by_symbol = HashMap::new();
+    for quote in quotes {
+        price_by_symbol.insert(quote.symbol.to_uppercase(), quote);
+    }
+
+    for (alert_id, symbol, condition_type, condition_value, was_notified) in alerts {
+        let Some(quote) = price_by_symbol.get(&symbol.to_uppercase()) else {
+            continue;
+        };
+        let condition_met = match condition_type.as_str() {
+            "above" => quote.price >= condition_value,
+            "below" => quote.price <= condition_value,
+            _ => false,
+        };
+
+        if condition_met && !was_notified {
+            let updated = sqlx::query(
+                r#"
+                UPDATE stock_monitoring.alerts
+                SET notified_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND user_id = $2 AND notified_at IS NULL
+                "#,
+            )
+            .bind(alert_id)
+            .bind(user_id)
+            .execute(&state.pool)
+            .await?;
+            if updated.rows_affected() > 0 {
+                write_audit(
+                    &state.pool,
+                    Some(user_id),
+                    "alert.trigger",
+                    Some("alert"),
+                    Some(&alert_id.to_string()),
+                    Some(serde_json::json!({
+                        "symbol": symbol,
+                        "condition_type": condition_type,
+                        "condition_value": condition_value,
+                        "price": quote.price,
+                        "currency": quote.currency
+                    })),
+                )
+                .await;
+            }
+        } else if !condition_met && was_notified {
+            let updated = sqlx::query(
+                r#"
+                UPDATE stock_monitoring.alerts
+                SET notified_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND user_id = $2 AND notified_at IS NOT NULL
+                "#,
+            )
+            .bind(alert_id)
+            .bind(user_id)
+            .execute(&state.pool)
+            .await?;
+            if updated.rows_affected() > 0 {
+                write_audit(
+                    &state.pool,
+                    Some(user_id),
+                    "alert.reset",
+                    Some("alert"),
+                    Some(&alert_id.to_string()),
+                    Some(serde_json::json!({
+                        "symbol": symbol,
+                        "condition_type": condition_type,
+                        "condition_value": condition_value,
+                        "price": quote.price,
+                        "currency": quote.currency
+                    })),
+                )
+                .await;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn create_alert(
