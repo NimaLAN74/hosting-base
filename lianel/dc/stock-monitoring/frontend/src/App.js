@@ -7,6 +7,9 @@ const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
 const WATCHLIST_STORAGE_KEY = 'stock_monitoring_watchlist_v1';
+const ALERTS_STORAGE_KEY = 'stock_monitoring_alerts_v1';
+const PRICES_STORAGE_KEY = 'stock_monitoring_prices_v1';
+const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 
 function evaluateSeverity({
@@ -69,6 +72,36 @@ function App() {
   });
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
+  const [prices, setPrices] = useState(() => {
+    try {
+      const raw = localStorage.getItem(PRICES_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [alerts, setAlerts] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ALERTS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [alertSymbol, setAlertSymbol] = useState(DEFAULT_WATCHLIST[0]);
+  const [alertDirection, setAlertDirection] = useState('above');
+  const [alertTarget, setAlertTarget] = useState('');
+  const [alertError, setAlertError] = useState('');
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -194,6 +227,53 @@ function App() {
   useEffect(() => {
     localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
   }, [watchlist]);
+  useEffect(() => {
+    localStorage.setItem(PRICES_STORAGE_KEY, JSON.stringify(prices));
+  }, [prices]);
+  useEffect(() => {
+    localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
+  }, [alerts]);
+  useEffect(() => {
+    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
+  }, [notifications]);
+  useEffect(() => {
+    if (!watchlist.includes(alertSymbol)) {
+      setAlertSymbol(watchlist[0] || '');
+    }
+  }, [alertSymbol, watchlist]);
+  useEffect(() => {
+    // Trigger alerts when prices cross thresholds (one-shot until condition resets).
+    const fired = [];
+    setAlerts((prev) => prev.map((alert) => {
+      if (!alert.enabled) {
+        return alert.active ? { ...alert, active: false } : alert;
+      }
+      const current = prices[alert.symbol];
+      if (typeof current !== 'number' || Number.isNaN(current)) {
+        return alert.active ? { ...alert, active: false } : alert;
+      }
+      const conditionMet = alert.direction === 'above'
+        ? current >= alert.target
+        : current <= alert.target;
+      if (conditionMet && !alert.active) {
+        const now = new Date().toISOString();
+        fired.push({
+          id: `${now}-${alert.id}`,
+          createdAt: now,
+          severity: 'warning',
+          message: `${alert.symbol} is ${current.toFixed(2)} (${alert.direction} ${alert.target.toFixed(2)})`,
+        });
+        return { ...alert, active: true, lastTriggeredAt: now };
+      }
+      if (!conditionMet && alert.active) {
+        return { ...alert, active: false };
+      }
+      return alert;
+    }));
+    if (fired.length > 0) {
+      setNotifications((prev) => [...fired, ...prev].slice(0, 50));
+    }
+  }, [prices]);
 
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
@@ -271,6 +351,68 @@ function App() {
 
   const removeSymbol = useCallback((symbolToRemove) => {
     setWatchlist((prev) => prev.filter((item) => item !== symbolToRemove));
+  }, []);
+  const setPriceForSymbol = useCallback((symbol, value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setPrices((prev) => {
+        const next = { ...prev };
+        delete next[symbol];
+        return next;
+      });
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isNaN(parsed)) {
+      return;
+    }
+    setPrices((prev) => ({ ...prev, [symbol]: parsed }));
+  }, []);
+  const addAlert = useCallback(() => {
+    setAlertError('');
+    const symbol = alertSymbol.toUpperCase().trim();
+    const target = Number(alertTarget);
+    if (!symbol) {
+      setAlertError('Choose a symbol for the alert.');
+      return;
+    }
+    if (Number.isNaN(target) || target <= 0) {
+      setAlertError('Target price must be a positive number.');
+      return;
+    }
+    const duplicate = alerts.some(
+      (item) => item.symbol === symbol && item.direction === alertDirection && item.target === target
+    );
+    if (duplicate) {
+      setAlertError('Same alert already exists.');
+      return;
+    }
+    const now = new Date().toISOString();
+    setAlerts((prev) => [
+      {
+        id: `${symbol}-${alertDirection}-${target}-${now}`,
+        symbol,
+        direction: alertDirection,
+        target,
+        enabled: true,
+        active: false,
+        createdAt: now,
+        lastTriggeredAt: null,
+      },
+      ...prev,
+    ]);
+    setAlertTarget('');
+  }, [alertDirection, alertSymbol, alertTarget, alerts]);
+  const removeAlert = useCallback((alertId) => {
+    setAlerts((prev) => prev.filter((item) => item.id !== alertId));
+  }, []);
+  const toggleAlert = useCallback((alertId, enabled) => {
+    setAlerts((prev) => prev.map((item) => (
+      item.id === alertId ? { ...item, enabled, active: enabled ? item.active : false } : item
+    )));
+  }, []);
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
   }, []);
 
   return (
@@ -441,6 +583,109 @@ function App() {
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">Current prices (manual feed)</p>
+            </div>
+            <div className="price-grid">
+              {watchlist.map((symbol) => (
+                <label className="price-input-row" key={`price-${symbol}`}>
+                  <span>{symbol}</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={prices[symbol] ?? ''}
+                    onChange={(event) => setPriceForSymbol(symbol, event.target.value)}
+                    placeholder="Set price"
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">Price alerts (P0.3 MVP)</p>
+              <span className="history-count">{alerts.length} alerts</span>
+            </div>
+            <div className="alert-form">
+              <select value={alertSymbol} onChange={(event) => setAlertSymbol(event.target.value)}>
+                {watchlist.map((symbol) => (
+                  <option key={`opt-${symbol}`} value={symbol}>{symbol}</option>
+                ))}
+              </select>
+              <select value={alertDirection} onChange={(event) => setAlertDirection(event.target.value)}>
+                <option value="above">above</option>
+                <option value="below">below</option>
+              </select>
+              <input
+                type="number"
+                step="0.01"
+                inputMode="decimal"
+                value={alertTarget}
+                onChange={(event) => setAlertTarget(event.target.value)}
+                placeholder="Target price"
+              />
+              <button type="button" className="raw-toggle-btn" onClick={addAlert}>
+                Add alert
+              </button>
+            </div>
+            {alertError && <p className="watchlist-error">{alertError}</p>}
+            {alerts.length === 0 ? (
+              <p className="status-meta">No alerts yet.</p>
+            ) : (
+              <div className="alerts-list">
+                {alerts.map((alert) => (
+                  <div className={`alert-item ${alert.active ? 'active' : ''}`} key={alert.id}>
+                    <div>
+                      <strong>{alert.symbol}</strong> {alert.direction} {alert.target.toFixed(2)}
+                      <div className="status-meta">
+                        {alert.lastTriggeredAt
+                          ? `Last triggered: ${new Date(alert.lastTriggeredAt).toLocaleString()}`
+                          : `Created: ${new Date(alert.createdAt).toLocaleString()}`}
+                      </div>
+                    </div>
+                    <div className="alert-actions">
+                      <label className="toggle-inline">
+                        <input
+                          type="checkbox"
+                          checked={alert.enabled}
+                          onChange={(event) => toggleAlert(alert.id, event.target.checked)}
+                        />
+                        Enabled
+                      </label>
+                      <button type="button" className="delete-btn" onClick={() => removeAlert(alert.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">In-app notifications (P0.4 channel)</p>
+              <button type="button" className="raw-toggle-btn" onClick={clearNotifications}>
+                Clear
+              </button>
+            </div>
+            {notifications.length === 0 ? (
+              <p className="status-meta">No notifications yet.</p>
+            ) : (
+              <div className="notifications-list">
+                {notifications.map((note) => (
+                  <div className="notification-item" key={note.id}>
+                    <div className="status-meta">{new Date(note.createdAt).toLocaleTimeString()}</div>
+                    <div>{note.message}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="status-card scope-card">
