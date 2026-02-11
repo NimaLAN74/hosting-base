@@ -229,6 +229,20 @@ jobs:
                psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -c \"SELECT 1 FROM stock_monitoring.watchlists LIMIT 1\" >/dev/null"
           echo "✅ Migration 022 on production"
 
+      - name: Restart stock backend after DB migration
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "set -e; DC_DIR=; for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/docker-compose.stock-monitoring.yaml\" ] && DC_DIR=\"\$d\" && break; done; \
+             [ -n \"\$DC_DIR\" ] || { echo 'No compose dir found'; exit 1; }; \
+             cd \"\$DC_DIR\"; \
+             docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d --force-recreate --no-deps stock-monitoring-service; \
+             sleep 5; docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml ps stock-monitoring-service"
+          echo "✅ Stock backend restarted after migration"
+
       - name: Verify deployment (health)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
@@ -237,8 +251,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "docker exec lianel-stock-monitoring-service curl -f http://localhost:3003/health" || \
-          { echo "❌ Health check failed"; exit 1; }
+            "set -e; for i in \$(seq 1 15); do docker exec lianel-stock-monitoring-service curl -fsS http://localhost:3003/health && exit 0; sleep 3; done; exit 1" || \
+          { echo "❌ Health check failed after retries"; exit 1; }
           echo "✅ Health check passed (HTTPS exposure when nginx location added in 1.6)"
 
       - name: Summary
