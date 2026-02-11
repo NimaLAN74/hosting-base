@@ -200,7 +200,19 @@ jobs:
             lianel/dc/database/migrations/022_stock_monitoring_schema.sql \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
-            "DC_DIR=; for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/.env\" ] && DC_DIR=\"\$d\" && break; done; [ -n \"\$DC_DIR\" ] && . \"\$DC_DIR/.env\" 2>/dev/null; PGPASSWORD=\${POSTGRES_PASSWORD:-postgres} psql -h \${POSTGRES_HOST:-172.18.0.1} -U \${POSTGRES_USER:-postgres} -d \${POSTGRES_DB:-lianel_energy} -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql 2>/dev/null || echo '⚠️ Migration (idempotent)'"
+            "set -euo pipefail; \
+             DC_DIR=''; \
+             for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/.env\" ] && DC_DIR=\"\$d\" && break; done; \
+             [ -n \"\$DC_DIR\" ] && . \"\$DC_DIR/.env\" 2>/dev/null || true; \
+             DB_HOST=\${POSTGRES_HOST:-172.18.0.1}; \
+             DB_USER=\${POSTGRES_USER:-postgres}; \
+             DB_NAME=\${POSTGRES_DB:-lianel_energy}; \
+             DB_PASS=\${POSTGRES_PASSWORD:-postgres}; \
+             echo \"Applying migration 022 to \$DB_USER@\$DB_HOST/\$DB_NAME\"; \
+             docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; \
+             docker run --rm --network host -e PGPASSWORD=\"\$DB_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -tAc \"SELECT to_regclass('stock_monitoring.watchlists')\" | grep -q 'stock_monitoring.watchlists'"
           echo "✅ Migration 022 on production"
 
       - name: Verify deployment (health)
