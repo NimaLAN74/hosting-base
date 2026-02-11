@@ -4,6 +4,32 @@ import './App.css';
 const API_HEALTH = '/api/v1/stock-monitoring/health';
 const API_STATUS = '/api/v1/stock-monitoring/status';
 const MAX_HISTORY_ITEMS = 20;
+const WARN_LATENCY_MS = 800;
+const CRITICAL_LATENCY_MS = 2000;
+
+function evaluateSeverity({
+  healthText,
+  dbText,
+  healthCode,
+  statusCode,
+  healthMs,
+  statusMs,
+  errorText,
+}) {
+  const healthOk = String(healthText || '').toLowerCase() === 'ok';
+  const dbOk = String(dbText || '').toLowerCase() === 'connected';
+  const healthCodeOk = typeof healthCode === 'number' && healthCode >= 200 && healthCode < 300;
+  const statusCodeOk = typeof statusCode === 'number' && statusCode >= 200 && statusCode < 300;
+  const maxLatency = Math.max(healthMs ?? 0, statusMs ?? 0);
+
+  if (errorText || !healthOk || !dbOk || !healthCodeOk || !statusCodeOk || maxLatency > CRITICAL_LATENCY_MS) {
+    return 'critical';
+  }
+  if (maxLatency > WARN_LATENCY_MS) {
+    return 'warning';
+  }
+  return 'ok';
+}
 
 function App() {
   const [loading, setLoading] = useState(true);
@@ -20,6 +46,7 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showRaw, setShowRaw] = useState(false);
   const [history, setHistory] = useState([]);
+  const [copied, setCopied] = useState(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -96,7 +123,8 @@ function App() {
         statusMs: nextMetrics.statusMs,
         errorText: issues.join(' | '),
       };
-      setHistory((prev) => [historyItem, ...prev].slice(0, MAX_HISTORY_ITEMS));
+      const severity = evaluateSeverity(historyItem);
+      setHistory((prev) => [{ ...historyItem, severity }, ...prev].slice(0, MAX_HISTORY_ITEMS));
 
       if (issues.length > 0) {
         setError(issues.join(' | '));
@@ -106,8 +134,7 @@ function App() {
       setError(errorText);
       const sampledAt = new Date();
       setLastUpdated(sampledAt.toLocaleString());
-      setHistory((prev) => [
-        {
+      const historyItem = {
           sampledAt: sampledAt.toISOString(),
           healthText: 'unknown',
           dbText: 'unknown',
@@ -116,9 +143,9 @@ function App() {
           healthMs: null,
           statusMs: null,
           errorText,
-        },
-        ...prev,
-      ].slice(0, MAX_HISTORY_ITEMS));
+      };
+      const severity = evaluateSeverity(historyItem);
+      setHistory((prev) => [{ ...historyItem, severity }, ...prev].slice(0, MAX_HISTORY_ITEMS));
     } finally {
       if (!silent) {
         setLoading(false);
@@ -147,6 +174,55 @@ function App() {
     () => (status?.database || '').toLowerCase() === 'connected',
     [status]
   );
+  const latestCheck = history[0];
+  const consecutiveCritical = useMemo(() => {
+    let count = 0;
+    for (const item of history) {
+      if (item.severity === 'critical') {
+        count += 1;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }, [history]);
+  const hasIncident = consecutiveCritical >= 3;
+  const hasWarningStreak = !hasIncident && history.length > 0 && history[0].severity === 'warning';
+
+  const copyDiagnostics = useCallback(async () => {
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      thresholds: {
+        warningLatencyMs: WARN_LATENCY_MS,
+        criticalLatencyMs: CRITICAL_LATENCY_MS,
+      },
+      latest: {
+        lastUpdated,
+        health,
+        status,
+        metrics,
+        severity: latestCheck?.severity || 'unknown',
+      },
+      recentChecks: history,
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (err) {
+      setError(err instanceof Error ? `Copy failed: ${err.message}` : 'Copy failed');
+    }
+  }, [health, history, lastUpdated, latestCheck?.severity, metrics, status]);
 
   return (
     <div className="App stock-app">
@@ -185,6 +261,9 @@ function App() {
             >
               {loading ? 'Refreshing...' : 'Refresh status'}
             </button>
+            <button type="button" className="copy-btn" onClick={copyDiagnostics}>
+              {copied ? 'Copied!' : 'Copy diagnostics'}
+            </button>
             <label className="auto-refresh-toggle">
               <input
                 type="checkbox"
@@ -197,6 +276,20 @@ function App() {
               <span className="last-updated">Last updated: {lastUpdated}</span>
             )}
           </div>
+
+          {(hasIncident || hasWarningStreak) && (
+            <div className={`incident-banner ${hasIncident ? 'critical' : 'warning'}`}>
+              {hasIncident ? (
+                <strong>
+                  Incident: {consecutiveCritical} consecutive critical checks. Investigate backend/API immediately.
+                </strong>
+              ) : (
+                <strong>
+                  Warning: latest check breached SLA threshold ({WARN_LATENCY_MS}+ms).
+                </strong>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="stock-error">
@@ -298,7 +391,10 @@ function App() {
                   </thead>
                   <tbody>
                     {history.map((item) => (
-                      <tr key={`${item.sampledAt}-${item.healthCode}-${item.statusCode}`}>
+                      <tr
+                        key={`${item.sampledAt}-${item.healthCode}-${item.statusCode}`}
+                        className={`history-row-${item.severity || 'ok'}`}
+                      >
                         <td>{new Date(item.sampledAt).toLocaleTimeString()}</td>
                         <td>{item.healthText.toUpperCase()}</td>
                         <td>{String(item.dbText).toUpperCase()}</td>

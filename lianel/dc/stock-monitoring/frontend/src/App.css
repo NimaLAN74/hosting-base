@@ -166,6 +166,20 @@ body {
   font-weight: 600;
 }
 
+.copy-btn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #1e293b;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.copy-btn:hover {
+  background: #e2e8f0;
+}
+
 .refresh-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
@@ -205,6 +219,25 @@ body {
 
 .stock-error p {
   margin: 0;
+}
+
+.incident-banner {
+  margin: 0 0 16px;
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+}
+
+.incident-banner.warning {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.incident-banner.critical {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #7f1d1d;
 }
 
 .status-grid {
@@ -325,6 +358,14 @@ body {
 .history-table td:last-child {
   white-space: normal;
   min-width: 220px;
+}
+
+.history-row-warning td {
+  background: #fffbeb;
+}
+
+.history-row-critical td {
+  background: #fef2f2;
 }
 
 .footer {
