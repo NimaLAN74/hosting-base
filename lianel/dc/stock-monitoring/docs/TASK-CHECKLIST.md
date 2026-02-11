@@ -57,7 +57,7 @@
 ## Phase 5 – Frontend (P0.5, P0.6)
 
 - [x] **5.1** Frontend: auth and API client — Keycloak login; Bearer token; API client with base URL `/api/v1/stock-monitoring`.
-- [ ] **5.2** Frontend: dashboard — One screen: watchlist symbols, latest price, last update time, simple up/down trend.
+- [x] **5.2** Frontend: dashboard — One screen: watchlist symbols, latest price, last update time, simple up/down trend.
 - [ ] **5.3** Frontend: watchlist management — Create/rename/delete watchlists; add/remove symbols (with validation feedback).
 - [x] **5.4** Frontend: alert management — Create/edit/delete alerts; set condition type and value; list with enabled/triggered state.
 - [ ] **5.5** Frontend: routing and layout — Routes for Dashboard, Watchlists, Alerts; nav; header with user and logout.

@@ -94,6 +94,7 @@ function App() {
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [prices, setPrices] = useState({});
+  const [previousPrices, setPreviousPrices] = useState({});
   const [quoteCurrencies, setQuoteCurrencies] = useState({});
   const [quotesAsOf, setQuotesAsOf] = useState(null);
   const [quotesError, setQuotesError] = useState('');
@@ -285,6 +286,7 @@ function App() {
           }
         }
       }
+      setPreviousPrices((prev) => ({ ...prev, ...prices }));
       setPrices(map);
       setQuoteCurrencies(currencyMap);
       setQuotesAsOf(payload?.as_of_ms || null);
@@ -293,7 +295,7 @@ function App() {
       applyAuthError(err);
       setQuotesError(err instanceof Error ? err.message : 'Failed to load quotes');
     }
-  }, [applyAuthError, watchlistItems]);
+  }, [applyAuthError, prices, watchlistItems]);
 
   const loadWatchlistItems = useCallback(async (watchlistId) => {
     const payload = await apiJson(`/watchlists/${watchlistId}/items`);
@@ -702,6 +704,22 @@ function App() {
   const displayUser = authState.userId || 'User';
   const displayInitial = displayUser.charAt(0).toUpperCase() || 'U';
   const isAuthReady = !authState.checking;
+  const dashboardRows = useMemo(() => watchlistSymbols.map((symbol) => {
+    const current = prices[symbol];
+    const previous = previousPrices[symbol];
+    let trend = 'flat';
+    if (typeof current === 'number' && typeof previous === 'number') {
+      if (current > previous) trend = 'up';
+      else if (current < previous) trend = 'down';
+    }
+    return {
+      symbol,
+      current,
+      previous,
+      trend,
+      currency: quoteCurrencies[symbol],
+    };
+  }), [previousPrices, prices, quoteCurrencies, watchlistSymbols]);
 
   return (
     <div className="App stock-app">
@@ -985,13 +1003,31 @@ function App() {
             <div className="raw-header">
               <p className="status-label">Current prices (provider feed)</p>
             </div>
-            <div className="price-grid">
-              {watchlistSymbols.map((symbol) => (
-                <div className="price-input-row" key={`price-${symbol}`}>
-                  <span>{symbol}</span>
-                  <strong>{formatMoney(prices[symbol], quoteCurrencies[symbol])}</strong>
-                </div>
-              ))}
+            <div className="history-table-wrapper">
+              <table className="history-table market-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Latest</th>
+                    <th>Previous</th>
+                    <th>Trend</th>
+                    <th>As of</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardRows.map((row) => (
+                    <tr key={`price-${row.symbol}`}>
+                      <td>{row.symbol}</td>
+                      <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
+                      <td>{formatMoney(row.previous, row.currency)}</td>
+                      <td className={`trend-cell trend-${row.trend}`}>
+                        {row.trend === 'up' ? '▲ Up' : row.trend === 'down' ? '▼ Down' : '• Flat'}
+                      </td>
+                      <td>{quotesAsOf ? new Date(quotesAsOf).toLocaleTimeString() : 'n/a'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
           )}

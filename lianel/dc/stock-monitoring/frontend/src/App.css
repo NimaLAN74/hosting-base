@@ -586,6 +586,27 @@ body {
   background: #fef2f2;
 }
 
+.trend-cell {
+  font-weight: 700;
+}
+
+.trend-up {
+  color: #166534;
+}
+
+.trend-down {
+  color: #b91c1c;
+}
+
+.trend-flat {
+  color: #475569;
+}
+
+.market-table td,
+.market-table th {
+  white-space: nowrap;
+}
+
 @media (max-width: 880px) {
   .alert-form {
     grid-template-columns: 1fr;
