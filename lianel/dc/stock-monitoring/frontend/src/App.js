@@ -6,6 +6,8 @@ const API_STATUS = '/api/v1/stock-monitoring/status';
 const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
+const WATCHLIST_STORAGE_KEY = 'stock_monitoring_watchlist_v1';
+const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 
 function evaluateSeverity({
   healthText,
@@ -47,6 +49,26 @@ function App() {
   const [showRaw, setShowRaw] = useState(false);
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
+  const [watchlist, setWatchlist] = useState(() => {
+    try {
+      const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+      if (!raw) {
+        return DEFAULT_WATCHLIST;
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return DEFAULT_WATCHLIST;
+      }
+      const sanitized = parsed
+        .map((item) => String(item).toUpperCase().trim())
+        .filter(Boolean);
+      return sanitized.length > 0 ? sanitized : DEFAULT_WATCHLIST;
+    } catch {
+      return DEFAULT_WATCHLIST;
+    }
+  });
+  const [symbolInput, setSymbolInput] = useState('');
+  const [watchlistError, setWatchlistError] = useState('');
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -169,6 +191,10 @@ function App() {
     return () => clearInterval(intervalId);
   }, [autoRefresh, loadData]);
 
+  useEffect(() => {
+    localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
+  }, [watchlist]);
+
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
     () => (status?.database || '').toLowerCase() === 'connected',
@@ -223,6 +249,29 @@ function App() {
       setError(err instanceof Error ? `Copy failed: ${err.message}` : 'Copy failed');
     }
   }, [health, history, lastUpdated, latestCheck?.severity, metrics, status]);
+
+  const addSymbol = useCallback(() => {
+    const normalized = symbolInput.toUpperCase().trim();
+    setWatchlistError('');
+    if (!normalized) {
+      setWatchlistError('Enter a symbol first.');
+      return;
+    }
+    if (!/^[A-Z0-9._-]{1,20}$/.test(normalized)) {
+      setWatchlistError('Use letters/numbers and . _ - only (max 20 chars).');
+      return;
+    }
+    if (watchlist.includes(normalized)) {
+      setWatchlistError('Symbol already exists in your watchlist.');
+      return;
+    }
+    setWatchlist((prev) => [normalized, ...prev].slice(0, 50));
+    setSymbolInput('');
+  }, [symbolInput, watchlist]);
+
+  const removeSymbol = useCallback((symbolToRemove) => {
+    setWatchlist((prev) => prev.filter((item) => item !== symbolToRemove));
+  }, []);
 
   return (
     <div className="App stock-app">
@@ -351,6 +400,47 @@ function App() {
           <section className="status-card scope-card">
             <p className="status-label">Scope</p>
             <p className="status-value">{status?.scope || (loading ? 'Loading...' : 'unknown')}</p>
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">Watchlist (P0.2 MVP)</p>
+              <span className="history-count">{watchlist.length} symbols</span>
+            </div>
+            <div className="watchlist-form">
+              <input
+                type="text"
+                value={symbolInput}
+                onChange={(event) => setSymbolInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addSymbol();
+                  }
+                }}
+                className="symbol-input"
+                placeholder="Add symbol (e.g. SAN.MC)"
+                aria-label="Add symbol to watchlist"
+              />
+              <button type="button" className="raw-toggle-btn" onClick={addSymbol}>
+                Add symbol
+              </button>
+            </div>
+            {watchlistError && <p className="watchlist-error">{watchlistError}</p>}
+            <div className="watchlist-chips">
+              {watchlist.map((symbol) => (
+                <div className="watchlist-chip" key={symbol}>
+                  <span>{symbol}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeSymbol(symbol)}
+                    aria-label={`Remove ${symbol}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           </section>
 
           <section className="status-card scope-card">

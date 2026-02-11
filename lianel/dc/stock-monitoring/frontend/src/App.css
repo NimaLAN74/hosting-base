@@ -322,6 +322,63 @@ body {
   line-height: 1.45;
 }
 
+.watchlist-form {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.symbol-input {
+  flex: 1;
+  min-width: 240px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.watchlist-error {
+  margin-top: 10px;
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
+.watchlist-chips {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.watchlist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #1e293b;
+  background: #f8fafc;
+}
+
+.watchlist-chip button {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.watchlist-chip button:hover {
+  color: #b91c1c;
+}
+
 .history-count {
   color: #64748b;
   font-size: 0.86rem;
