@@ -8,7 +8,6 @@ const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
 const WATCHLIST_STORAGE_KEY = 'stock_monitoring_watchlist_v1';
 const ALERTS_STORAGE_KEY = 'stock_monitoring_alerts_v1';
-const PRICES_STORAGE_KEY = 'stock_monitoring_prices_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 
@@ -72,14 +71,9 @@ function App() {
   });
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
-  const [prices, setPrices] = useState(() => {
-    try {
-      const raw = localStorage.getItem(PRICES_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [prices, setPrices] = useState({});
+  const [quotesAsOf, setQuotesAsOf] = useState(null);
+  const [quotesError, setQuotesError] = useState('');
   const [alerts, setAlerts] = useState(() => {
     try {
       const raw = localStorage.getItem(ALERTS_STORAGE_KEY);
@@ -208,6 +202,35 @@ function App() {
     }
   }, []);
 
+  const fetchQuotes = useCallback(async () => {
+    if (watchlist.length === 0) {
+      setPrices({});
+      setQuotesError('');
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ symbols: watchlist.join(',') });
+      const response = await fetch(`/api/v1/stock-monitoring/quotes?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error(`Quotes request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const map = {};
+      for (const item of payload.quotes || []) {
+        if (item?.symbol && typeof item?.price === 'number') {
+          map[String(item.symbol).toUpperCase()] = item.price;
+        }
+      }
+      setPrices(map);
+      setQuotesAsOf(payload?.as_of_ms || null);
+      setQuotesError('');
+    } catch (err) {
+      setQuotesError(err instanceof Error ? err.message : 'Failed to load quotes');
+    }
+  }, [watchlist]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -219,17 +242,15 @@ function App() {
 
     const intervalId = setInterval(() => {
       loadData({ silent: true });
+      fetchQuotes();
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [autoRefresh, loadData]);
+  }, [autoRefresh, fetchQuotes, loadData]);
 
   useEffect(() => {
     localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
   }, [watchlist]);
-  useEffect(() => {
-    localStorage.setItem(PRICES_STORAGE_KEY, JSON.stringify(prices));
-  }, [prices]);
   useEffect(() => {
     localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
   }, [alerts]);
@@ -274,7 +295,6 @@ function App() {
       setNotifications((prev) => [...fired, ...prev].slice(0, 50));
     }
   }, [prices]);
-
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
     () => (status?.database || '').toLowerCase() === 'connected',
@@ -304,9 +324,11 @@ function App() {
       },
       latest: {
         lastUpdated,
+        quotesAsOf,
         health,
         status,
         metrics,
+        prices,
         severity: latestCheck?.severity || 'unknown',
       },
       recentChecks: history,
@@ -328,7 +350,7 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? `Copy failed: ${err.message}` : 'Copy failed');
     }
-  }, [health, history, lastUpdated, latestCheck?.severity, metrics, status]);
+  }, [health, history, lastUpdated, latestCheck?.severity, metrics, prices, quotesAsOf, status]);
 
   const addSymbol = useCallback(() => {
     const normalized = symbolInput.toUpperCase().trim();
@@ -351,22 +373,6 @@ function App() {
 
   const removeSymbol = useCallback((symbolToRemove) => {
     setWatchlist((prev) => prev.filter((item) => item !== symbolToRemove));
-  }, []);
-  const setPriceForSymbol = useCallback((symbol, value) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setPrices((prev) => {
-        const next = { ...prev };
-        delete next[symbol];
-        return next;
-      });
-      return;
-    }
-    const parsed = Number(trimmed);
-    if (Number.isNaN(parsed)) {
-      return;
-    }
-    setPrices((prev) => ({ ...prev, [symbol]: parsed }));
   }, []);
   const addAlert = useCallback(() => {
     setAlertError('');
@@ -414,6 +420,13 @@ function App() {
   const clearNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadData(), fetchQuotes()]);
+  }, [fetchQuotes, loadData]);
+
+  useEffect(() => {
+    fetchQuotes();
+  }, [fetchQuotes]);
 
   return (
     <div className="App stock-app">
@@ -446,7 +459,7 @@ function App() {
           <div className="status-toolbar">
             <button
               type="button"
-              onClick={() => loadData()}
+              onClick={refreshAll}
               disabled={loading}
               className="refresh-btn"
             >
@@ -466,7 +479,17 @@ function App() {
             {lastUpdated && (
               <span className="last-updated">Last updated: {lastUpdated}</span>
             )}
+            {quotesAsOf && (
+              <span className="last-updated">Data as of: {new Date(quotesAsOf).toLocaleString()}</span>
+            )}
           </div>
+          {quotesError && (
+            <div className="stock-error">
+              <p className="stock-error-title">Unable to load provider quotes</p>
+              <p>{quotesError}</p>
+            </div>
+          )}
+
 
           {(hasIncident || hasWarningStreak) && (
             <div className={`incident-banner ${hasIncident ? 'critical' : 'warning'}`}>
@@ -587,21 +610,14 @@ function App() {
 
           <section className="status-card scope-card">
             <div className="raw-header">
-              <p className="status-label">Current prices (manual feed)</p>
+              <p className="status-label">Current prices (provider feed)</p>
             </div>
             <div className="price-grid">
               {watchlist.map((symbol) => (
-                <label className="price-input-row" key={`price-${symbol}`}>
+                <div className="price-input-row" key={`price-${symbol}`}>
                   <span>{symbol}</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={prices[symbol] ?? ''}
-                    onChange={(event) => setPriceForSymbol(symbol, event.target.value)}
-                    placeholder="Set price"
-                  />
-                </label>
+                  <strong>{typeof prices[symbol] === 'number' ? prices[symbol].toFixed(2) : 'n/a'}</strong>
+                </div>
               ))}
             </div>
           </section>
@@ -612,7 +628,11 @@ function App() {
               <span className="history-count">{alerts.length} alerts</span>
             </div>
             <div className="alert-form">
-              <select value={alertSymbol} onChange={(event) => setAlertSymbol(event.target.value)}>
+              <select
+                value={alertSymbol}
+                onChange={(event) => setAlertSymbol(event.target.value)}
+                disabled={watchlist.length === 0}
+              >
                 {watchlist.map((symbol) => (
                   <option key={`opt-${symbol}`} value={symbol}>{symbol}</option>
                 ))}
@@ -633,6 +653,9 @@ function App() {
                 Add alert
               </button>
             </div>
+            {watchlist.length === 0 && (
+              <p className="status-meta">Add at least one watchlist symbol to create alerts.</p>
+            )}
             {alertError && <p className="watchlist-error">{alertError}</p>}
             {alerts.length === 0 ? (
               <p className="status-meta">No alerts yet.</p>

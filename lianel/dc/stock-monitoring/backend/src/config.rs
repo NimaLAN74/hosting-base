@@ -15,6 +15,10 @@ pub struct AppConfig {
     pub keycloak_url: String,
     /// Keycloak realm (e.g. lianel). Required for JWT validation.
     pub keycloak_realm: String,
+    /// Quotes provider identifier (MVP default: yahoo).
+    pub quote_provider: String,
+    /// Quote cache TTL in seconds for provider results.
+    pub quote_cache_ttl_seconds: u64,
 }
 
 impl AppConfig {
@@ -46,6 +50,12 @@ impl AppConfig {
             postgres_db: env::var("POSTGRES_DB").unwrap_or_else(|_| "postgres".to_string()),
             keycloak_url: env::var("KEYCLOAK_URL").unwrap_or_else(|_| "https://auth.lianel.se".to_string()),
             keycloak_realm: env::var("KEYCLOAK_REALM").unwrap_or_else(|_| "lianel".to_string()),
+            quote_provider: env::var("STOCK_MONITORING_QUOTE_PROVIDER")
+                .unwrap_or_else(|_| "yahoo".to_string()),
+            quote_cache_ttl_seconds: env::var("STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")
+                .unwrap_or_else(|_| "30".to_string())
+                .parse()
+                .context("Invalid STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")?,
         })
     }
 

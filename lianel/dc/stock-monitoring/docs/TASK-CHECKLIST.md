@@ -33,11 +33,11 @@
 
 ## Phase 3 – Quotes and data (P0.1)
 
-- [ ] **3.1** Quote storage decision — Document: DB table vs on-demand provider vs hybrid; decide and document.
+- [x] **3.1** Quote storage decision — **Chosen for MVP:** on-demand provider fetch with short in-memory cache (TTL) in backend.
 - [ ] **3.2** Migration 023 quote cache — If using DB: add `stock_monitoring.quote_cache` (symbol, price, updated_at, etc.).
 - [ ] **3.3** Airflow: ingest DAG — Implement `stock_monitoring_ingest_dag`: fetch EU symbols from provider, write to DB (or backend).
-- [ ] **3.4** Backend: quotes API — `GET /api/v1/quotes?symbols=...` returns latest price and last update for requested symbols.
-- [ ] **3.5** Backend: last update — Expose last ingestion time (e.g. in status or quotes response) for dashboard “Data as of”.
+- [x] **3.4** Backend: quotes API — `GET /api/v1/quotes?symbols=...` returns latest price and last update for requested symbols.
+- [x] **3.5** Backend: last update — Expose last ingestion time (e.g. in status or quotes response) for dashboard “Data as of”.
 
 **Phase 3 done when:** Quotes are ingested on schedule; quotes API works; dashboard can show last update.
 

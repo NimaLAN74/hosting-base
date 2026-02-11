@@ -1,30 +1,54 @@
 //! Axum router and handlers. Exposed for integration tests (oneshot) and main binary.
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 use crate::config::AppConfig;
 
 #[derive(Clone)]
+pub struct QuoteService {
+    pub provider: String,
+    pub cache_ttl: Duration,
+    pub http: reqwest::Client,
+    pub cache: Arc<RwLock<HashMap<String, CachedQuote>>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CachedQuote {
+    pub symbol: String,
+    pub price: f64,
+    pub currency: Option<String>,
+    pub fetched_at_ms: u64,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub validator: Arc<KeycloakJwtValidator>,
+    pub quote_service: QuoteService,
 }
 
 /// Build the application router (used by main and by API integration tests).
 pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
-        .route("/api/v1/status", get(status));
+        .route("/api/v1/status", get(status))
+        .route("/api/v1/quotes", get(quotes));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -98,6 +122,221 @@ async fn status(State(state): State<AppState>) -> String {
     } else {
         scope.to_string()
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct QuotesQuery {
+    symbols: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct QuoteDto {
+    symbol: String,
+    price: f64,
+    currency: Option<String>,
+    fetched_at_ms: u64,
+    stale: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct QuotesResponse {
+    provider: String,
+    as_of_ms: u64,
+    quotes: Vec<QuoteDto>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooQuoteEnvelope {
+    #[serde(rename = "quoteResponse")]
+    quote_response: YahooQuoteResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooQuoteResponse {
+    result: Vec<YahooQuoteItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooQuoteItem {
+    symbol: String,
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: Option<f64>,
+    currency: Option<String>,
+}
+
+async fn quotes(
+    State(state): State<AppState>,
+    Query(query): Query<QuotesQuery>,
+) -> Result<Json<QuotesResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbols = parse_symbols(query.symbols.as_deref())?;
+    let now_ms = current_time_ms();
+
+    let mut cached = Vec::new();
+    let mut missing = Vec::new();
+    {
+        let cache = state.quote_service.cache.read().await;
+        for symbol in &symbols {
+            if let Some(entry) = cache.get(symbol) {
+                let age_ms = now_ms.saturating_sub(entry.fetched_at_ms);
+                if age_ms <= state.quote_service.cache_ttl.as_millis() as u64 {
+                    cached.push(QuoteDto {
+                        symbol: entry.symbol.clone(),
+                        price: entry.price,
+                        currency: entry.currency.clone(),
+                        fetched_at_ms: entry.fetched_at_ms,
+                        stale: false,
+                    });
+                    continue;
+                }
+            }
+            missing.push(symbol.clone());
+        }
+    }
+
+    let mut fetched_quotes = Vec::new();
+    let mut fetch_error: Option<String> = None;
+    if !missing.is_empty() {
+        match fetch_yahoo_quotes(&state.quote_service.http, &missing).await {
+            Ok(items) => {
+                let mut write_cache = state.quote_service.cache.write().await;
+                for item in items {
+                    let quote = CachedQuote {
+                        symbol: item.symbol.clone(),
+                        price: item.price,
+                        currency: item.currency,
+                        fetched_at_ms: now_ms,
+                    };
+                    write_cache.insert(item.symbol.clone(), quote.clone());
+                    fetched_quotes.push(QuoteDto {
+                        symbol: quote.symbol,
+                        price: quote.price,
+                        currency: quote.currency,
+                        fetched_at_ms: quote.fetched_at_ms,
+                        stale: false,
+                    });
+                }
+            }
+            Err(err) => {
+                fetch_error = Some(err.to_string());
+            }
+        }
+    }
+
+    if fetch_error.is_some() && fetched_quotes.is_empty() {
+        let cache = state.quote_service.cache.read().await;
+        for symbol in &missing {
+            if let Some(entry) = cache.get(symbol) {
+                cached.push(QuoteDto {
+                    symbol: entry.symbol.clone(),
+                    price: entry.price,
+                    currency: entry.currency.clone(),
+                    fetched_at_ms: entry.fetched_at_ms,
+                    stale: true,
+                });
+            }
+        }
+    }
+
+    let mut quotes = Vec::new();
+    quotes.extend(cached);
+    quotes.extend(fetched_quotes);
+    quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
+    if quotes.is_empty() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": "No quotes available",
+                "detail": fetch_error.unwrap_or_else(|| "No provider data returned".to_string())
+            })),
+        ));
+    }
+
+    Ok(Json(QuotesResponse {
+        provider: state.quote_service.provider.clone(),
+        as_of_ms: now_ms,
+        quotes,
+    }))
+}
+
+fn parse_symbols(raw: Option<&str>) -> Result<Vec<String>, (StatusCode, Json<serde_json::Value>)> {
+    let Some(raw_symbols) = raw else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Missing symbols query parameter",
+                "detail": "Use /api/v1/quotes?symbols=ASML.AS,SAP.DE"
+            })),
+        ));
+    };
+
+    let mut symbols = Vec::new();
+    for item in raw_symbols.split(',') {
+        let symbol = item.trim().to_uppercase();
+        if symbol.is_empty() {
+            continue;
+        }
+        if symbol.len() > 20 || !symbol.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Invalid symbol",
+                    "detail": format!("Invalid symbol format: {}", symbol)
+                })),
+            ));
+        }
+        symbols.push(symbol);
+    }
+
+    if symbols.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "No symbols provided",
+                "detail": "Provide at least one symbol"
+            })),
+        ));
+    }
+
+    symbols.sort();
+    symbols.dedup();
+    Ok(symbols)
+}
+
+async fn fetch_yahoo_quotes(
+    http: &reqwest::Client,
+    symbols: &[String],
+) -> anyhow::Result<Vec<CachedQuote>> {
+    let url = "https://query1.finance.yahoo.com/v7/finance/quote";
+    let joined = symbols.join(",");
+    let resp = http
+        .get(url)
+        .query(&[("symbols", joined)])
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<YahooQuoteEnvelope>()
+        .await?;
+
+    let mut out = Vec::new();
+    for item in resp.quote_response.result {
+        if let Some(price) = item.regular_market_price {
+            out.push(CachedQuote {
+                symbol: item.symbol.to_uppercase(),
+                price,
+                currency: item.currency,
+                fetched_at_ms: current_time_ms(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_millis() as u64
 }
 
 async fn me(

@@ -1,10 +1,11 @@
 //! Stock Monitoring Service – binary. EU markets MVP.
 //! Step 1.3 Keycloak JWT (JWKS), 1.4 public vs protected routes.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tokio::sync::RwLock;
 
-use lianel_stock_monitoring_service::app::{create_router, AppState};
+use lianel_stock_monitoring_service::app::{create_router, AppState, QuoteService};
 use lianel_stock_monitoring_service::auth::KeycloakJwtValidator;
 use lianel_stock_monitoring_service::config::AppConfig;
 use lianel_stock_monitoring_service::db;
@@ -22,10 +23,19 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::create_pool(&config.database_url()).await?;
     let config = Arc::new(config);
     let validator = Arc::new(KeycloakJwtValidator::new(config.clone()));
+    let quote_service = QuoteService {
+        provider: config.quote_provider.clone(),
+        cache_ttl: Duration::from_secs(config.quote_cache_ttl_seconds),
+        http: reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()?,
+        cache: Arc::new(RwLock::new(HashMap::new())),
+    };
 
     let state = AppState {
         pool: pool.clone(),
         validator: validator.clone(),
+        quote_service,
     };
 
     let app = create_router(state);

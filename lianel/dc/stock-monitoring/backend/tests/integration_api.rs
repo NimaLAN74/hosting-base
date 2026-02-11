@@ -4,11 +4,12 @@
 
 use axum::body::Body;
 use axum::http::Request;
-use lianel_stock_monitoring_service::app::{create_router, AppState};
+use lianel_stock_monitoring_service::app::{create_router, AppState, QuoteService};
 use lianel_stock_monitoring_service::auth::KeycloakJwtValidator;
 use lianel_stock_monitoring_service::config::AppConfig;
 use lianel_stock_monitoring_service::db;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -61,8 +62,18 @@ async fn test_state() -> AppState {
         .expect("pool must connect in CI");
     let config = Arc::new(config);
     let validator = Arc::new(KeycloakJwtValidator::new(config));
+    let quote_service = QuoteService {
+        provider: "yahoo".to_string(),
+        cache_ttl: Duration::from_secs(30),
+        http: reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .expect("http client"),
+        cache: Arc::new(RwLock::new(HashMap::new())),
+    };
     AppState {
         pool,
         validator,
+        quote_service,
     }
 }
