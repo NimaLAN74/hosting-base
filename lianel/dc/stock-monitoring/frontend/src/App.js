@@ -1,25 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
+import { ApiError, apiFetch, apiJson, getLoginUrl } from './apiClient';
 
-const API_HEALTH = '/api/v1/stock-monitoring/health';
-const API_STATUS = '/api/v1/stock-monitoring/status';
+const API_HEALTH = '/health';
+const API_STATUS = '/status';
+const API_ME = '/me';
 const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
-
-async function readApiError(response, fallbackText) {
-  try {
-    const payload = await response.json();
-    if (payload && typeof payload.error === 'string' && payload.error.trim()) {
-      return payload.error;
-    }
-  } catch {
-    // ignore parse errors and fall back to generic text
-  }
-  return `${fallbackText} (${response.status})`;
-}
 
 function evaluateSeverity({
   healthText,
@@ -123,6 +113,39 @@ function App() {
   const [alertTarget, setAlertTarget] = useState('');
   const [alertError, setAlertError] = useState('');
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const [authState, setAuthState] = useState({
+    checking: true,
+    isAuthenticated: true,
+    userId: '',
+  });
+
+  const applyAuthError = useCallback((err) => {
+    if (err instanceof ApiError && err.status === 401) {
+      setAuthState({
+        checking: false,
+        isAuthenticated: false,
+        userId: '',
+      });
+      return true;
+    }
+    return false;
+  }, []);
+
+  const loadAuthState = useCallback(async () => {
+    setAuthState((prev) => ({ ...prev, checking: true }));
+    try {
+      const mePayload = await apiJson(API_ME);
+      setAuthState({
+        checking: false,
+        isAuthenticated: true,
+        userId: String(mePayload?.user_id || '').trim(),
+      });
+    } catch (err) {
+      if (!applyAuthError(err)) {
+        setAuthState((prev) => ({ ...prev, checking: false }));
+      }
+    }
+  }, [applyAuthError]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -132,7 +155,7 @@ function App() {
     try {
       const timedFetch = async (url) => {
         const start = performance.now();
-        const response = await fetch(url, { credentials: 'include' });
+        const response = await apiFetch(url);
         return {
           response,
           durationMs: Math.round(performance.now() - start),
@@ -203,6 +226,13 @@ function App() {
       setHistory((prev) => [{ ...historyItem, severity }, ...prev].slice(0, MAX_HISTORY_ITEMS));
 
       if (issues.length > 0) {
+        if (issues.some((issue) => issue.includes('(401)'))) {
+          setAuthState({
+            checking: false,
+            isAuthenticated: false,
+            userId: '',
+          });
+        }
         setError(issues.join(' | '));
       }
     } catch (err) {
@@ -239,11 +269,9 @@ function App() {
     }
     try {
       const params = new URLSearchParams({ symbols: symbols.join(',') });
-      const response = await fetch(`/api/v1/stock-monitoring/quotes?${params.toString()}`, {
-        credentials: 'include',
-      });
+      const response = await apiFetch(`/quotes?${params.toString()}`);
       if (!response.ok) {
-        throw new Error(`Quotes request failed (${response.status})`);
+        throw new ApiError(`Quotes request failed (${response.status})`, response.status);
       }
       const payload = await response.json();
       const map = {};
@@ -262,29 +290,18 @@ function App() {
       setQuotesAsOf(payload?.as_of_ms || null);
       setQuotesError('');
     } catch (err) {
+      applyAuthError(err);
       setQuotesError(err instanceof Error ? err.message : 'Failed to load quotes');
     }
-  }, [watchlistItems]);
+  }, [applyAuthError, watchlistItems]);
 
   const loadWatchlistItems = useCallback(async (watchlistId) => {
-    const response = await fetch(`/api/v1/stock-monitoring/watchlists/${watchlistId}/items`, {
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail || `Watchlist items request failed (${response.status})`);
-    }
-    const payload = await response.json();
+    const payload = await apiJson(`/watchlists/${watchlistId}/items`);
     setWatchlistItems(Array.isArray(payload) ? payload : []);
   }, []);
 
   const loadWatchlists = useCallback(async () => {
-    const response = await fetch('/api/v1/stock-monitoring/watchlists', { credentials: 'include' });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail || `Watchlists request failed (${response.status})`);
-    }
-    const payload = await response.json();
+    const payload = await apiJson('/watchlists');
     const items = Array.isArray(payload) ? payload : [];
     setWatchlists(items);
 
@@ -297,24 +314,17 @@ function App() {
       return;
     }
 
-    const createResponse = await fetch('/api/v1/stock-monitoring/watchlists', {
+    const created = await apiJson('/watchlists', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'Primary' }),
     });
-    if (!createResponse.ok) {
-      const detail = await createResponse.text();
-      throw new Error(detail || `Create watchlist failed (${createResponse.status})`);
-    }
-    const created = await createResponse.json();
     setWatchlists([created]);
     setActiveWatchlistId(created.id);
 
     for (const symbol of DEFAULT_WATCHLIST) {
-      await fetch(`/api/v1/stock-monitoring/watchlists/${created.id}/items`, {
+      await apiJson(`/watchlists/${created.id}/items`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol }),
       });
@@ -323,12 +333,7 @@ function App() {
   }, [activeWatchlistId, loadWatchlistItems]);
 
   const loadAlerts = useCallback(async () => {
-    const response = await fetch('/api/v1/stock-monitoring/alerts', { credentials: 'include' });
-    if (!response.ok) {
-      const detail = await readApiError(response, 'Alerts request failed');
-      throw new Error(detail);
-    }
-    const payload = await response.json();
+    const payload = await apiJson('/alerts');
     const items = Array.isArray(payload) ? payload : [];
     setAlerts(items.map(normalizeAlertFromApi).filter((item) => item.id && item.symbol));
   }, []);
@@ -336,6 +341,10 @@ function App() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    loadAuthState();
+  }, [loadAuthState]);
 
   useEffect(() => {
     if (!autoRefresh) {
@@ -362,14 +371,16 @@ function App() {
   }, [alertSymbol, watchlistItems]);
   useEffect(() => {
     loadWatchlists().catch((err) => {
+      applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlists');
     });
-  }, [loadWatchlists]);
+  }, [applyAuthError, loadWatchlists]);
   useEffect(() => {
     loadAlerts().catch((err) => {
+      applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to load alerts');
     });
-  }, [loadAlerts]);
+  }, [applyAuthError, loadAlerts]);
   useEffect(() => {
     // Trigger alerts when prices cross thresholds (one-shot until condition resets).
     const fired = [];
@@ -486,23 +497,18 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(`/api/v1/stock-monitoring/watchlists/${activeWatchlistId}/items`, {
+      const created = await apiJson(`/watchlists/${activeWatchlistId}/items`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: normalized }),
       });
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        throw new Error(detail?.error || `Add symbol failed (${response.status})`);
-      }
-      const created = await response.json();
       setWatchlistItems((prev) => [created, ...prev]);
       setSymbolInput('');
     } catch (err) {
+      applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to add symbol.');
     }
-  }, [activeWatchlistId, symbolInput, watchlistItems]);
+  }, [activeWatchlistId, applyAuthError, symbolInput, watchlistItems]);
 
   const removeSymbol = useCallback(async (symbolToRemove) => {
     if (!activeWatchlistId) {
@@ -513,22 +519,13 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(
-        `/api/v1/stock-monitoring/watchlists/${activeWatchlistId}/items/${item.id}`,
-        {
-          method: 'DELETE',
-          credentials: 'include',
-        }
-      );
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        throw new Error(detail?.error || `Delete symbol failed (${response.status})`);
-      }
+      await apiJson(`/watchlists/${activeWatchlistId}/items/${item.id}`, { method: 'DELETE' });
       setWatchlistItems((prev) => prev.filter((candidate) => candidate.id !== item.id));
     } catch (err) {
+      applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to remove symbol.');
     }
-  }, [activeWatchlistId, watchlistItems]);
+  }, [activeWatchlistId, applyAuthError, watchlistItems]);
   const createWatchlist = useCallback(async () => {
     const name = newWatchlistName.trim();
     setWatchlistError('');
@@ -546,27 +543,23 @@ function App() {
     }
     setWatchlistBusy(true);
     try {
-      const response = await fetch('/api/v1/stock-monitoring/watchlists', {
+      const created = await apiJson('/watchlists', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, 'Create watchlist failed'));
-      }
-      const created = await response.json();
       setWatchlists((prev) => [created, ...prev]);
       setActiveWatchlistId(created.id);
       setWatchlistItems([]);
       setNewWatchlistName('');
       setSymbolInput('');
     } catch (err) {
+      applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to create watchlist.');
     } finally {
       setWatchlistBusy(false);
     }
-  }, [newWatchlistName, watchlists]);
+  }, [applyAuthError, newWatchlistName, watchlists]);
   const deleteActiveWatchlist = useCallback(async () => {
     setWatchlistError('');
     if (!activeWatchlistId) {
@@ -579,13 +572,7 @@ function App() {
     }
     setWatchlistBusy(true);
     try {
-      const response = await fetch(`/api/v1/stock-monitoring/watchlists/${activeWatchlistId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, 'Delete watchlist failed'));
-      }
+      await apiJson(`/watchlists/${activeWatchlistId}`, { method: 'DELETE' });
       const remaining = watchlists.filter((item) => item.id !== activeWatchlistId);
       setWatchlists(remaining);
       const nextId = remaining[0]?.id || null;
@@ -597,11 +584,12 @@ function App() {
       }
       setSymbolInput('');
     } catch (err) {
+      applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to delete watchlist.');
     } finally {
       setWatchlistBusy(false);
     }
-  }, [activeWatchlistId, loadWatchlistItems, watchlists]);
+  }, [activeWatchlistId, applyAuthError, loadWatchlistItems, watchlists]);
   const addAlert = useCallback(async () => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
@@ -623,9 +611,8 @@ function App() {
     }
     setAlertsBusy(true);
     try {
-      const response = await fetch('/api/v1/stock-monitoring/alerts', {
+      const created = await apiJson('/alerts', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol,
@@ -634,59 +621,47 @@ function App() {
           enabled: true,
         }),
       });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, 'Create alert failed'));
-      }
-      const created = await response.json();
       setAlerts((prev) => [normalizeAlertFromApi(created), ...prev]);
       setAlertTarget('');
     } catch (err) {
+      applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to create alert.');
     } finally {
       setAlertsBusy(false);
     }
-  }, [alertDirection, alertSymbol, alertTarget, alerts]);
+  }, [alertDirection, alertSymbol, alertTarget, alerts, applyAuthError]);
   const removeAlert = useCallback(async (alertId) => {
     setAlertError('');
     setAlertsBusy(true);
     try {
-      const response = await fetch(`/api/v1/stock-monitoring/alerts/${alertId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, 'Delete alert failed'));
-      }
+      await apiJson(`/alerts/${alertId}`, { method: 'DELETE' });
       setAlerts((prev) => prev.filter((item) => item.id !== alertId));
     } catch (err) {
+      applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to delete alert.');
     } finally {
       setAlertsBusy(false);
     }
-  }, []);
+  }, [applyAuthError]);
   const toggleAlert = useCallback(async (alertId, enabled) => {
     setAlertError('');
     setAlertsBusy(true);
     try {
-      const response = await fetch(`/api/v1/stock-monitoring/alerts/${alertId}`, {
+      const updated = await apiJson(`/alerts/${alertId}`, {
         method: 'PUT',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       });
-      if (!response.ok) {
-        throw new Error(await readApiError(response, 'Update alert failed'));
-      }
-      const updated = await response.json();
       setAlerts((prev) => prev.map((item) => (
         item.id === String(alertId) ? normalizeAlertFromApi(updated) : item
       )));
     } catch (err) {
+      applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to update alert.');
     } finally {
       setAlertsBusy(false);
     }
-  }, []);
+  }, [applyAuthError]);
   const clearNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
@@ -724,6 +699,9 @@ function App() {
   }, []);
 
   const isOpsPage = routePath.startsWith('/stock/ops');
+  const displayUser = authState.userId || 'User';
+  const displayInitial = displayUser.charAt(0).toUpperCase() || 'U';
+  const isAuthReady = !authState.checking;
 
   return (
     <div className="App stock-app">
@@ -734,9 +712,17 @@ function App() {
             Lianel World
           </a>
           <div className="header-right">
-            <a href="/profile" className="profile-link" aria-label="Open profile">
-              <span className="profile-avatar">U</span>
-              <span>Profile</span>
+            <a
+              href={authState.isAuthenticated ? '/profile' : getLoginUrl(routePath)}
+              className="profile-link"
+              aria-label={authState.isAuthenticated ? 'Open profile' : 'Sign in with Keycloak'}
+            >
+              <span className="profile-avatar">{displayInitial}</span>
+              <span>
+                {authState.checking
+                  ? 'Auth...'
+                  : (authState.isAuthenticated ? displayUser : 'Sign in')}
+              </span>
             </a>
           </div>
         </header>
@@ -762,6 +748,22 @@ function App() {
               <a href="/stock-monitoring/endpoints">Endpoints</a>
             </div>
           </div>
+
+          {isAuthReady && !authState.isAuthenticated && (
+            <div className="stock-error auth-required">
+              <p className="stock-error-title">Authentication required</p>
+              <p>Your session is missing or expired. Sign in again to manage watchlists and alerts.</p>
+              <button
+                type="button"
+                className="refresh-btn auth-login-btn"
+                onClick={() => {
+                  window.location.href = getLoginUrl(routePath);
+                }}
+              >
+                Sign in with Keycloak
+              </button>
+            </div>
+          )}
 
           <div className="view-tabs">
             <button
