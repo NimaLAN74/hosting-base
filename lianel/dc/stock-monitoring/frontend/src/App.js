@@ -3,6 +3,7 @@ import './App.css';
 
 const API_HEALTH = '/api/v1/stock-monitoring/health';
 const API_STATUS = '/api/v1/stock-monitoring/status';
+const MAX_HISTORY_ITEMS = 20;
 
 function App() {
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,7 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showRaw, setShowRaw] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -47,6 +49,9 @@ function App() {
       };
       const issues = [];
 
+      let fetchedHealth = '';
+      let fetchedStatus = null;
+
       if (healthResult.status === 'fulfilled') {
         const { response, durationMs } = healthResult.value;
         nextMetrics.healthCode = response.status;
@@ -55,7 +60,8 @@ function App() {
           issues.push(`Health request failed (${response.status})`);
         } else {
           const healthText = await response.text();
-          setHealth(healthText.trim());
+          fetchedHealth = healthText.trim();
+          setHealth(fetchedHealth);
         }
       } else {
         issues.push('Health request failed (network error)');
@@ -69,6 +75,7 @@ function App() {
           issues.push(`Status request failed (${response.status})`);
         } else {
           const statusJson = await response.json();
+          fetchedStatus = statusJson;
           setStatus(statusJson);
         }
       } else {
@@ -76,13 +83,42 @@ function App() {
       }
 
       setMetrics(nextMetrics);
-      setLastUpdated(new Date().toLocaleString());
+      const sampledAt = new Date();
+      setLastUpdated(sampledAt.toLocaleString());
+
+      const historyItem = {
+        sampledAt: sampledAt.toISOString(),
+        healthText: fetchedHealth || 'unknown',
+        dbText: fetchedStatus?.database || 'unknown',
+        healthCode: nextMetrics.healthCode,
+        statusCode: nextMetrics.statusCode,
+        healthMs: nextMetrics.healthMs,
+        statusMs: nextMetrics.statusMs,
+        errorText: issues.join(' | '),
+      };
+      setHistory((prev) => [historyItem, ...prev].slice(0, MAX_HISTORY_ITEMS));
 
       if (issues.length > 0) {
         setError(issues.join(' | '));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const errorText = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorText);
+      const sampledAt = new Date();
+      setLastUpdated(sampledAt.toLocaleString());
+      setHistory((prev) => [
+        {
+          sampledAt: sampledAt.toISOString(),
+          healthText: 'unknown',
+          dbText: 'unknown',
+          healthCode: null,
+          statusCode: null,
+          healthMs: null,
+          statusMs: null,
+          errorText,
+        },
+        ...prev,
+      ].slice(0, MAX_HISTORY_ITEMS));
     } finally {
       if (!silent) {
         setLoading(false);
@@ -237,6 +273,49 @@ function App() {
             </div>
             {showRaw && (
               <pre className="raw-json">{JSON.stringify(status || {}, null, 2)}</pre>
+            )}
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">Recent checks</p>
+              <span className="history-count">{history.length} / {MAX_HISTORY_ITEMS}</span>
+            </div>
+            {history.length === 0 ? (
+              <p className="status-meta">No checks yet.</p>
+            ) : (
+              <div className="history-table-wrapper">
+                <table className="history-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Health</th>
+                      <th>DB</th>
+                      <th>Health API</th>
+                      <th>Status API</th>
+                      <th>Issue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((item) => (
+                      <tr key={`${item.sampledAt}-${item.healthCode}-${item.statusCode}`}>
+                        <td>{new Date(item.sampledAt).toLocaleTimeString()}</td>
+                        <td>{item.healthText.toUpperCase()}</td>
+                        <td>{String(item.dbText).toUpperCase()}</td>
+                        <td>
+                          {item.healthCode ? `HTTP ${item.healthCode}` : 'n/a'}
+                          {item.healthMs !== null ? ` (${item.healthMs}ms)` : ''}
+                        </td>
+                        <td>
+                          {item.statusCode ? `HTTP ${item.statusCode}` : 'n/a'}
+                          {item.statusMs !== null ? ` (${item.statusMs}ms)` : ''}
+                        </td>
+                        <td>{item.errorText || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </main>
