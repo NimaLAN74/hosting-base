@@ -42,6 +42,8 @@ jobs:
           cd lianel/dc/stock-monitoring/frontend && npm run test:ci
 
       - name: Build
+        env:
+          NODE_OPTIONS: "--require ./patch-fork-ts-checker.js"
         run: |
           cd lianel/dc/stock-monitoring/frontend && npm run build
           echo "✅ Build complete"
