@@ -70,31 +70,64 @@ async fn require_auth(
     mut req: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> axum::response::Response {
-    let token = req
-        .headers()
+    let parse_bearer = |raw: &str| {
+        raw.strip_prefix("Bearer ")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+
+    let headers = req.headers();
+    let token = headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer ").map(String::from));
-    let token = match token {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Missing authorization token"})),
-            )
-                .into_response()
+        .and_then(parse_bearer)
+        // oauth2-proxy auth_request token header (forwarded by nginx)
+        .or_else(|| {
+            headers
+                .get("x-auth-request-access-token")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|raw| {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else if let Some(parsed) = parse_bearer(trimmed) {
+                        Some(parsed)
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+        });
+
+    if let Some(token) = token {
+        match state.validator.validate_bearer(&token).await {
+            Ok(sub) => {
+                req.extensions_mut().insert(UserId(sub));
+                return next.run(req).await;
+            }
+            Err(e) => {
+                tracing::debug!("JWT validation failed: {}", e);
+            }
         }
-    };
-    match state.validator.validate_bearer(&token).await {
-        Ok(sub) => {
+    }
+
+    // Last-resort trusted proxy identity when oauth2 already authenticated upstream.
+    let forwarded_user = headers
+        .get("x-auth-request-user")
+        .or_else(|| headers.get("x-forwarded-user"))
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    match forwarded_user {
+        Some(sub) => {
             req.extensions_mut().insert(UserId(sub));
             next.run(req).await
         }
-        Err(e) => {
-            tracing::debug!("JWT validation failed: {}", e);
+        None => {
             (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Invalid or expired token"})),
+                Json(serde_json::json!({"error": "Missing authorization token"})),
             )
                 .into_response()
         }
