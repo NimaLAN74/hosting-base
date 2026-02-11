@@ -176,6 +176,18 @@ body {
   font-size: 0.9rem;
 }
 
+.auto-refresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #dbeafe;
+  font-size: 0.92rem;
+}
+
+.auto-refresh-toggle input {
+  accent-color: #60a5fa;
+}
+
 .stock-error {
   border: 1px solid #fecaca;
   background: #fef2f2;
@@ -225,6 +237,12 @@ body {
   font-weight: 700;
 }
 
+.status-meta {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
 .status-pill {
   display: inline-block;
   border-radius: 999px;
@@ -241,6 +259,34 @@ body {
 .status-pill.bad {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.raw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.raw-toggle-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #334155;
+}
+
+.raw-json {
+  margin: 12px 0 0;
+  max-height: 280px;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
 .footer {

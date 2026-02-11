@@ -9,42 +9,102 @@ function App() {
   const [error, setError] = useState('');
   const [health, setHealth] = useState('');
   const [status, setStatus] = useState(null);
+  const [metrics, setMetrics] = useState({
+    healthMs: null,
+    statusMs: null,
+    healthCode: null,
+    statusCode: null,
+  });
   const [lastUpdated, setLastUpdated] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showRaw, setShowRaw] = useState(false);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+    }
     setError('');
     try {
-      const [healthRes, statusRes] = await Promise.all([
-        fetch(API_HEALTH, { credentials: 'include' }),
-        fetch(API_STATUS, { credentials: 'include' }),
+      const timedFetch = async (url) => {
+        const start = performance.now();
+        const response = await fetch(url, { credentials: 'include' });
+        return {
+          response,
+          durationMs: Math.round(performance.now() - start),
+        };
+      };
+
+      const [healthResult, statusResult] = await Promise.allSettled([
+        timedFetch(API_HEALTH),
+        timedFetch(API_STATUS),
       ]);
 
-      if (!healthRes.ok) {
-        throw new Error(`Health request failed (${healthRes.status})`);
-      }
-      if (!statusRes.ok) {
-        throw new Error(`Status request failed (${statusRes.status})`);
+      const nextMetrics = {
+        healthMs: null,
+        statusMs: null,
+        healthCode: null,
+        statusCode: null,
+      };
+      const issues = [];
+
+      if (healthResult.status === 'fulfilled') {
+        const { response, durationMs } = healthResult.value;
+        nextMetrics.healthCode = response.status;
+        nextMetrics.healthMs = durationMs;
+        if (!response.ok) {
+          issues.push(`Health request failed (${response.status})`);
+        } else {
+          const healthText = await response.text();
+          setHealth(healthText.trim());
+        }
+      } else {
+        issues.push('Health request failed (network error)');
       }
 
-      const [healthText, statusJson] = await Promise.all([
-        healthRes.text(),
-        statusRes.json(),
-      ]);
+      if (statusResult.status === 'fulfilled') {
+        const { response, durationMs } = statusResult.value;
+        nextMetrics.statusCode = response.status;
+        nextMetrics.statusMs = durationMs;
+        if (!response.ok) {
+          issues.push(`Status request failed (${response.status})`);
+        } else {
+          const statusJson = await response.json();
+          setStatus(statusJson);
+        }
+      } else {
+        issues.push('Status request failed (network error)');
+      }
 
-      setHealth(healthText.trim());
-      setStatus(statusJson);
+      setMetrics(nextMetrics);
       setLastUpdated(new Date().toLocaleString());
+
+      if (issues.length > 0) {
+        setError(issues.join(' | '));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!autoRefresh) {
+      return undefined;
+    }
+
+    const intervalId = setInterval(() => {
+      loadData({ silent: true });
+    }, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefresh, loadData]);
 
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
@@ -83,12 +143,20 @@ function App() {
           <div className="status-toolbar">
             <button
               type="button"
-              onClick={loadData}
+              onClick={() => loadData()}
               disabled={loading}
               className="refresh-btn"
             >
               {loading ? 'Refreshing...' : 'Refresh status'}
             </button>
+            <label className="auto-refresh-toggle">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(event) => setAutoRefresh(event.target.checked)}
+              />
+              Auto-refresh (30s)
+            </label>
             {lastUpdated && (
               <span className="last-updated">Last updated: {lastUpdated}</span>
             )}
@@ -129,11 +197,47 @@ function App() {
               <p className="status-label">Version</p>
               <p className="status-value">{status?.version || (loading ? 'Loading...' : 'unknown')}</p>
             </article>
+
+            <article className="status-card">
+              <p className="status-label">Health endpoint</p>
+              <p className="status-value">
+                {metrics.healthCode ? `HTTP ${metrics.healthCode}` : 'n/a'}
+              </p>
+              <p className="status-meta">
+                {metrics.healthMs !== null ? `${metrics.healthMs} ms` : 'n/a'}
+              </p>
+            </article>
+
+            <article className="status-card">
+              <p className="status-label">Status endpoint</p>
+              <p className="status-value">
+                {metrics.statusCode ? `HTTP ${metrics.statusCode}` : 'n/a'}
+              </p>
+              <p className="status-meta">
+                {metrics.statusMs !== null ? `${metrics.statusMs} ms` : 'n/a'}
+              </p>
+            </article>
           </section>
 
           <section className="status-card scope-card">
             <p className="status-label">Scope</p>
             <p className="status-value">{status?.scope || (loading ? 'Loading...' : 'unknown')}</p>
+          </section>
+
+          <section className="status-card scope-card">
+            <div className="raw-header">
+              <p className="status-label">Raw status JSON</p>
+              <button
+                type="button"
+                className="raw-toggle-btn"
+                onClick={() => setShowRaw((current) => !current)}
+              >
+                {showRaw ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showRaw && (
+              <pre className="raw-json">{JSON.stringify(status || {}, null, 2)}</pre>
+            )}
           </section>
         </main>
 
