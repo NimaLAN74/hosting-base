@@ -287,8 +287,10 @@ function App() {
           }
         }
       }
-      setPreviousPrices((prev) => ({ ...prev, ...prices }));
-      setPrices(map);
+      setPrices((prevPrices) => {
+        setPreviousPrices((prev) => ({ ...prev, ...prevPrices }));
+        return map;
+      });
       setQuoteCurrencies(currencyMap);
       setQuotesAsOf(payload?.as_of_ms || null);
       setQuotesError('');
@@ -296,7 +298,7 @@ function App() {
       applyAuthError(err);
       setQuotesError(err instanceof Error ? err.message : 'Failed to load quotes');
     }
-  }, [applyAuthError, prices, watchlistItems]);
+  }, [applyAuthError, watchlistItems]);
 
   const loadWatchlistItems = useCallback(async (watchlistId) => {
     const payload = await apiJson(`/watchlists/${watchlistId}/items`);
