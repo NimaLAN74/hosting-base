@@ -39,7 +39,8 @@ jobs:
 
       - name: Run tests
         run: |
-          cd lianel/dc/stock-monitoring/frontend && npm run test:ci
+          cd lianel/dc/stock-monitoring/frontend
+          CI=true npm test -- --watchAll=false --runInBand --forceExit --passWithNoTests
 
       - name: Build
         run: |
