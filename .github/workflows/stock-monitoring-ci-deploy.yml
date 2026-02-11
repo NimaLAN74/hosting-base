@@ -12,6 +12,7 @@ on:
       - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
       - 'lianel/dc/docker-compose.stock-monitoring.yaml'
       - 'lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh'
+      - 'lianel/dc/dags/stock_monitoring_ingest_dag.py'
       - 'lianel/dc/dags/stock_monitoring_alerts_dag.py'
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
@@ -170,10 +171,11 @@ jobs:
         run: |
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
             lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh \
-            lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml lianel/dc/dags/stock_monitoring_alerts_dag.py \
+            lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
+            lianel/dc/dags/stock_monitoring_ingest_dag.py lianel/dc/dags/stock_monitoring_alerts_dag.py \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
-            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_alerts_dag.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
+            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_ingest_dag.py /tmp/stock_monitoring_alerts_dag.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
           echo "✅ Script and compose synced"
 
       - name: Deploy to remote host (stock backend only)

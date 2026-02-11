@@ -49,6 +49,8 @@ wait_for_ingest = ExternalTaskSensor(
     task_id="wait_for_stock_ingest",
     external_dag_id="stock_monitoring_ingest",
     external_task_id="ingest_eu_quotes",
+    # Alerts run at :05, while ingest runs at :00; align sensor lookup to previous run.
+    execution_delta=timedelta(minutes=5),
     allowed_states=["success"],
     failed_states=["failed", "upstream_failed"],
     mode="reschedule",
