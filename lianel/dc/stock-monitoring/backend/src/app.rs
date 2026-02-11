@@ -143,6 +143,7 @@ struct QuotesResponse {
     provider: String,
     as_of_ms: u64,
     quotes: Vec<QuoteDto>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,9 +195,9 @@ async fn quotes(
     }
 
     let mut fetched_quotes = Vec::new();
-    let mut fetch_error: Option<String> = None;
+    let mut warnings = Vec::new();
     if !missing.is_empty() {
-        match fetch_yahoo_quotes(&state.quote_service.http, &missing).await {
+        match fetch_provider_quotes(&state.quote_service.http, &missing).await {
             Ok(items) => {
                 let mut write_cache = state.quote_service.cache.write().await;
                 for item in items {
@@ -217,12 +218,12 @@ async fn quotes(
                 }
             }
             Err(err) => {
-                fetch_error = Some(err.to_string());
+                warnings.push(err.to_string());
             }
         }
     }
 
-    if fetch_error.is_some() && fetched_quotes.is_empty() {
+    if !warnings.is_empty() && fetched_quotes.is_empty() {
         let cache = state.quote_service.cache.read().await;
         for symbol in &missing {
             if let Some(entry) = cache.get(symbol) {
@@ -241,21 +242,20 @@ async fn quotes(
     quotes.extend(cached);
     quotes.extend(fetched_quotes);
     quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
-
-    if quotes.is_empty() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({
-                "error": "No quotes available",
-                "detail": fetch_error.unwrap_or_else(|| "No provider data returned".to_string())
-            })),
-        ));
+    let unresolved: Vec<String> = symbols
+        .iter()
+        .filter(|symbol| !quotes.iter().any(|q| &q.symbol == *symbol))
+        .cloned()
+        .collect();
+    if !unresolved.is_empty() {
+        warnings.push(format!("No provider quote for: {}", unresolved.join(",")));
     }
 
     Ok(Json(QuotesResponse {
         provider: state.quote_service.provider.clone(),
         as_of_ms: now_ms,
         quotes,
+        warnings,
     }))
 }
 
@@ -303,6 +303,41 @@ fn parse_symbols(raw: Option<&str>) -> Result<Vec<String>, (StatusCode, Json<ser
     Ok(symbols)
 }
 
+async fn fetch_provider_quotes(
+    http: &reqwest::Client,
+    symbols: &[String],
+) -> anyhow::Result<Vec<CachedQuote>> {
+    let mut all = Vec::new();
+
+    // First attempt: Yahoo bulk endpoint.
+    match fetch_yahoo_quotes(http, symbols).await {
+        Ok(mut quotes) => {
+            all.append(&mut quotes);
+        }
+        Err(err) => {
+            tracing::warn!("Yahoo quote fetch failed: {}", err);
+        }
+    }
+
+    // Fallback: per-symbol Stooq CSV endpoint (delayed data).
+    let unresolved: Vec<String> = symbols
+        .iter()
+        .filter(|symbol| !all.iter().any(|q| q.symbol.eq_ignore_ascii_case(symbol)))
+        .cloned()
+        .collect();
+
+    for symbol in unresolved {
+        if let Some(quote) = fetch_stooq_quote(http, &symbol).await {
+            all.push(quote);
+        }
+    }
+
+    if all.is_empty() {
+        anyhow::bail!("Provider fetch returned no data (Yahoo/Stooq)");
+    }
+    Ok(all)
+}
+
 async fn fetch_yahoo_quotes(
     http: &reqwest::Client,
     symbols: &[String],
@@ -330,6 +365,40 @@ async fn fetch_yahoo_quotes(
         }
     }
     Ok(out)
+}
+
+async fn fetch_stooq_quote(http: &reqwest::Client, symbol: &str) -> Option<CachedQuote> {
+    let stooq_symbol = to_stooq_symbol(symbol);
+    let url = format!("https://stooq.com/q/l/?s={}&i=d", stooq_symbol.to_lowercase());
+    let text = http.get(url).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
+    parse_stooq_line(symbol, &text)
+}
+
+fn parse_stooq_line(original_symbol: &str, line: &str) -> Option<CachedQuote> {
+    let first = line.lines().next()?.trim().trim_end_matches(',');
+    let parts: Vec<&str> = first.split(',').collect();
+    if parts.len() < 7 {
+        return None;
+    }
+    let close = parts[6].trim();
+    if close.eq_ignore_ascii_case("N/D") {
+        return None;
+    }
+    let price = close.parse::<f64>().ok()?;
+    Some(CachedQuote {
+        symbol: original_symbol.to_uppercase(),
+        price,
+        currency: None,
+        fetched_at_ms: current_time_ms(),
+    })
+}
+
+fn to_stooq_symbol(symbol: &str) -> String {
+    let upper = symbol.to_uppercase();
+    if upper.ends_with(".L") {
+        return upper.replace(".L", ".UK");
+    }
+    upper
 }
 
 fn current_time_ms() -> u64 {
