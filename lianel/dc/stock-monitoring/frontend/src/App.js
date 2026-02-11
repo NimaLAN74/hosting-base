@@ -6,7 +6,6 @@ const API_STATUS = '/api/v1/stock-monitoring/status';
 const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
-const ALERTS_STORAGE_KEY = 'stock_monitoring_alerts_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 
@@ -46,6 +45,22 @@ function evaluateSeverity({
   return 'ok';
 }
 
+function normalizeAlertFromApi(item) {
+  const symbol = String(item?.symbol || '').toUpperCase();
+  const direction = item?.condition_type === 'below' ? 'below' : 'above';
+  const target = Number(item?.condition_value);
+  return {
+    id: String(item?.id || ''),
+    symbol,
+    direction,
+    target: Number.isFinite(target) ? target : 0,
+    enabled: Boolean(item?.enabled),
+    active: Boolean(item?.triggered),
+    createdAt: new Date().toISOString(),
+    lastTriggeredAt: item?.triggered ? new Date().toISOString() : null,
+  };
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -72,15 +87,8 @@ function App() {
   const [prices, setPrices] = useState({});
   const [quotesAsOf, setQuotesAsOf] = useState(null);
   const [quotesError, setQuotesError] = useState('');
-  const [alerts, setAlerts] = useState(() => {
-    try {
-      const raw = localStorage.getItem(ALERTS_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [alerts, setAlerts] = useState([]);
+  const [alertsBusy, setAlertsBusy] = useState(false);
   const [notifications, setNotifications] = useState(() => {
     try {
       const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
@@ -287,6 +295,17 @@ function App() {
     await loadWatchlistItems(created.id);
   }, [activeWatchlistId, loadWatchlistItems]);
 
+  const loadAlerts = useCallback(async () => {
+    const response = await fetch('/api/v1/stock-monitoring/alerts', { credentials: 'include' });
+    if (!response.ok) {
+      const detail = await readApiError(response, 'Alerts request failed');
+      throw new Error(detail);
+    }
+    const payload = await response.json();
+    const items = Array.isArray(payload) ? payload : [];
+    setAlerts(items.map(normalizeAlertFromApi).filter((item) => item.id && item.symbol));
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -299,14 +318,12 @@ function App() {
     const intervalId = setInterval(() => {
       loadData({ silent: true });
       fetchQuotes();
+      loadAlerts().catch(() => {});
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [autoRefresh, fetchQuotes, loadData]);
+  }, [autoRefresh, fetchQuotes, loadAlerts, loadData]);
 
-  useEffect(() => {
-    localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
-  }, [alerts]);
   useEffect(() => {
     localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
   }, [notifications]);
@@ -321,6 +338,11 @@ function App() {
       setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlists');
     });
   }, [loadWatchlists]);
+  useEffect(() => {
+    loadAlerts().catch((err) => {
+      setAlertError(err instanceof Error ? err.message : 'Failed to load alerts');
+    });
+  }, [loadAlerts]);
   useEffect(() => {
     // Trigger alerts when prices cross thresholds (one-shot until condition resets).
     const fired = [];
@@ -552,7 +574,7 @@ function App() {
       setWatchlistBusy(false);
     }
   }, [activeWatchlistId, loadWatchlistItems, watchlists]);
-  const addAlert = useCallback(() => {
+  const addAlert = useCallback(async () => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
     const target = Number(alertTarget);
@@ -571,29 +593,71 @@ function App() {
       setAlertError('Same alert already exists.');
       return;
     }
-    const now = new Date().toISOString();
-    setAlerts((prev) => [
-      {
-        id: `${symbol}-${alertDirection}-${target}-${now}`,
-        symbol,
-        direction: alertDirection,
-        target,
-        enabled: true,
-        active: false,
-        createdAt: now,
-        lastTriggeredAt: null,
-      },
-      ...prev,
-    ]);
-    setAlertTarget('');
+    setAlertsBusy(true);
+    try {
+      const response = await fetch('/api/v1/stock-monitoring/alerts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol,
+          condition_type: alertDirection,
+          condition_value: target,
+          enabled: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Create alert failed'));
+      }
+      const created = await response.json();
+      setAlerts((prev) => [normalizeAlertFromApi(created), ...prev]);
+      setAlertTarget('');
+    } catch (err) {
+      setAlertError(err instanceof Error ? err.message : 'Failed to create alert.');
+    } finally {
+      setAlertsBusy(false);
+    }
   }, [alertDirection, alertSymbol, alertTarget, alerts]);
-  const removeAlert = useCallback((alertId) => {
-    setAlerts((prev) => prev.filter((item) => item.id !== alertId));
+  const removeAlert = useCallback(async (alertId) => {
+    setAlertError('');
+    setAlertsBusy(true);
+    try {
+      const response = await fetch(`/api/v1/stock-monitoring/alerts/${alertId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Delete alert failed'));
+      }
+      setAlerts((prev) => prev.filter((item) => item.id !== alertId));
+    } catch (err) {
+      setAlertError(err instanceof Error ? err.message : 'Failed to delete alert.');
+    } finally {
+      setAlertsBusy(false);
+    }
   }, []);
-  const toggleAlert = useCallback((alertId, enabled) => {
-    setAlerts((prev) => prev.map((item) => (
-      item.id === alertId ? { ...item, enabled, active: enabled ? item.active : false } : item
-    )));
+  const toggleAlert = useCallback(async (alertId, enabled) => {
+    setAlertError('');
+    setAlertsBusy(true);
+    try {
+      const response = await fetch(`/api/v1/stock-monitoring/alerts/${alertId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Update alert failed'));
+      }
+      const updated = await response.json();
+      setAlerts((prev) => prev.map((item) => (
+        item.id === String(alertId) ? normalizeAlertFromApi(updated) : item
+      )));
+    } catch (err) {
+      setAlertError(err instanceof Error ? err.message : 'Failed to update alert.');
+    } finally {
+      setAlertsBusy(false);
+    }
   }, []);
   const clearNotifications = useCallback(() => {
     setNotifications([]);
@@ -611,8 +675,8 @@ function App() {
     }
   }, [activeWatchlistId, loadWatchlistItems]);
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadData(), fetchQuotes()]);
-  }, [fetchQuotes, loadData]);
+    await Promise.all([loadData(), fetchQuotes(), loadAlerts()]);
+  }, [fetchQuotes, loadAlerts, loadData]);
 
   useEffect(() => {
     fetchQuotes();
@@ -930,7 +994,7 @@ function App() {
                 onChange={(event) => setAlertTarget(event.target.value)}
                 placeholder="Target price"
               />
-              <button type="button" className="raw-toggle-btn" onClick={addAlert}>
+              <button type="button" className="raw-toggle-btn" onClick={addAlert} disabled={alertsBusy}>
                 Add alert
               </button>
             </div>
@@ -958,10 +1022,11 @@ function App() {
                           type="checkbox"
                           checked={alert.enabled}
                           onChange={(event) => toggleAlert(alert.id, event.target.checked)}
+                          disabled={alertsBusy}
                         />
                         Enabled
                       </label>
-                      <button type="button" className="delete-btn" onClick={() => removeAlert(alert.id)}>
+                      <button type="button" className="delete-btn" onClick={() => removeAlert(alert.id)} disabled={alertsBusy}>
                         Delete
                       </button>
                     </div>

@@ -5,7 +5,7 @@ use axum::{
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/watchlists/:watchlist_id", delete(delete_watchlist))
         .route("/api/v1/watchlists/:watchlist_id/items", get(list_watchlist_items).post(add_watchlist_item))
         .route("/api/v1/watchlists/:watchlist_id/items/:item_id", delete(delete_watchlist_item))
+        .route("/api/v1/alerts", get(list_alerts).post(create_alert))
+        .route("/api/v1/alerts/:alert_id", put(update_alert).delete(delete_alert))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -471,6 +473,35 @@ struct AddWatchlistItemRequest {
 }
 
 #[derive(Debug, Serialize)]
+struct AlertDto {
+    id: i64,
+    symbol: String,
+    mic: Option<String>,
+    condition_type: String,
+    condition_value: f64,
+    enabled: bool,
+    triggered: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateAlertRequest {
+    symbol: String,
+    mic: Option<String>,
+    condition_type: String,
+    condition_value: f64,
+    enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateAlertRequest {
+    symbol: Option<String>,
+    mic: Option<String>,
+    condition_type: Option<String>,
+    condition_value: Option<f64>,
+    enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
 struct DeleteResult {
     ok: bool,
 }
@@ -720,6 +751,247 @@ async fn delete_watchlist_item(
     Ok(Json(DeleteResult { ok: true }))
 }
 
+async fn list_alerts(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<Vec<AlertDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows = sqlx::query_as::<_, (i64, String, Option<String>, String, f64, bool, bool)>(
+        r#"
+        SELECT
+            id,
+            symbol,
+            mic,
+            condition_type,
+            condition_value::double precision,
+            enabled,
+            (notified_at IS NOT NULL) AS triggered
+        FROM stock_monitoring.alerts
+        WHERE user_id = $1
+        ORDER BY updated_at DESC, id DESC
+        "#,
+    )
+    .bind(&user_id.0)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let out = rows
+        .into_iter()
+        .map(
+            |(id, symbol, mic, condition_type, condition_value, enabled, triggered)| AlertDto {
+                id,
+                symbol,
+                mic,
+                condition_type,
+                condition_value,
+                enabled,
+                triggered,
+            },
+        )
+        .collect::<Vec<_>>();
+    Ok(Json(out))
+}
+
+async fn create_alert(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Json(body): Json<CreateAlertRequest>,
+) -> Result<(StatusCode, Json<AlertDto>), (StatusCode, Json<serde_json::Value>)> {
+    let symbol = normalize_symbol(&body.symbol)?;
+    let mic = normalize_mic(body.mic.as_deref())?;
+    let condition_type = normalize_condition_type(&body.condition_type)?;
+    if !body.condition_value.is_finite() || body.condition_value <= 0.0 {
+        return Err(bad_request("Invalid condition_value"));
+    }
+    let enabled = body.enabled.unwrap_or(true);
+
+    let inserted = sqlx::query_as::<_, (i64, String, Option<String>, String, f64, bool, bool)>(
+        r#"
+        INSERT INTO stock_monitoring.alerts (user_id, symbol, mic, condition_type, condition_value, enabled)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, symbol, mic, condition_type, condition_value::double precision, enabled, (notified_at IS NOT NULL)
+        "#,
+    )
+    .bind(&user_id.0)
+    .bind(&symbol)
+    .bind(&mic)
+    .bind(&condition_type)
+    .bind(body.condition_value)
+    .bind(enabled)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "alert.create",
+        Some("alert"),
+        Some(&inserted.0.to_string()),
+        Some(serde_json::json!({
+            "symbol": inserted.1,
+            "mic": inserted.2,
+            "condition_type": inserted.3,
+            "condition_value": inserted.4,
+            "enabled": inserted.5
+        })),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AlertDto {
+            id: inserted.0,
+            symbol: inserted.1,
+            mic: inserted.2,
+            condition_type: inserted.3,
+            condition_value: inserted.4,
+            enabled: inserted.5,
+            triggered: inserted.6,
+        }),
+    ))
+}
+
+async fn update_alert(
+    State(state): State<AppState>,
+    Path((alert_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Json(body): Json<UpdateAlertRequest>,
+) -> Result<Json<AlertDto>, (StatusCode, Json<serde_json::Value>)> {
+    let current = sqlx::query_as::<_, (String, Option<String>, String, f64, bool)>(
+        r#"
+        SELECT symbol, mic, condition_type, condition_value::double precision, enabled
+        FROM stock_monitoring.alerts
+        WHERE id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(alert_id)
+    .bind(&user_id.0)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let Some(existing) = current else {
+        return Err(not_found("Alert not found"));
+    };
+
+    let symbol = match body.symbol.as_deref() {
+        Some(v) => normalize_symbol(v)?,
+        None => existing.0,
+    };
+    let mic = match body.mic {
+        Some(ref v) => normalize_mic(Some(v))?,
+        None => existing.1,
+    };
+    let condition_type = match body.condition_type.as_deref() {
+        Some(v) => normalize_condition_type(v)?,
+        None => existing.2,
+    };
+    let condition_value = match body.condition_value {
+        Some(v) => {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(bad_request("Invalid condition_value"));
+            }
+            v
+        }
+        None => existing.3,
+    };
+    let enabled = body.enabled.unwrap_or(existing.4);
+
+    let updated = sqlx::query_as::<_, (i64, String, Option<String>, String, f64, bool, bool)>(
+        r#"
+        UPDATE stock_monitoring.alerts
+        SET symbol = $1,
+            mic = $2,
+            condition_type = $3,
+            condition_value = $4,
+            enabled = $5,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $6 AND user_id = $7
+        RETURNING id, symbol, mic, condition_type, condition_value::double precision, enabled, (notified_at IS NOT NULL)
+        "#,
+    )
+    .bind(&symbol)
+    .bind(&mic)
+    .bind(&condition_type)
+    .bind(condition_value)
+    .bind(enabled)
+    .bind(alert_id)
+    .bind(&user_id.0)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let Some(updated) = updated else {
+        return Err(not_found("Alert not found"));
+    };
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "alert.update",
+        Some("alert"),
+        Some(&updated.0.to_string()),
+        Some(serde_json::json!({
+            "symbol": updated.1,
+            "mic": updated.2,
+            "condition_type": updated.3,
+            "condition_value": updated.4,
+            "enabled": updated.5
+        })),
+    )
+    .await;
+
+    Ok(Json(AlertDto {
+        id: updated.0,
+        symbol: updated.1,
+        mic: updated.2,
+        condition_type: updated.3,
+        condition_value: updated.4,
+        enabled: updated.5,
+        triggered: updated.6,
+    }))
+}
+
+async fn delete_alert(
+    State(state): State<AppState>,
+    Path((alert_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<DeleteResult>, (StatusCode, Json<serde_json::Value>)> {
+    let deleted = sqlx::query_as::<_, (i64, String, String, f64)>(
+        r#"
+        DELETE FROM stock_monitoring.alerts
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, symbol, condition_type, condition_value::double precision
+        "#,
+    )
+    .bind(alert_id)
+    .bind(&user_id.0)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let Some((id, symbol, condition_type, condition_value)) = deleted else {
+        return Err(not_found("Alert not found"));
+    };
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "alert.delete",
+        Some("alert"),
+        Some(&id.to_string()),
+        Some(serde_json::json!({
+            "symbol": symbol,
+            "condition_type": condition_type,
+            "condition_value": condition_value
+        })),
+    )
+    .await;
+
+    Ok(Json(DeleteResult { ok: true }))
+}
+
 async fn ensure_watchlist_owned(
     pool: &sqlx::PgPool,
     watchlist_id: i64,
@@ -776,6 +1048,14 @@ fn normalize_mic(raw: Option<&str>) -> Result<Option<String>, (StatusCode, Json<
         ));
     }
     Ok(Some(mic))
+}
+
+fn normalize_condition_type(raw: &str) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    let value = raw.trim().to_lowercase();
+    match value.as_str() {
+        "above" | "below" => Ok(value),
+        _ => Err(bad_request("Unsupported condition_type")),
+    }
 }
 
 async fn write_audit(
