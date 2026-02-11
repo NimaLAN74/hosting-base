@@ -54,7 +54,7 @@ impl KeycloakJwtValidator {
             Validation::SubjectPresent,
         ];
         let valid = validate(token, jwk, validations)
-            .map_err(|e| anyhow::anyhow!("Token validation failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Token validation failed: {:?}", e))?;
         let sub = valid
             .claims
             .get("sub")

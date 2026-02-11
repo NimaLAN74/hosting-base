@@ -8,16 +8,15 @@
     "express": "^4.18.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@craco/craco": "^7.1.0",
     "react-scripts": "5.0.1",
     "@testing-library/jest-dom": "^6.1.5",
     "@testing-library/react": "^14.1.2"
   },
   "scripts": {
-    "start": "craco start",
-    "build": "craco build",
-    "test": "craco test",
-    "test:ci": "CI=true craco test --watchAll=false --testTimeout=15000"
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "test:ci": "CI=true react-scripts test --watchAll=false --testTimeout=15000"
   },
   "browserslist": {
     "production": [
@@ -27,8 +26,5 @@
     "development": [
       "last 1 chrome version"
     ]
-  },
-  "overrides": {
-    "ajv": "^8.12.0"
   }
 }
