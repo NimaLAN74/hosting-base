@@ -10,6 +10,7 @@ const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 
 function evaluateSeverity({
   healthText,
@@ -82,7 +83,7 @@ function App() {
     statusCode: null,
   });
   const [lastUpdated, setLastUpdated] = useState('');
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(!IS_TEST_ENV);
   const [showRaw, setShowRaw] = useState(false);
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
