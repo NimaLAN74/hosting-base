@@ -1,7 +1,7 @@
 # Stock Monitoring Service – Rust backend (EU markets MVP). TDD + CI deploy.
 FROM rust:alpine AS builder
 WORKDIR /app
-RUN apk add --no-cache musl-dev pkgconfig
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 RUN rustup target add x86_64-unknown-linux-musl
 
 COPY Cargo.toml Cargo.lock* ./
