@@ -365,6 +365,19 @@ body {
   flex-wrap: wrap;
 }
 
+.watchlist-form select {
+  min-width: 220px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.watchlist-manager {
+  align-items: center;
+}
+
 .symbol-input {
   flex: 1;
   min-width: 240px;
@@ -500,6 +513,12 @@ body {
   padding: 6px 10px;
   cursor: pointer;
   font-weight: 600;
+}
+
+.delete-btn:disabled,
+.raw-toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .notifications-list {

@@ -10,6 +10,18 @@ const ALERTS_STORAGE_KEY = 'stock_monitoring_alerts_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 
+async function readApiError(response, fallbackText) {
+  try {
+    const payload = await response.json();
+    if (payload && typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error;
+    }
+  } catch {
+    // ignore parse errors and fall back to generic text
+  }
+  return `${fallbackText} (${response.status})`;
+}
+
 function evaluateSeverity({
   healthText,
   dbText,
@@ -53,6 +65,8 @@ function App() {
   const [watchlists, setWatchlists] = useState([]);
   const [activeWatchlistId, setActiveWatchlistId] = useState(null);
   const [watchlistItems, setWatchlistItems] = useState([]);
+  const [newWatchlistName, setNewWatchlistName] = useState('');
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [prices, setPrices] = useState({});
@@ -465,6 +479,79 @@ function App() {
       setWatchlistError(err instanceof Error ? err.message : 'Failed to remove symbol.');
     }
   }, [activeWatchlistId, watchlistItems]);
+  const createWatchlist = useCallback(async () => {
+    const name = newWatchlistName.trim();
+    setWatchlistError('');
+    if (!name) {
+      setWatchlistError('Enter a watchlist name first.');
+      return;
+    }
+    if (name.length > 255) {
+      setWatchlistError('Watchlist name is too long.');
+      return;
+    }
+    if (watchlists.some((item) => String(item.name).trim().toLowerCase() === name.toLowerCase())) {
+      setWatchlistError('Watchlist already exists.');
+      return;
+    }
+    setWatchlistBusy(true);
+    try {
+      const response = await fetch('/api/v1/stock-monitoring/watchlists', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Create watchlist failed'));
+      }
+      const created = await response.json();
+      setWatchlists((prev) => [created, ...prev]);
+      setActiveWatchlistId(created.id);
+      setWatchlistItems([]);
+      setNewWatchlistName('');
+      setSymbolInput('');
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to create watchlist.');
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }, [newWatchlistName, watchlists]);
+  const deleteActiveWatchlist = useCallback(async () => {
+    setWatchlistError('');
+    if (!activeWatchlistId) {
+      setWatchlistError('No watchlist selected.');
+      return;
+    }
+    if (watchlists.length <= 1) {
+      setWatchlistError('Create another watchlist before deleting the current one.');
+      return;
+    }
+    setWatchlistBusy(true);
+    try {
+      const response = await fetch(`/api/v1/stock-monitoring/watchlists/${activeWatchlistId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Delete watchlist failed'));
+      }
+      const remaining = watchlists.filter((item) => item.id !== activeWatchlistId);
+      setWatchlists(remaining);
+      const nextId = remaining[0]?.id || null;
+      setActiveWatchlistId(nextId);
+      if (nextId) {
+        await loadWatchlistItems(nextId);
+      } else {
+        setWatchlistItems([]);
+      }
+      setSymbolInput('');
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to delete watchlist.');
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }, [activeWatchlistId, loadWatchlistItems, watchlists]);
   const addAlert = useCallback(() => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
@@ -512,6 +599,9 @@ function App() {
     setNotifications([]);
   }, []);
   const changeActiveWatchlist = useCallback(async (nextId) => {
+    if (!Number.isInteger(nextId) || nextId <= 0 || nextId === activeWatchlistId) {
+      return;
+    }
     setWatchlistError('');
     setActiveWatchlistId(nextId);
     try {
@@ -519,7 +609,7 @@ function App() {
     } catch (err) {
       setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlist');
     }
-  }, [loadWatchlistItems]);
+  }, [activeWatchlistId, loadWatchlistItems]);
   const refreshAll = useCallback(async () => {
     await Promise.all([loadData(), fetchQuotes()]);
   }, [fetchQuotes, loadData]);
@@ -722,8 +812,21 @@ function App() {
                 {watchlistSymbols.length} symbols · {watchlists.length} list{watchlists.length === 1 ? '' : 's'}
               </span>
             </div>
-            {watchlists.length > 1 && (
-              <div className="watchlist-form">
+            <div className="watchlist-form">
+              <input
+                type="text"
+                value={newWatchlistName}
+                onChange={(event) => setNewWatchlistName(event.target.value)}
+                className="symbol-input"
+                placeholder="New watchlist name"
+                aria-label="Create watchlist"
+              />
+              <button type="button" className="raw-toggle-btn" onClick={createWatchlist} disabled={watchlistBusy}>
+                Create list
+              </button>
+            </div>
+            {watchlists.length > 0 && (
+              <div className="watchlist-form watchlist-manager">
                 <select
                   value={activeWatchlistId || ''}
                   onChange={(event) => changeActiveWatchlist(Number(event.target.value))}
@@ -735,6 +838,14 @@ function App() {
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="delete-btn"
+                  onClick={deleteActiveWatchlist}
+                  disabled={watchlistBusy || watchlists.length <= 1}
+                >
+                  Delete active
+                </button>
               </div>
             )}
             <div className="watchlist-form">
@@ -752,7 +863,7 @@ function App() {
                 placeholder="Add symbol (e.g. SAN.MC)"
                 aria-label="Add symbol to watchlist"
               />
-              <button type="button" className="raw-toggle-btn" onClick={addSymbol}>
+              <button type="button" className="raw-toggle-btn" onClick={addSymbol} disabled={watchlistBusy}>
                 Add symbol
               </button>
             </div>
@@ -765,6 +876,7 @@ function App() {
                     type="button"
                     onClick={() => removeSymbol(symbol)}
                     aria-label={`Remove ${symbol}`}
+                    disabled={watchlistBusy}
                   >
                     ×
                   </button>
