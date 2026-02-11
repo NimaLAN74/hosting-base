@@ -205,14 +205,22 @@ jobs:
              for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/.env\" ] && DC_DIR=\"\$d\" && break; done; \
              [ -n \"\$DC_DIR\" ] && . \"\$DC_DIR/.env\" 2>/dev/null || true; \
              DB_HOST=\${POSTGRES_HOST:-172.18.0.1}; \
-             DB_USER=\${POSTGRES_USER:-postgres}; \
+             DB_APP_USER=\${POSTGRES_USER:-airflow}; \
+             DB_APP_PASS=\${POSTGRES_PASSWORD:-postgres}; \
+             DB_MIG_USER=\${POSTGRES_MIGRATION_USER:-postgres}; \
+             DB_MIG_PASS=\${POSTGRES_MIGRATION_PASSWORD:-\$DB_APP_PASS}; \
              DB_NAME=\${POSTGRES_DB:-lianel_energy}; \
-             DB_PASS=\${POSTGRES_PASSWORD:-postgres}; \
-             echo \"Applying migration 022 to \$DB_USER@\$DB_HOST/\$DB_NAME\"; \
-             docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_PASS\" postgres:15-alpine \
-               psql -h \"\$DB_HOST\" -U \"\$DB_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; \
-             docker run --rm --network host -e PGPASSWORD=\"\$DB_PASS\" postgres:15-alpine \
-               psql -h \"\$DB_HOST\" -U \"\$DB_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -tAc \"SELECT to_regclass('stock_monitoring.watchlists')\" | grep -q 'stock_monitoring.watchlists'"
+             echo \"Applying migration 022 to \$DB_MIG_USER@\$DB_HOST/\$DB_NAME (app user: \$DB_APP_USER)\"; \
+             if ! docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; then \
+               echo \"⚠️ Migration with \$DB_MIG_USER failed, retrying with app user \$DB_APP_USER\"; \
+               docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+                 psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; \
+             fi; \
+             docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -tAc \"SELECT to_regclass('stock_monitoring.watchlists')\" | grep -q 'stock_monitoring.watchlists'; \
+             docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -c \"SELECT 1 FROM stock_monitoring.watchlists LIMIT 1\" >/dev/null"
           echo "✅ Migration 022 on production"
 
       - name: Verify deployment (health)

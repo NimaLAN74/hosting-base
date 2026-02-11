@@ -61,3 +61,15 @@ COMMENT ON SCHEMA stock_monitoring IS 'Stock exchange monitoring – EU markets 
 COMMENT ON TABLE stock_monitoring.watchlists IS 'User watchlists; scope EU symbols';
 COMMENT ON TABLE stock_monitoring.alerts IS 'Price (and later technical) alerts; EU symbols';
 COMMENT ON TABLE stock_monitoring.audit_log IS 'Immutable audit trail for alerts, watchlists, etc.';
+
+-- Grant to airflow app role when present (production app user)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'airflow') THEN
+    EXECUTE 'GRANT USAGE ON SCHEMA stock_monitoring TO airflow';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA stock_monitoring TO airflow';
+    EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA stock_monitoring TO airflow';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA stock_monitoring GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO airflow';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA stock_monitoring GRANT USAGE, SELECT ON SEQUENCES TO airflow';
+  END IF;
+END $$;
