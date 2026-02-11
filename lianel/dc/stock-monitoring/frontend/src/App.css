@@ -1,0 +1,253 @@
+:root {
+  --primary-blue: #2c5aa0;
+  --secondary-blue: #4a8fe7;
+  --accent-gold: #f6c445;
+  --dark-gray: #596273;
+  --white: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.05), transparent 25%),
+    radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.06), transparent 22%),
+    linear-gradient(135deg, #0f172a, #1f3b73);
+  min-height: 100vh;
+  color: #ffffff;
+}
+
+.stock-app {
+  min-height: 100vh;
+}
+
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 0;
+  margin-bottom: 30px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--white);
+  text-decoration: none;
+}
+
+.logo-icon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, var(--primary-blue), var(--secondary-blue));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: #e2e8f0;
+  font-weight: 600;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.profile-link:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--primary-blue), var(--secondary-blue));
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.main {
+  min-height: calc(100vh - 220px);
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.back-to-home-btn {
+  display: inline-block;
+  margin-bottom: 16px;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 2rem;
+  color: #fff;
+}
+
+.page-subtitle {
+  color: #dbeafe;
+  margin: 10px 0 0;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.quick-links a {
+  color: #bfdbfe;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.quick-links a:hover {
+  color: #f6c445;
+}
+
+.status-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 8px 0 16px;
+}
+
+.refresh-btn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.last-updated {
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.stock-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #7f1d1d;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.stock-error-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.stock-error p {
+  margin: 0;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.status-card {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1f2937;
+}
+
+.scope-card {
+  margin-top: 14px;
+}
+
+.status-label {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.status-value {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.status-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.status-pill.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-pill.bad {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.footer {
+  margin-top: 60px;
+  padding: 30px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.9rem;
+}
