@@ -6,7 +6,6 @@ const API_STATUS = '/api/v1/stock-monitoring/status';
 const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
-const WATCHLIST_STORAGE_KEY = 'stock_monitoring_watchlist_v1';
 const ALERTS_STORAGE_KEY = 'stock_monitoring_alerts_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
@@ -51,24 +50,9 @@ function App() {
   const [showRaw, setShowRaw] = useState(false);
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
-  const [watchlist, setWatchlist] = useState(() => {
-    try {
-      const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
-      if (!raw) {
-        return DEFAULT_WATCHLIST;
-      }
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        return DEFAULT_WATCHLIST;
-      }
-      const sanitized = parsed
-        .map((item) => String(item).toUpperCase().trim())
-        .filter(Boolean);
-      return sanitized.length > 0 ? sanitized : DEFAULT_WATCHLIST;
-    } catch {
-      return DEFAULT_WATCHLIST;
-    }
-  });
+  const [watchlists, setWatchlists] = useState([]);
+  const [activeWatchlistId, setActiveWatchlistId] = useState(null);
+  const [watchlistItems, setWatchlistItems] = useState([]);
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [prices, setPrices] = useState({});
@@ -92,10 +76,11 @@ function App() {
       return [];
     }
   });
-  const [alertSymbol, setAlertSymbol] = useState(DEFAULT_WATCHLIST[0]);
+  const [alertSymbol, setAlertSymbol] = useState('');
   const [alertDirection, setAlertDirection] = useState('above');
   const [alertTarget, setAlertTarget] = useState('');
   const [alertError, setAlertError] = useState('');
+  const [routePath, setRoutePath] = useState(() => window.location.pathname);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -203,13 +188,14 @@ function App() {
   }, []);
 
   const fetchQuotes = useCallback(async () => {
-    if (watchlist.length === 0) {
+    const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
+    if (symbols.length === 0) {
       setPrices({});
       setQuotesError('');
       return;
     }
     try {
-      const params = new URLSearchParams({ symbols: watchlist.join(',') });
+      const params = new URLSearchParams({ symbols: symbols.join(',') });
       const response = await fetch(`/api/v1/stock-monitoring/quotes?${params.toString()}`, {
         credentials: 'include',
       });
@@ -229,7 +215,63 @@ function App() {
     } catch (err) {
       setQuotesError(err instanceof Error ? err.message : 'Failed to load quotes');
     }
-  }, [watchlist]);
+  }, [watchlistItems]);
+
+  const loadWatchlistItems = useCallback(async (watchlistId) => {
+    const response = await fetch(`/api/v1/stock-monitoring/watchlists/${watchlistId}/items`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Watchlist items request failed (${response.status})`);
+    }
+    const payload = await response.json();
+    setWatchlistItems(Array.isArray(payload) ? payload : []);
+  }, []);
+
+  const loadWatchlists = useCallback(async () => {
+    const response = await fetch('/api/v1/stock-monitoring/watchlists', { credentials: 'include' });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Watchlists request failed (${response.status})`);
+    }
+    const payload = await response.json();
+    const items = Array.isArray(payload) ? payload : [];
+    setWatchlists(items);
+
+    if (items.length > 0) {
+      const preferred =
+        items.find((w) => w.id === activeWatchlistId)
+        || items[0];
+      setActiveWatchlistId(preferred.id);
+      await loadWatchlistItems(preferred.id);
+      return;
+    }
+
+    const createResponse = await fetch('/api/v1/stock-monitoring/watchlists', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Primary' }),
+    });
+    if (!createResponse.ok) {
+      const detail = await createResponse.text();
+      throw new Error(detail || `Create watchlist failed (${createResponse.status})`);
+    }
+    const created = await createResponse.json();
+    setWatchlists([created]);
+    setActiveWatchlistId(created.id);
+
+    for (const symbol of DEFAULT_WATCHLIST) {
+      await fetch(`/api/v1/stock-monitoring/watchlists/${created.id}/items`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+    }
+    await loadWatchlistItems(created.id);
+  }, [activeWatchlistId, loadWatchlistItems]);
 
   useEffect(() => {
     loadData();
@@ -249,19 +291,22 @@ function App() {
   }, [autoRefresh, fetchQuotes, loadData]);
 
   useEffect(() => {
-    localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
-  }, [watchlist]);
-  useEffect(() => {
     localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
   }, [alerts]);
   useEffect(() => {
     localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
   }, [notifications]);
   useEffect(() => {
-    if (!watchlist.includes(alertSymbol)) {
-      setAlertSymbol(watchlist[0] || '');
+    const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
+    if (!symbols.includes(alertSymbol)) {
+      setAlertSymbol(symbols[0] || '');
     }
-  }, [alertSymbol, watchlist]);
+  }, [alertSymbol, watchlistItems]);
+  useEffect(() => {
+    loadWatchlists().catch((err) => {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlists');
+    });
+  }, [loadWatchlists]);
   useEffect(() => {
     // Trigger alerts when prices cross thresholds (one-shot until condition resets).
     const fired = [];
@@ -299,6 +344,10 @@ function App() {
   const dbConnected = useMemo(
     () => (status?.database || '').toLowerCase() === 'connected',
     [status]
+  );
+  const watchlistSymbols = useMemo(
+    () => watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean),
+    [watchlistItems]
   );
   const latestCheck = history[0];
   const consecutiveCritical = useMemo(() => {
@@ -352,7 +401,7 @@ function App() {
     }
   }, [health, history, lastUpdated, latestCheck?.severity, metrics, prices, quotesAsOf, status]);
 
-  const addSymbol = useCallback(() => {
+  const addSymbol = useCallback(async () => {
     const normalized = symbolInput.toUpperCase().trim();
     setWatchlistError('');
     if (!normalized) {
@@ -363,17 +412,59 @@ function App() {
       setWatchlistError('Use letters/numbers and . _ - only (max 20 chars).');
       return;
     }
-    if (watchlist.includes(normalized)) {
+    const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase());
+    if (symbols.includes(normalized)) {
       setWatchlistError('Symbol already exists in your watchlist.');
       return;
     }
-    setWatchlist((prev) => [normalized, ...prev].slice(0, 50));
-    setSymbolInput('');
-  }, [symbolInput, watchlist]);
+    if (!activeWatchlistId) {
+      setWatchlistError('No watchlist selected yet.');
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/stock-monitoring/watchlists/${activeWatchlistId}/items`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: normalized }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail?.error || `Add symbol failed (${response.status})`);
+      }
+      const created = await response.json();
+      setWatchlistItems((prev) => [created, ...prev]);
+      setSymbolInput('');
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to add symbol.');
+    }
+  }, [activeWatchlistId, symbolInput, watchlistItems]);
 
-  const removeSymbol = useCallback((symbolToRemove) => {
-    setWatchlist((prev) => prev.filter((item) => item !== symbolToRemove));
-  }, []);
+  const removeSymbol = useCallback(async (symbolToRemove) => {
+    if (!activeWatchlistId) {
+      return;
+    }
+    const item = watchlistItems.find((candidate) => candidate.symbol === symbolToRemove);
+    if (!item?.id) {
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/v1/stock-monitoring/watchlists/${activeWatchlistId}/items/${item.id}`,
+        {
+          method: 'DELETE',
+          credentials: 'include',
+        }
+      );
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail?.error || `Delete symbol failed (${response.status})`);
+      }
+      setWatchlistItems((prev) => prev.filter((candidate) => candidate.id !== item.id));
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to remove symbol.');
+    }
+  }, [activeWatchlistId, watchlistItems]);
   const addAlert = useCallback(() => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
@@ -420,6 +511,15 @@ function App() {
   const clearNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
+  const changeActiveWatchlist = useCallback(async (nextId) => {
+    setWatchlistError('');
+    setActiveWatchlistId(nextId);
+    try {
+      await loadWatchlistItems(nextId);
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlist');
+    }
+  }, [loadWatchlistItems]);
   const refreshAll = useCallback(async () => {
     await Promise.all([loadData(), fetchQuotes()]);
   }, [fetchQuotes, loadData]);
@@ -427,6 +527,21 @@ function App() {
   useEffect(() => {
     fetchQuotes();
   }, [fetchQuotes]);
+
+  useEffect(() => {
+    const onPopState = () => setRoutePath(window.location.pathname);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigateToView = useCallback((path) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+      setRoutePath(path);
+    }
+  }, []);
+
+  const isOpsPage = routePath.startsWith('/stock/ops');
 
   return (
     <div className="App stock-app">
@@ -448,12 +563,39 @@ function App() {
           <div className="page-header">
             <a href="/" className="back-to-home-btn">← Back to Home</a>
             <h1 className="page-title">Stock Exchange Monitoring</h1>
-            <p className="page-subtitle">Live operational status for the EU markets MVP backend.</p>
+            <p className="page-subtitle">
+              {isOpsPage
+                ? 'Operations and runtime diagnostics for the stock service.'
+                : 'Market watchlist, provider quotes, and alert workflows for the EU markets MVP.'}
+            </p>
             <div className="quick-links">
               <a href="/services">All Services</a>
               <a href="/profile">Profile</a>
+              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock')}>
+                Market
+              </button>
+              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/ops')}>
+                Ops
+              </button>
               <a href="/stock-monitoring/endpoints">Endpoints</a>
             </div>
+          </div>
+
+          <div className="view-tabs">
+            <button
+              type="button"
+              className={`view-tab ${!isOpsPage ? 'active' : ''}`}
+              onClick={() => navigateToView('/stock')}
+            >
+              Market view
+            </button>
+            <button
+              type="button"
+              className={`view-tab ${isOpsPage ? 'active' : ''}`}
+              onClick={() => navigateToView('/stock/ops')}
+            >
+              Ops view
+            </button>
           </div>
 
           <div className="status-toolbar">
@@ -463,11 +605,13 @@ function App() {
               disabled={loading}
               className="refresh-btn"
             >
-              {loading ? 'Refreshing...' : 'Refresh status'}
+              {loading ? 'Refreshing...' : (isOpsPage ? 'Refresh status' : 'Refresh market data')}
             </button>
-            <button type="button" className="copy-btn" onClick={copyDiagnostics}>
-              {copied ? 'Copied!' : 'Copy diagnostics'}
-            </button>
+            {isOpsPage && (
+              <button type="button" className="copy-btn" onClick={copyDiagnostics}>
+                {copied ? 'Copied!' : 'Copy diagnostics'}
+              </button>
+            )}
             <label className="auto-refresh-toggle">
               <input
                 type="checkbox"
@@ -476,22 +620,21 @@ function App() {
               />
               Auto-refresh (30s)
             </label>
-            {lastUpdated && (
+            {isOpsPage && lastUpdated && (
               <span className="last-updated">Last updated: {lastUpdated}</span>
             )}
             {quotesAsOf && (
               <span className="last-updated">Data as of: {new Date(quotesAsOf).toLocaleString()}</span>
             )}
           </div>
-          {quotesError && (
+          {!isOpsPage && quotesError && (
             <div className="stock-error">
               <p className="stock-error-title">Unable to load provider quotes</p>
               <p>{quotesError}</p>
             </div>
           )}
 
-
-          {(hasIncident || hasWarningStreak) && (
+          {isOpsPage && (hasIncident || hasWarningStreak) && (
             <div className={`incident-banner ${hasIncident ? 'critical' : 'warning'}`}>
               {hasIncident ? (
                 <strong>
@@ -505,13 +648,14 @@ function App() {
             </div>
           )}
 
-          {error && (
+          {isOpsPage && error && (
             <div className="stock-error">
               <p className="stock-error-title">Unable to load stock service status</p>
               <p>{error}</p>
             </div>
           )}
 
+          {isOpsPage && (
           <section className="status-grid">
             <article className="status-card">
               <p className="status-label">Backend health</p>
@@ -561,17 +705,38 @@ function App() {
               </p>
             </article>
           </section>
+          )}
 
+          {isOpsPage && (
           <section className="status-card scope-card">
             <p className="status-label">Scope</p>
             <p className="status-value">{status?.scope || (loading ? 'Loading...' : 'unknown')}</p>
           </section>
+          )}
 
+          {!isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Watchlist (P0.2 MVP)</p>
-              <span className="history-count">{watchlist.length} symbols</span>
+              <span className="history-count">
+                {watchlistSymbols.length} symbols · {watchlists.length} list{watchlists.length === 1 ? '' : 's'}
+              </span>
             </div>
+            {watchlists.length > 1 && (
+              <div className="watchlist-form">
+                <select
+                  value={activeWatchlistId || ''}
+                  onChange={(event) => changeActiveWatchlist(Number(event.target.value))}
+                  aria-label="Select watchlist"
+                >
+                  {watchlists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                      {list.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="watchlist-form">
               <input
                 type="text"
@@ -593,7 +758,7 @@ function App() {
             </div>
             {watchlistError && <p className="watchlist-error">{watchlistError}</p>}
             <div className="watchlist-chips">
-              {watchlist.map((symbol) => (
+              {watchlistSymbols.map((symbol) => (
                 <div className="watchlist-chip" key={symbol}>
                   <span>{symbol}</span>
                   <button
@@ -607,13 +772,15 @@ function App() {
               ))}
             </div>
           </section>
+          )}
 
+          {!isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Current prices (provider feed)</p>
             </div>
             <div className="price-grid">
-              {watchlist.map((symbol) => (
+              {watchlistSymbols.map((symbol) => (
                 <div className="price-input-row" key={`price-${symbol}`}>
                   <span>{symbol}</span>
                   <strong>{typeof prices[symbol] === 'number' ? prices[symbol].toFixed(2) : 'n/a'}</strong>
@@ -621,7 +788,9 @@ function App() {
               ))}
             </div>
           </section>
+          )}
 
+          {!isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Price alerts (P0.3 MVP)</p>
@@ -631,9 +800,9 @@ function App() {
               <select
                 value={alertSymbol}
                 onChange={(event) => setAlertSymbol(event.target.value)}
-                disabled={watchlist.length === 0}
+                  disabled={watchlistSymbols.length === 0}
               >
-                {watchlist.map((symbol) => (
+                {watchlistSymbols.map((symbol) => (
                   <option key={`opt-${symbol}`} value={symbol}>{symbol}</option>
                 ))}
               </select>
@@ -653,7 +822,7 @@ function App() {
                 Add alert
               </button>
             </div>
-            {watchlist.length === 0 && (
+            {watchlistSymbols.length === 0 && (
               <p className="status-meta">Add at least one watchlist symbol to create alerts.</p>
             )}
             {alertError && <p className="watchlist-error">{alertError}</p>}
@@ -689,7 +858,9 @@ function App() {
               </div>
             )}
           </section>
+          )}
 
+          {!isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">In-app notifications (P0.4 channel)</p>
@@ -710,7 +881,9 @@ function App() {
               </div>
             )}
           </section>
+          )}
 
+          {isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Raw status JSON</p>
@@ -726,7 +899,9 @@ function App() {
               <pre className="raw-json">{JSON.stringify(status || {}, null, 2)}</pre>
             )}
           </section>
+          )}
 
+          {isOpsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Recent checks</p>
@@ -772,6 +947,7 @@ function App() {
               </div>
             )}
           </section>
+          )}
         </main>
 
         <footer className="footer">

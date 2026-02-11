@@ -144,8 +144,44 @@ body {
   font-weight: 600;
 }
 
+.inline-link-btn {
+  border: 0;
+  background: transparent;
+  color: #bfdbfe;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
 .quick-links a:hover {
   color: #f6c445;
+}
+
+.inline-link-btn:hover {
+  color: #f6c445;
+}
+
+.view-tabs {
+  display: inline-flex;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.view-tab {
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.view-tab.active {
+  border-color: #3b82f6;
+  background: #1d4ed8;
+  color: #eff6ff;
 }
 
 .status-toolbar {
