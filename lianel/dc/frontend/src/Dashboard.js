@@ -81,7 +81,8 @@ function Dashboard() {
       description: 'Explore EU energy statistics and analytics',
       icon: '⚡',
       url: '/energy',
-      status: 'active',
+      status: 'paused',
+      enabled: false,
       gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
       category: 'Analytics'
     },
@@ -90,7 +91,8 @@ function Dashboard() {
       description: 'High-frequency electricity load and generation data (ENTSO-E)',
       icon: '🔌',
       url: '/electricity',
-      status: 'active',
+      status: 'paused',
+      enabled: false,
       gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       category: 'Analytics'
     },
@@ -99,7 +101,8 @@ function Dashboard() {
       description: 'OpenStreetMap features aggregated to NUTS regions',
       icon: '🗺️',
       url: '/geo',
-      status: 'active',
+      status: 'paused',
+      enabled: false,
       gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
       category: 'Analytics'
     },
@@ -109,6 +112,7 @@ function Dashboard() {
       icon: '📊',
       url: '/monitoring',
       status: 'active',
+      enabled: true,
       gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
       category: 'Monitoring'
     },
@@ -118,13 +122,25 @@ function Dashboard() {
       icon: '🤖',
       url: '/comp-ai',
       status: 'active',
+      enabled: true,
       gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
       category: 'AI Services'
+    },
+    {
+      name: 'Stock Monitoring',
+      description: 'EU stock monitoring service and operational subpages',
+      icon: '📈',
+      url: '/stock-monitoring',
+      status: 'active',
+      enabled: true,
+      gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+      category: 'Analytics'
     }
   ];
 
   // All services combined for stats (only main analytics on main page)
   const allServices = [...mainAnalytics];
+  const activeServices = allServices.filter((service) => service.enabled !== false);
 
   // Recent activity - show different activities based on role
   const recentActivity = [
@@ -162,33 +178,53 @@ function Dashboard() {
           {/* Main Analytics & Visualizations */}
           <section className="services-section">
             <h2 className="section-title">Analytics & Data Visualizations</h2>
-            <p className="section-subtitle">Explore energy data, timeseries, geospatial features, and monitoring dashboards</p>
+            <p className="section-subtitle">Explore active analytics services. Paused services are shown but disabled.</p>
             <div className="services-grid">
-              {mainAnalytics.map((service, index) => (
-                <a 
-                  key={index} 
-                  href={service.url} 
-                  className="service-card"
-                  target={service.url.startsWith('http') ? '_self' : '_self'}
-                  rel={service.url.startsWith('http') ? 'noopener noreferrer' : ''}
-                >
-                  <div className="service-header" style={{ background: service.gradient }}>
-                    <div className="service-icon">{service.icon}</div>
-                    <div className={`service-status status-${service.status}`}>
-                      <span className="status-dot"></span>
-                      {service.status}
+              {mainAnalytics.map((service, index) => {
+                const isEnabled = service.enabled !== false;
+                const actionLabel = isEnabled ? 'Open Service' : 'Service Paused';
+                const className = `service-card ${isEnabled ? '' : 'service-card-disabled'}`.trim();
+
+                const content = (
+                  <>
+                    <div className="service-header" style={{ background: service.gradient }}>
+                      <div className="service-icon">{service.icon}</div>
+                      <div className={`service-status status-${service.status}`}>
+                        <span className="status-dot"></span>
+                        {service.status}
+                      </div>
                     </div>
-                  </div>
-                  <div className="service-content">
-                    <h3 className="service-name">{service.name}</h3>
-                    <p className="service-description">{service.description}</p>
-                    <div className="service-action">
-                      Open Service
-                      <span className="arrow">→</span>
+                    <div className="service-content">
+                      <h3 className="service-name">{service.name}</h3>
+                      <p className="service-description">{service.description}</p>
+                      <div className="service-action">
+                        {actionLabel}
+                        <span className="arrow">→</span>
+                      </div>
                     </div>
-                  </div>
-                </a>
-              ))}
+                  </>
+                );
+
+                if (!isEnabled) {
+                  return (
+                    <div key={index} className={className} aria-disabled="true">
+                      {content}
+                    </div>
+                  );
+                }
+
+                return (
+                  <a
+                    key={index}
+                    href={service.url}
+                    className={className}
+                    target={service.url.startsWith('http') ? '_self' : '_self'}
+                    rel={service.url.startsWith('http') ? 'noopener noreferrer' : ''}
+                  >
+                    {content}
+                  </a>
+                );
+              })}
             </div>
           </section>
 
@@ -229,7 +265,7 @@ function Dashboard() {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-icon">🚀</div>
-                <div className="stat-value">{allServices.length}</div>
+                <div className="stat-value">{activeServices.length}</div>
                 <div className="stat-label">Active Services</div>
               </div>
               <div className="stat-card">

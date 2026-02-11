@@ -1,0 +1,63 @@
+.stock-monitoring-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.stock-monitoring-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.stock-monitoring-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  color: #111827;
+}
+
+.stock-monitoring-card p {
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.stock-monitoring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.stock-monitoring-actions a {
+  display: inline-block;
+  text-decoration: none;
+  background: #2563eb;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.stock-monitoring-actions a.secondary {
+  background: #475569;
+}
+
+.stock-monitoring-status-box {
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 16px;
+}
+
+.stock-monitoring-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 14px;
+}

@@ -115,6 +115,20 @@
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
 }
 
+.service-card-disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.service-card-disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.service-card-disabled .service-action {
+  color: #94a3b8;
+}
+
 .service-header {
   padding: 32px 24px;
   display: flex;
@@ -148,6 +162,11 @@
   background: white;
   border-radius: 50%;
   animation: pulse 2s infinite;
+}
+
+.status-paused .status-dot {
+  background: #f59e0b;
+  animation: none;
 }
 
 .service-content {

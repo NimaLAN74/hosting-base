@@ -38,6 +38,16 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
+.service-card-disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.service-card-disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
 .service-header {
   padding: 20px;
   color: white;
@@ -68,6 +78,10 @@
 
 .status-active .status-dot {
   background: #10b981;
+}
+
+.status-paused .status-dot {
+  background: #f59e0b;
 }
 
 .service-content {
