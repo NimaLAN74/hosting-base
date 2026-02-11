@@ -1,5 +1,5 @@
 # Stock Monitoring Service – Rust backend (EU markets MVP). TDD + CI deploy.
-FROM rust:nightly-alpine AS builder
+FROM rust:alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache musl-dev pkgconfig
 RUN rustup target add x86_64-unknown-linux-musl
