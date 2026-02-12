@@ -30,6 +30,7 @@ function StockPageTemplate({
   onNavigate,
   children,
 }) {
+  const currentYear = new Date().getFullYear();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
   const isDashboardPage = !routePath.startsWith('/stock/watchlists')
@@ -151,7 +152,7 @@ function StockPageTemplate({
         </main>
 
         <footer className="footer">
-          <p>&copy; 2026 Lianel World. All rights reserved.</p>
+          <p>&copy; {currentYear} Lianel World. All rights reserved.</p>
         </footer>
       </div>
     </div>

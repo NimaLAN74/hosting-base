@@ -10,15 +10,17 @@ import './App.css';
  * @param {Object} props
  * @param {string} props.title - Page title
  * @param {ReactNode} props.children - Page content
- * @param {boolean} props.showBackButton - Show "Back to Home" button (default: true)
+ * @param {boolean} props.showBackButton - Show "Back to Home" button (default: false)
  * @param {string} props.backButtonText - Custom back button text (default: "← Back to Home")
  */
 const PageTemplate = ({ 
   title, 
+  subtitle,
   children, 
-  showBackButton = true, 
+  showBackButton = false, 
   backButtonText = "← Back to Home" 
 }) => {
+  const currentYear = new Date().getFullYear();
   return (
     <div className="App">
       <div className="container">
@@ -40,6 +42,7 @@ const PageTemplate = ({
               </Link>
             )}
             {title && <h1 className="page-title">{title}</h1>}
+            {subtitle && <p className="page-subtitle">{subtitle}</p>}
           </div>
           
           <div className="page-content">
@@ -48,7 +51,7 @@ const PageTemplate = ({
         </main>
         
         <footer className="footer">
-          <p>&copy; 2025 Lianel World. All rights reserved.</p>
+          <p>&copy; {currentYear} Lianel World. All rights reserved.</p>
         </footer>
       </div>
     </div>

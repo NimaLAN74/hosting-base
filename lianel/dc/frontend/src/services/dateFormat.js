@@ -1,5 +1,3 @@
-const EU_LOCALE = 'en-GB';
-
 /** Use these for all date inputs so UI never shows US format (mm/dd/yyyy). */
 export const EU_DATE_INPUT_PLACEHOLDER = 'DD/MM/YYYY (e.g. 31/12/2025)';
 export const EU_DATE_INPUT_LABEL = 'DD/MM/YYYY';
@@ -27,22 +25,25 @@ const toDate = (value) => {
 export const formatDateEU = (value) => {
   const date = toDate(value);
   if (!date) return 'N/A';
-  return date.toLocaleDateString(EU_LOCALE, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 export const formatDateTimeEU = (value, { includeSeconds = true } = {}) => {
   const date = toDate(value);
   if (!date) return 'N/A';
-  const options = {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  };
-  if (includeSeconds) options.second = '2-digit';
-  return date.toLocaleString(EU_LOCALE, options);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  if (!includeSeconds) {
+    return `${day}/${month}/${year} ${hour}:${minute}`;
+  }
+  const second = String(date.getSeconds()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hour}:${minute}:${second}`;
 };
 
 export const formatFilenameDateEU = (value = new Date()) =>

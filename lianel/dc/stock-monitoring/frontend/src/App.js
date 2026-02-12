@@ -12,6 +12,38 @@ const CRITICAL_LATENCY_MS = 2000;
 const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
+const SWEDISH_LOCALE = 'sv-SE';
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function toDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateTimeSwedish(value) {
+  const date = toDate(value);
+  if (!date) {
+    return 'n/a';
+  }
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+function formatTimeSwedish(value) {
+  const date = toDate(value);
+  if (!date) {
+    return 'n/a';
+  }
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
 
 function evaluateSeverity({
   healthText,
@@ -59,7 +91,7 @@ function formatMoney(value, currency) {
   }
   if (currency && /^[A-Z]{3}$/.test(currency)) {
     try {
-      return new Intl.NumberFormat(undefined, {
+      return new Intl.NumberFormat(SWEDISH_LOCALE, {
         style: 'currency',
         currency,
         minimumFractionDigits: 2,
@@ -271,7 +303,7 @@ function App() {
 
       setMetrics(nextMetrics);
       const sampledAt = new Date();
-      setLastUpdated(sampledAt.toLocaleString());
+      setLastUpdated(formatDateTimeSwedish(sampledAt));
 
       const historyItem = {
         sampledAt: sampledAt.toISOString(),
@@ -302,7 +334,7 @@ function App() {
       const errorText = err instanceof Error ? err.message : 'Unknown error';
       setError(errorText);
       const sampledAt = new Date();
-      setLastUpdated(sampledAt.toLocaleString());
+      setLastUpdated(formatDateTimeSwedish(sampledAt));
       const historyItem = {
           sampledAt: sampledAt.toISOString(),
           healthText: 'unknown',
@@ -891,7 +923,7 @@ function App() {
               <span className="last-updated">Last updated: {lastUpdated}</span>
             )}
             {quotesAsOf && (
-              <span className="last-updated">Data as of: {new Date(quotesAsOf).toLocaleString()}</span>
+              <span className="last-updated">Data as of: {formatDateTimeSwedish(quotesAsOf)}</span>
             )}
           </div>
           {!isOpsPage && quotesError && (
@@ -1108,12 +1140,12 @@ function App() {
                     <tr key={`price-${row.symbol}`}>
                       <td>{row.symbol}</td>
                       <td>{row.currency || 'n/a'}</td>
-                      <td><strong>{formatMoneyWithCurrency(row.current, row.currency)}</strong></td>
-                      <td>{formatMoneyWithCurrency(row.previous, row.currency)}</td>
+                      <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
+                      <td>{formatMoney(row.previous, row.currency)}</td>
                       <td className={`trend-cell trend-${row.trend}`}>
                         {row.trend === 'up' ? '▲ Up' : row.trend === 'down' ? '▼ Down' : '• Flat'}
                       </td>
-                      <td>{quotesAsOf ? new Date(quotesAsOf).toLocaleTimeString() : 'n/a'}</td>
+                      <td>{formatTimeSwedish(quotesAsOf)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1170,8 +1202,8 @@ function App() {
                       <div className="status-meta">Currency: {quoteCurrencies[alert.symbol] || 'n/a'}</div>
                       <div className="status-meta">
                         {alert.lastTriggeredAt
-                          ? `Last triggered: ${new Date(alert.lastTriggeredAt).toLocaleString()}`
-                          : `Created: ${new Date(alert.createdAt).toLocaleString()}`}
+                          ? `Last triggered: ${formatDateTimeSwedish(alert.lastTriggeredAt)}`
+                          : `Created: ${formatDateTimeSwedish(alert.createdAt)}`}
                       </div>
                     </div>
                     <div className="alert-actions">
@@ -1209,7 +1241,7 @@ function App() {
               <div className="notifications-list">
                 {notifications.map((note) => (
                   <div className="notification-item" key={note.id}>
-                    <div className="status-meta">{new Date(note.createdAt).toLocaleTimeString()}</div>
+                    <div className="status-meta">{formatTimeSwedish(note.createdAt)}</div>
                     <div>{note.message}</div>
                   </div>
                 ))}
@@ -1263,7 +1295,7 @@ function App() {
                         key={`${item.sampledAt}-${item.healthCode}-${item.statusCode}`}
                         className={`history-row-${item.severity || 'ok'}`}
                       >
-                        <td>{new Date(item.sampledAt).toLocaleTimeString()}</td>
+                        <td>{formatTimeSwedish(item.sampledAt)}</td>
                         <td>{item.healthText.toUpperCase()}</td>
                         <td>{String(item.dbText).toUpperCase()}</td>
                         <td>

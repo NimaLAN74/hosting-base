@@ -127,7 +127,10 @@ function Monitoring() {
   }
 
   return (
-    <PageTemplate title="Monitoring & Dashboards">
+    <PageTemplate
+      title="Monitoring & Dashboards"
+      subtitle="System monitoring, dashboards, and operational visibility"
+    >
       <div className="monitoring-container" style={{ minHeight: '400px' }}>
         <div className="monitoring-header">
           <p className="monitoring-description">
