@@ -8,6 +8,7 @@ use axum::{
     routing::{delete, get, post, put},
     Json, Router,
 };
+use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -24,6 +25,7 @@ use crate::config::AppConfig;
 pub struct QuoteService {
     pub provider: String,
     pub cache_ttl: Duration,
+    pub data_provider_api_key: Option<String>,
     pub http: reqwest::Client,
     pub cache: Arc<RwLock<HashMap<String, CachedQuote>>>,
 }
@@ -276,6 +278,22 @@ struct YahooQuoteItem {
     currency: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AlphaVantageGlobalQuoteEnvelope {
+    #[serde(rename = "Global Quote")]
+    global_quote: Option<AlphaVantageGlobalQuote>,
+    #[serde(rename = "Note")]
+    note: Option<String>,
+    #[serde(rename = "Error Message")]
+    error_message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AlphaVantageGlobalQuote {
+    #[serde(rename = "05. price")]
+    price: Option<String>,
+}
+
 async fn quotes(
     State(state): State<AppState>,
     Query(query): Query<QuotesQuery>,
@@ -308,7 +326,7 @@ async fn quotes(
     let mut fetched_quotes = Vec::new();
     let mut warnings = Vec::new();
     if !missing.is_empty() {
-        match fetch_provider_quotes(&state.quote_service.http, &missing).await {
+        match fetch_provider_quotes(&state.quote_service, &missing).await {
             Ok(items) => {
                 let mut write_cache = state.quote_service.cache.write().await;
                 for item in items {
@@ -419,10 +437,11 @@ fn parse_symbols(raw: Option<&str>) -> Result<Vec<String>, (StatusCode, Json<ser
 }
 
 async fn fetch_provider_quotes(
-    http: &reqwest::Client,
+    quote_service: &QuoteService,
     symbols: &[String],
 ) -> anyhow::Result<Vec<CachedQuote>> {
     let mut all = Vec::new();
+    let http = &quote_service.http;
 
     // First attempt: Yahoo bulk endpoint.
     match fetch_yahoo_quotes(http, symbols).await {
@@ -447,10 +466,75 @@ async fn fetch_provider_quotes(
         }
     }
 
+    // Secondary provider fallback for unresolved symbols (notably Stockholm .ST).
+    if let Some(api_key) = quote_service.data_provider_api_key.as_deref() {
+        let unresolved_after_stooq: Vec<String> = symbols
+            .iter()
+            .filter(|symbol| !all.iter().any(|q| q.symbol.eq_ignore_ascii_case(symbol)))
+            .cloned()
+            .collect();
+        if !unresolved_after_stooq.is_empty() {
+            let mut alpha_quotes = fetch_alpha_vantage_quotes(http, &unresolved_after_stooq, api_key).await;
+            all.append(&mut alpha_quotes);
+        }
+    }
+
     if all.is_empty() {
         anyhow::bail!("Provider fetch returned no data (Yahoo/Stooq)");
     }
     Ok(all)
+}
+
+async fn fetch_alpha_vantage_quotes(
+    http: &reqwest::Client,
+    symbols: &[String],
+    api_key: &str,
+) -> Vec<CachedQuote> {
+    let mut out = Vec::new();
+    for original_symbol in symbols {
+        let provider_symbol = map_to_alpha_vantage_symbol(original_symbol);
+        let response = http
+            .get("https://www.alphavantage.co/query")
+            .query(&[
+                ("function", "GLOBAL_QUOTE"),
+                ("symbol", provider_symbol.as_str()),
+                ("apikey", api_key),
+            ])
+            .send()
+            .await;
+        let Ok(resp) = response else {
+            continue;
+        };
+        let parsed = resp.json::<AlphaVantageGlobalQuoteEnvelope>().await;
+        let Ok(payload) = parsed else {
+            continue;
+        };
+        if payload.note.is_some() || payload.error_message.is_some() {
+            continue;
+        }
+        let price = payload
+            .global_quote
+            .and_then(|q| q.price)
+            .and_then(|raw| raw.parse::<f64>().ok());
+        let Some(price) = price else {
+            continue;
+        };
+        out.push(CachedQuote {
+            symbol: original_symbol.to_uppercase(),
+            price,
+            currency: infer_currency_from_symbol(original_symbol),
+            fetched_at_ms: current_time_ms(),
+        });
+    }
+    out
+}
+
+fn map_to_alpha_vantage_symbol(symbol: &str) -> String {
+    let upper = symbol.to_uppercase();
+    if upper.ends_with(".ST") {
+        return upper.replace(".ST", ".STO");
+    }
+    upper
 }
 
 async fn fetch_yahoo_quotes(
@@ -461,6 +545,8 @@ async fn fetch_yahoo_quotes(
     let joined = symbols.join(",");
     let resp = http
         .get(url)
+        .header(USER_AGENT, "Mozilla/5.0 (compatible; LianelStockMonitoring/1.0)")
+        .header(ACCEPT, "application/json,text/plain,*/*")
         .query(&[("symbols", joined)])
         .send()
         .await?
@@ -487,7 +573,18 @@ async fn fetch_yahoo_quotes(
 async fn fetch_stooq_quote(http: &reqwest::Client, symbol: &str) -> Option<CachedQuote> {
     let stooq_symbol = to_stooq_symbol(symbol);
     let url = format!("https://stooq.com/q/l/?s={}&i=d", stooq_symbol.to_lowercase());
-    let text = http.get(url).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
+    let text = http
+        .get(url)
+        .header(USER_AGENT, "Mozilla/5.0 (compatible; LianelStockMonitoring/1.0)")
+        .header(ACCEPT, "text/csv,text/plain,*/*")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .text()
+        .await
+        .ok()?;
     parse_stooq_line(symbol, &text)
 }
 
@@ -1142,7 +1239,7 @@ async fn evaluate_alerts_for_user(state: &AppState, user_id: &str) -> anyhow::Re
     let mut symbols = alerts.iter().map(|(_, symbol, _, _, _)| symbol.clone()).collect::<Vec<_>>();
     symbols.sort();
     symbols.dedup();
-    let quotes = fetch_provider_quotes(&state.quote_service.http, &symbols).await?;
+    let quotes = fetch_provider_quotes(&state.quote_service, &symbols).await?;
 
     let mut price_by_symbol = HashMap::new();
     for quote in quotes {

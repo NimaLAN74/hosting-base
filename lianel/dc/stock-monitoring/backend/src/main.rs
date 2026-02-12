@@ -26,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let quote_service = QuoteService {
         provider: config.quote_provider.clone(),
         cache_ttl: Duration::from_secs(config.quote_cache_ttl_seconds),
+        data_provider_api_key: config.data_provider_api_key.clone(),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()?,

@@ -15,7 +15,7 @@ MVP scope: **European Union markets** (exchanges, symbols, data). Global (e.g. N
 
 - Prefer providers with EU coverage and (where required) licensing: Alpha Vantage, IEX Cloud, Polygon, FMP, or exchange/aggregator feeds.
 - Ensure **symbol format** and **mic** (market identifier) align with EU exchanges (e.g. XPAR, XETR, XLON, SIX).
-- **MVP implementation choice (current):** Backend quote endpoint uses Yahoo Finance quote API (`query1.finance.yahoo.com`) as on-demand source with short cache.
+- **MVP implementation choice (current):** Backend quote endpoint uses Yahoo Finance as primary with short cache, Stooq as secondary fallback, and optional Alpha Vantage fallback when `STOCK_MONITORING_DATA_PROVIDER_API_KEY` is set.
 
 ## Symbols and identifiers
 

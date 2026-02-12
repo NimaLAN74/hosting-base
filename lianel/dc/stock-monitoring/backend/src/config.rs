@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub quote_provider: String,
     /// Quote cache TTL in seconds for provider results.
     pub quote_cache_ttl_seconds: u64,
+    /// Optional API key for secondary provider fallback (e.g. Alpha Vantage).
+    pub data_provider_api_key: Option<String>,
 }
 
 impl AppConfig {
@@ -56,6 +58,10 @@ impl AppConfig {
                 .unwrap_or_else(|_| "30".to_string())
                 .parse()
                 .context("Invalid STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")?,
+            data_provider_api_key: env::var("STOCK_MONITORING_DATA_PROVIDER_API_KEY")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
         })
     }
 
