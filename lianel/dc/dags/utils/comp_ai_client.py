@@ -93,6 +93,20 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
+def _raise_401_help(resp: requests.Response, url: str) -> None:
+    """Log help and raise HTTPError so DAG logs show how to fix 401."""
+    help_msg = (
+        "Set Airflow Variables: COMP_AI_KEYCLOAK_URL, COMP_AI_CLIENT_ID, COMP_AI_CLIENT_SECRET "
+        "(recommended), or refresh COMP_AI_TOKEN. See docs/runbooks/COMP-AI-AIRFLOW-401-TOKEN.md"
+    )
+    log.warning("Comp-AI 401 for %s: %s", url, help_msg)
+    raise requests.HTTPError(
+        f"401 Unauthorized for {url}. {help_msg}",
+        request=resp.request,
+        response=resp,
+    )
+
+
 def get_tests(control_id: Optional[int] = None) -> list[dict[str, Any]]:
     """GET /api/v1/tests. Returns list of control tests (id, control_id, name, test_type, schedule, ...)."""
     base_url, token = _get_config()
@@ -101,6 +115,8 @@ def get_tests(control_id: Optional[int] = None) -> list[dict[str, Any]]:
     if control_id is not None:
         params["control_id"] = control_id
     resp = requests.get(url, headers=_headers(token), params=params or None, timeout=30)
+    if resp.status_code == 401:
+        _raise_401_help(resp, url)
     resp.raise_for_status()
     return resp.json()
 
@@ -110,6 +126,8 @@ def get_gaps() -> list[dict[str, Any]]:
     base_url, token = _get_config()
     url = f"{base_url}/api/v1/controls/gaps"
     resp = requests.get(url, headers=_headers(token), timeout=30)
+    if resp.status_code == 401:
+        _raise_401_help(resp, url)
     resp.raise_for_status()
     return resp.json()
 

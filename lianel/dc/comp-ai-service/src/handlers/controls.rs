@@ -29,7 +29,7 @@ use crate::db::queries::{
     list_control_tests, list_all_control_tests, record_control_test_result,
 };
 use crate::inference;
-use crate::utils::{format_eu_date, parse_eu_date};
+use crate::utils::{format_eu_date, parse_eu_date, parse_eu_or_iso_date};
 use crate::integrations::github::{fetch_last_commit_evidence, fetch_branch_protection_evidence};
 use crate::integrations::okta::{
     fetch_okta_org_summary, fetch_okta_users_snapshot, fetch_okta_groups_snapshot,
@@ -2068,13 +2068,24 @@ pub async fn post_dlp_evidence(
         ));
     }
 
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let scan_date = body
+    let today = format_eu_date(chrono::Utc::now().date_naive());
+    let scan_date = if let Some(raw_date) = body
         .scan_date
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| today.as_str());
+    {
+        let parsed = parse_eu_or_iso_date(raw_date).ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Invalid scan_date",
+                "detail": "Use DD/MM/YYYY"
+            })),
+        ))?;
+        format_eu_date(parsed)
+    } else {
+        today
+    };
     let source = format!("DLP/compliance scan {}: {}", scan_date, summary);
 
     let id = create_evidence(

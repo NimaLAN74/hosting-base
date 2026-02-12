@@ -171,7 +171,11 @@ function CompAIControls() {
       setRemediationTask(task);
       if (task) {
         setRemediationAssignedTo(task.assigned_to || '');
-        setRemediationDueDate(task.due_date ? euStringFromISOInput(task.due_date.slice(0, 10)) : '');
+        setRemediationDueDate(
+          task.due_date
+            ? (task.due_date.includes('/') ? task.due_date : euStringFromISOInput(task.due_date.slice(0, 10)))
+            : ''
+        );
         setRemediationStatus(task.status || 'open');
         setRemediationNotes(task.notes || '');
       } else {
@@ -1298,12 +1302,17 @@ function CompAIControls() {
                     />
                   </div>
                   <div className="form-group">
-                    <label htmlFor="dlp-scan-date">Scan date (optional)</label>
+                    <label htmlFor="dlp-scan-date">Scan date (optional, {EU_DATE_INPUT_LABEL})</label>
                     <input
                       id="dlp-scan-date"
-                      type="date"
+                      type="text"
+                      inputMode="text"
+                      autoComplete="off"
+                      data-date-format="eu"
                       value={dlpScanDate}
                       onChange={(e) => setDlpScanDate(e.target.value)}
+                      placeholder={EU_DATE_INPUT_PLACEHOLDER}
+                      title={`Enter date as ${EU_DATE_INPUT_LABEL}`}
                     />
                   </div>
                   <div className="form-group">

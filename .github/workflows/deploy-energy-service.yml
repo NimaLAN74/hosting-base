@@ -1,16 +1,17 @@
+# Energy project PAUSED (Feb 2026) – workflow runs only when manually triggered.
+# See lianel/dc/docs/status/ENERGY-PROJECT-PAUSED.md. Re-add push trigger to resume deploy on push.
 name: Deploy Energy Service to Production
 
 on:
-  push:
-    branches:
-      - master
-      - main
-    paths:
-      - 'lianel/dc/energy-service/**'
-      - 'lianel/dc/docker-compose.backend.yaml'
-      - 'lianel/dc/docker-compose.yaml'
-      - '.github/workflows/deploy-energy-service.yml'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual only while energy project is paused
+  # push:
+  #   branches: [master, main]
+  #   paths:
+  #     - 'lianel/dc/energy-service/**'
+  #     - 'lianel/dc/docker-compose.backend.yaml'
+  #     - 'lianel/dc/docker-compose.yaml'
+  #     - 'lianel/dc/nginx/config/nginx.conf'
+  #     - '.github/workflows/deploy-energy-service.yml'
 
 env:
   REGISTRY: ghcr.io
@@ -281,8 +282,28 @@ jobs:
           echo "1. Network issues between GitHub Actions and remote host"
           echo "2. Firewall blocking GitHub Actions IP ranges"
           echo "3. SSH service issues on remote host"
-          exit 1
+              exit 1
 
+      - name: Sync nginx config (fix login: /auth/ → Keycloak)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Syncing nginx config to remote (part of every deploy)..."
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P ${REMOTE_PORT} \
+            lianel/dc/nginx/config/nginx.conf \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
+          echo "✅ Nginx config synced (login routes /auth/, /realms/, /resources/ to Keycloak)"
 
       - name: Deployment Summary
         run: |

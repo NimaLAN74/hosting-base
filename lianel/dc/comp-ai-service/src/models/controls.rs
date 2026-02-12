@@ -207,13 +207,14 @@ pub struct SharepointEvidenceResponse {
     pub evidence_ids: Vec<i64>,
 }
 
-/// D4: DLP or compliance scan result – store as one evidence item (e.g. "DLP scan 2026-01-15: no violation").
+/// D4: DLP or compliance scan result – store as one evidence item (e.g. "DLP scan 15/01/2026: no violation").
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DlpEvidenceRequest {
     pub control_id: i64,
     /// Short summary (e.g. "No violation" or "3 items flagged").
     pub summary: String,
-    /// Optional scan date (ISO date); defaults to today.
+    /// Optional scan date (DD/MM/YYYY); defaults to today.
+    #[schema(example = "31/12/2026")]
     pub scan_date: Option<String>,
     /// Optional details or report reference.
     pub details: Option<String>,

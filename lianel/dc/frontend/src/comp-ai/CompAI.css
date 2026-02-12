@@ -543,6 +543,29 @@
   gap: 24px;
 }
 
+.comp-ai-controls-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.comp-ai-controls-header-row h2 {
+  margin: 0;
+}
+
+.comp-ai-category-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comp-ai-category-filter span {
+  font-size: 13px;
+  color: #555;
+}
+
 .comp-ai-controls-section {
   background: white;
   border-radius: 8px;

@@ -218,7 +218,7 @@ def out(s=""):
 
 out("# Comp-AI Demo Report")
 out("")
-out(f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}  ")
+out(f"**Generated**: {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}  ")
 out(f"**Environment**: {base_url}  ")
 out("")
 out("---")

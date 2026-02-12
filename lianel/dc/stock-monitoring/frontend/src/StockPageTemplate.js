@@ -13,6 +13,15 @@ function getUserInitials(displayName) {
   return source.substring(0, 2).toUpperCase();
 }
 
+function looksLikeUserId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return true;
+  }
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+  return uuidLike || raw.includes('|') || raw.startsWith('auth0|');
+}
+
 function StockPageTemplate({
   authState,
   routePath,
@@ -29,7 +38,10 @@ function StockPageTemplate({
   const isWatchlistsPage = routePath.startsWith('/stock/watchlists');
   const isAlertsPage = routePath.startsWith('/stock/alerts');
   const isOpsPage = routePath.startsWith('/stock/ops');
-  const displayUser = authState.displayName || authState.email || 'User';
+  const preferredName = String(authState.displayName || '').trim();
+  const displayUser = preferredName && !looksLikeUserId(preferredName)
+    ? preferredName
+    : (authState.email || 'User');
   const displayEmail = authState.email || '';
   const initials = getUserInitials(displayUser);
 
@@ -77,10 +89,6 @@ function StockPageTemplate({
                     <a href="/profile" className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
                       <span className="dropdown-icon">👤</span>
                       Profile
-                    </a>
-                    <a href="/services" className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
-                      <span className="dropdown-icon">🧩</span>
-                      Services
                     </a>
                     <a href={getLogoutUrl('/stock')} className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
                       <span className="dropdown-icon">🚪</span>

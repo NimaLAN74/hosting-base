@@ -24,10 +24,14 @@ Failed to obtain JDBC connection
 
 Postgres is rejecting the `keycloak` user with the password from the current `.env` (e.g. `KEYCLOAK_DB_PASSWORD`). This often happens after Keycloak was **recreated** (e.g. when running `docker compose up` for another service that depends on Keycloak); the DB user/password in Postgres may have been set differently earlier.
 
-### Fix (server-side only, no repo change)
+### Quick fix (no SSH)
 
-1. On the server, align Postgres with `.env`: set the `keycloak` user password in Postgres to match `KEYCLOAK_DB_PASSWORD` in `.env` (or the reverse — set `.env` to match existing Postgres).
-2. Restart Keycloak: `docker compose -f docker-compose.infra.yaml up -d keycloak`.
+Trigger the **Sync Nginx (Fix Login)** workflow: GitHub → Actions → **Sync Nginx (Fix Login)** → **Run workflow**. It syncs Keycloak DB password, starts Keycloak, reloads nginx, and sets realm frontendUrl. Re-run whenever `https://www.lianel.se/auth/...` returns **502**.
+
+### Fix (server-side, when you have SSH)
+
+1. On the server, align Postgres with `.env`: run `bash lianel/dc/scripts/maintenance/set-keycloak-db-password-on-server.sh` (from repo root or `/root/hosting-base`).
+2. Restart Keycloak: `cd lianel/dc && docker compose -f docker-compose.infra.yaml up -d keycloak`.
 
 See **DIAGNOSIS-KEYCLOAK-502-AND-OLLAMA.md** for details.
 

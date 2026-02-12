@@ -4,24 +4,38 @@
 - `HTTPError: 401 Client Error: Unauthorized for url: .../api/v1/controls/gaps` (or `/api/v1/tests`)
 - `WARNING - COMP_AI_TOKEN or COMP_AI_BASE_URL contained non-ASCII characters`
 
-**Causes:**
-1. **Non-ASCII in token** – The Airflow Variable `COMP_AI_TOKEN` (or GitHub secret) was set with a non-ASCII character (e.g. ellipsis `…` instead of `...`). The client strips non-ASCII for HTTP headers; if the token was corrupted when set, it becomes invalid → 401.
-2. **Expired token** – Keycloak access token has a short lifespan (e.g. 5 min); the stored token is no longer valid.
+---
 
-**Fixes (choose one):**
+## Immediate fix (recommended: client credentials)
 
-### 1. Use client credentials (recommended – no expiry issues)
+**Option A – GitHub Secrets (then re-sync DAGs)**  
+Add these repository secrets, then run **Sync Airflow DAGs to Remote Host** so it sets the Variables in Airflow:
 
-Set these Airflow Variables so the DAG fetches a fresh token each run:
-
-- `COMP_AI_KEYCLOAK_URL` – e.g. `https://auth.lianel.se`
+- `COMP_AI_KEYCLOAK_URL` – Keycloak base URL reachable from the server (e.g. `https://www.lianel.se/auth` or `http://keycloak:8080` if Airflow runs in Docker on same host)
 - `COMP_AI_CLIENT_ID` – e.g. `comp-ai-service`
-- `COMP_AI_CLIENT_SECRET` – client secret for the Comp-AI Keycloak client
-- Optional: `COMP_AI_KEYCLOAK_REALM` – default `lianel`
+- `COMP_AI_CLIENT_SECRET` – client secret for that Keycloak client  
+Optionally: `COMP_AI_KEYCLOAK_REALM` (default `lianel`).  
+Keep `COMP_AI_BASE_URL` set (e.g. `http://lianel-comp-ai-service:3002`).
 
-Keep `COMP_AI_BASE_URL` set. You can leave `COMP_AI_TOKEN` set or remove it; the client will use client_credentials when the Keycloak variables are present.
+**Option B – Set Airflow Variables manually**  
+In Airflow UI: Admin → Variables. Add:
 
-### 2. Refresh the stored token (ASCII-safe)
+- `COMP_AI_KEYCLOAK_URL` – e.g. `https://www.lianel.se/auth`
+- `COMP_AI_CLIENT_ID` – `comp-ai-service`
+- `COMP_AI_CLIENT_SECRET` – (secret from Keycloak for comp-ai-service client)
+- `COMP_AI_KEYCLOAK_REALM` – `lianel` (optional)
+
+Ensure `COMP_AI_BASE_URL` is set (e.g. `http://lianel-comp-ai-service:3002`). The DAG will fetch a fresh token each run and 401 from expiry goes away.
+
+---
+
+**Causes:**
+1. **Expired or missing token** – `COMP_AI_TOKEN` is not set, or it expired (Keycloak access tokens are short-lived). Using client_credentials avoids this.
+2. **Non-ASCII in token** – The Airflow Variable `COMP_AI_TOKEN` was set with a non-ASCII character (e.g. ellipsis `…`). The client strips non-ASCII; if the token was corrupted, it becomes invalid → 401.
+
+**If you prefer a stored token instead of client credentials:**
+
+### 1. Refresh the stored token (ASCII-safe)
 
 On the server where Airflow runs:
 
@@ -37,7 +51,7 @@ The script now strips non-ASCII from the token before setting the Variable. Ensu
 bash scripts/maintenance/keycloak-comp-ai-extend-token-lifespan.sh
 ```
 
-### 3. GitHub Actions sync – sanitize secret
+### 2. GitHub Actions sync – sanitize secret
 
 If the sync workflow sets `COMP_AI_TOKEN` from a repo secret, ensure the secret value contains **only ASCII**. The workflow now sanitizes the token before setting the Variable; if the secret was wrong, re-save the secret with a token that has no special Unicode characters (e.g. copy the token again from Keycloak or from the script output).
 

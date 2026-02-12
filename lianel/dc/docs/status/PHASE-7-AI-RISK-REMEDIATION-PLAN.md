@@ -2,7 +2,7 @@
 
 **Goal:** Use AI to help users/customers with **risk analysis** and **remediation** (and optionally **retaliation**-related compliance). This phase adds tools and UI so the product directly supports those workflows.
 
-**Status:** **7.1** and **7.2** done. Next: 7.3 (optional) or 7.4 (optional).
+**Status:** **7.1**, **7.2**, and **7.3** done. 7.3: "Apply to remediation" button applies AI suggestion to remediation (notes) in one click. Next: 7.4 (optional) or other workstreams.
 
 ---
 

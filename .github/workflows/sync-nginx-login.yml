@@ -40,15 +40,16 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          for i in 1 2 3; do
-            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=25 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+          for i in 1 2 3 4 5; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=45 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
               echo "✅ SSH reachable (attempt $i)"
               exit 0
             fi
-            echo "⚠️ SSH attempt $i failed; retrying in 20s..."
-            [ $i -lt 3 ] && sleep 20
+            echo "⚠️ SSH attempt $i failed (timeout or refused); retrying in 30s..."
+            [ $i -lt 5 ] && sleep 30
           done
-          echo "❌ SSH to ${REMOTE_HOST} failed after 3 attempts"
+          echo "❌ SSH to ${REMOTE_HOST} failed after 5 attempts. Server may be down or firewall blocking GitHub Actions IPs."
+          echo "→ Run fix manually on server: bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh"
           exit 1
 
       - name: "Apply on remote (fix 502: sync DB + start Keycloak, then nginx + KC_HOSTNAME, reload, frontendUrl)"

@@ -65,6 +65,34 @@ Trigger from the Comp AI UI (“Collect AWS evidence”) or via the Airflow cont
 
 ---
 
+## M365 (Email) Integration (D3)
+
+Import recent email metadata from a Microsoft 365 mailbox as evidence (one row per message: From, Subject, Date, link). No body storage.
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `M365_TENANT_ID` | Yes | Azure AD tenant ID (GUID or xxx.onmicrosoft.com). |
+| `M365_CLIENT_ID` | Yes | App (client) ID of the app registration. |
+| `M365_CLIENT_SECRET` | Yes | Client secret of the app registration. |
+| `M365_MAILBOX_USER_ID` | Yes | User ID or userPrincipalName of the mailbox to read (e.g. user@domain.com). |
+
+### Azure AD app registration
+
+1. In **Azure Portal** → **Azure Active Directory** → **App registrations** → **New registration**. Name the app (e.g. Comp-AI M365 evidence).
+2. Under **Certificates & secrets**, create a **Client secret**; use it as `M365_CLIENT_SECRET`.
+3. Under **API permissions**, add **Microsoft Graph** → **Application permissions** → **Mail.Read**. Grant admin consent.
+4. Use **Application (client) ID** as `M365_CLIENT_ID` and **Directory (tenant) ID** as `M365_TENANT_ID`.
+5. Set `M365_MAILBOX_USER_ID` to the user principal name or object ID of the mailbox.
+
+### API and UI
+
+- **POST /api/v1/integrations/m365/evidence** — body: `{ "control_id": N, "limit": 50 }`. Creates up to `limit` evidence rows (max 100).
+- **UI:** Controls → “Collect from M365 (email metadata) — D3”.
+
+---
+
 ## Optional follow-up
 
 - **More G4 evidence types**: Additional AWS evidence (e.g. config snapshots, CloudTrail summaries) can be added as new evidence types and handlers.

@@ -1,5 +1,7 @@
 # Energy Service - Next Steps
 
+> **⏸️ Project paused (Feb 2026).** The energy project is paused; resources freed for new SaaS. See [ENERGY-PROJECT-PAUSED.md](./ENERGY-PROJECT-PAUSED.md). The content below remains for when the project is resumed.
+
 ## Current Status ✅
 
 - **Data Available**: 905 records from Eurostat ingestion

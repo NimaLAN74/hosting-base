@@ -78,7 +78,13 @@ impl KeycloakJwtValidator {
             .and_then(Value::as_str)
             .map(String::from)
             .unwrap_or_else(|| "unknown".to_string());
-        let display_name = claim_str("name")
+        let display_name = claim_str("given_name")
+            .and_then(|given| {
+                claim_str("family_name")
+                    .map(|family| format!("{} {}", given, family))
+                    .or(Some(given))
+            })
+            .or_else(|| claim_str("name"))
             .or_else(|| claim_str("preferred_username"))
             .or_else(|| claim_str("email"));
         let email = claim_str("email");

@@ -78,9 +78,9 @@ Scope: documents, policies, spreadsheets, emails; evidence linked to controls; o
 | D3 | **Integration (optional)** – M365 or Google: list recent emails (metadata only) or “compliance” channel; create evidence per relevant email (subject, date, link). No body storage. | Backend | OAuth + Mail API; effort Medium. |
 | D4 | **DLP-style (optional)** – Integrate with DLP or external tool that flags “sensitive in email”; store result as evidence (e.g. “DLP scan 2026-01-15: no violation”). | Backend | Lower priority. |
 
-**Deliverable:** Email as first-class evidence; optional connector for metadata.
+**Deliverable:** Email as first-class evidence; D1–D2 done. Optional connector (D3) later.
 
-**Effort (rough):** Small for D1–D2; Medium for D3.
+**Effort (rough):** Small for D1–D2 done; Medium for D3.
 
 ---
 
@@ -140,7 +140,12 @@ Suggested ordering **if you want balance**:
 | 6 | G2 – More automated tests | ✅ Done — control_tests.config; runner runs real GitHub tests |
 | 7 | Phase 7.3 – One-click apply | ✅ Done — "Apply to remediation" saves AI suggestion to remediation in one click |
 | 8 | Org scan + monitoring | ✅ Done — DAG `comp_ai_scan_documents` (weekly scan + gap analysis) |
-| … | G3 (IdP); G6 (policy); G9 (AI evidence review); Phase D (email) later | Next workstreams |
+| 9 | G3 (IdP – Okta) | ✅ Done — evidence API + UI + DAG test types |
+| 10 | G4 (Cloud – AWS IAM) | ✅ Done — evidence API + UI + DAG test type |
+| 11 | G6 (Policy / System Description) | ✅ Done — Audit docs page + policy mapping |
+| 12 | G8 (Vanta control set) | ✅ Done — bulk external_id API + UI; runbook |
+| 13 | G9 (AI evidence review) | ✅ Done — POST evidence/review + UI |
+| 14 | Phase D (email evidence) | ✅ D1–D2 done — email in type selector + UI hint; D3/D4 optional |
 
 **Phase C checklist (next):**
 

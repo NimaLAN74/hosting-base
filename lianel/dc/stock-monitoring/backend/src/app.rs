@@ -49,6 +49,38 @@ struct UserDisplayName(pub String);
 #[derive(Clone)]
 struct UserEmail(pub Option<String>);
 
+fn looks_like_user_id(candidate: &str) -> bool {
+    let s = candidate.trim();
+    if s.is_empty() {
+        return true;
+    }
+    let uuid_like = s.len() == 36
+        && s.chars().filter(|c| *c == '-').count() == 4
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    let tokenish = s.contains('|') || s.starts_with("auth0|");
+    uuid_like || tokenish
+}
+
+fn normalize_display_name(
+    display_name: Option<String>,
+    user_id: &str,
+    email: Option<&str>,
+) -> Option<String> {
+    let cleaned = display_name
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .filter(|v| v != user_id)
+        .filter(|v| !looks_like_user_id(v));
+    if cleaned.is_some() {
+        return cleaned;
+    }
+    email
+        .and_then(|v| v.split('@').next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(String::from)
+}
+
 /// Build the application router (used by main and by API integration tests).
 pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
@@ -114,10 +146,12 @@ async fn require_auth(
     if let Some(token) = token {
         match state.validator.validate_bearer_identity(&token).await {
             Ok(identity) => {
-                let display_name = identity
-                    .display_name
-                    .clone()
-                    .unwrap_or_else(|| identity.user_id.clone());
+                let display_name = normalize_display_name(
+                    identity.display_name.clone(),
+                    &identity.user_id,
+                    identity.email.as_deref(),
+                )
+                .unwrap_or_else(|| "User".to_string());
                 req.extensions_mut().insert(UserId(identity.user_id));
                 req.extensions_mut().insert(UserDisplayName(display_name));
                 req.extensions_mut().insert(UserEmail(identity.email));
@@ -147,7 +181,8 @@ async fn require_auth(
 
     match forwarded_user {
         Some(sub) => {
-            let display_name = sub.clone();
+            let display_name = normalize_display_name(None, &sub, forwarded_email.as_deref())
+                .unwrap_or_else(|| "User".to_string());
             req.extensions_mut().insert(UserId(sub));
             req.extensions_mut().insert(UserDisplayName(display_name));
             req.extensions_mut().insert(UserEmail(forwarded_email));
@@ -274,10 +309,14 @@ async fn quotes(
             Ok(items) => {
                 let mut write_cache = state.quote_service.cache.write().await;
                 for item in items {
+                    let resolved_currency = item
+                        .currency
+                        .clone()
+                        .or_else(|| infer_currency_from_symbol(&item.symbol));
                     let quote = CachedQuote {
                         symbol: item.symbol.clone(),
                         price: item.price,
-                        currency: item.currency,
+                        currency: resolved_currency,
                         fetched_at_ms: now_ms,
                     };
                     write_cache.insert(item.symbol.clone(), quote.clone());
@@ -432,7 +471,9 @@ async fn fetch_yahoo_quotes(
             out.push(CachedQuote {
                 symbol: item.symbol.to_uppercase(),
                 price,
-                currency: item.currency,
+                currency: item
+                    .currency
+                    .or_else(|| infer_currency_from_symbol(&item.symbol)),
                 fetched_at_ms: current_time_ms(),
             });
         }
@@ -461,7 +502,7 @@ fn parse_stooq_line(original_symbol: &str, line: &str) -> Option<CachedQuote> {
     Some(CachedQuote {
         symbol: original_symbol.to_uppercase(),
         price,
-        currency: None,
+        currency: infer_currency_from_symbol(original_symbol),
         fetched_at_ms: current_time_ms(),
     })
 }
@@ -472,6 +513,37 @@ fn to_stooq_symbol(symbol: &str) -> String {
         return upper.replace(".L", ".UK");
     }
     upper
+}
+
+fn infer_currency_from_symbol(symbol: &str) -> Option<String> {
+    let upper = symbol.to_uppercase();
+    if upper.ends_with(".L") || upper.ends_with(".UK") {
+        return Some("GBP".to_string());
+    }
+    if upper.ends_with(".ST") {
+        return Some("SEK".to_string());
+    }
+    if upper.ends_with(".CO") {
+        return Some("DKK".to_string());
+    }
+    if upper.ends_with(".OL") {
+        return Some("NOK".to_string());
+    }
+    if upper.ends_with(".HE")
+        || upper.ends_with(".AS")
+        || upper.ends_with(".DE")
+        || upper.ends_with(".F")
+        || upper.ends_with(".PA")
+        || upper.ends_with(".MI")
+        || upper.ends_with(".MC")
+        || upper.ends_with(".BR")
+    {
+        return Some("EUR".to_string());
+    }
+    if upper.ends_with(".SW") {
+        return Some("CHF".to_string());
+    }
+    None
 }
 
 fn current_time_ms() -> u64 {
@@ -1363,10 +1435,18 @@ async fn me(
     display_name: Option<axum::extract::Extension<UserDisplayName>>,
     email: Option<axum::extract::Extension<UserEmail>>,
 ) -> Json<serde_json::Value> {
+    let resolved_email = email.and_then(|axum::extract::Extension(v)| v.0);
     let resolved_display_name = display_name
         .map(|axum::extract::Extension(v)| v.0)
-        .unwrap_or_else(|| user_id.0.clone());
-    let resolved_email = email.and_then(|axum::extract::Extension(v)| v.0);
+        .filter(|v| !v.trim().is_empty())
+        .filter(|v| v != &user_id.0)
+        .filter(|v| !looks_like_user_id(v))
+        .or_else(|| {
+            resolved_email
+                .as_deref()
+                .and_then(|v| v.split('@').next())
+                .map(String::from)
+        });
     Json(serde_json::json!({
         "user_id": user_id.0,
         "display_name": resolved_display_name,

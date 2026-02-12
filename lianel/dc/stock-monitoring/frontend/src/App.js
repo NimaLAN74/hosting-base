@@ -80,6 +80,46 @@ function formatMoneyWithCurrency(value, currency) {
   return currency && /^[A-Z]{3}$/.test(currency) ? `${output} (${currency})` : output;
 }
 
+function looksLikeUserId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return true;
+  }
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+  return uuidLike || raw.includes('|') || raw.startsWith('auth0|');
+}
+
+function resolveDisplayName(rawDisplayName, userId, email) {
+  const displayName = String(rawDisplayName || '').trim();
+  if (displayName && displayName !== userId && !looksLikeUserId(displayName)) {
+    return displayName;
+  }
+  const localPart = String(email || '').trim().split('@')[0];
+  return localPart || '';
+}
+
+function inferCurrencyFromSymbol(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  if (upper.endsWith('.L') || upper.endsWith('.UK')) return 'GBP';
+  if (upper.endsWith('.ST')) return 'SEK';
+  if (upper.endsWith('.CO')) return 'DKK';
+  if (upper.endsWith('.OL')) return 'NOK';
+  if (upper.endsWith('.SW')) return 'CHF';
+  if (
+    upper.endsWith('.HE')
+    || upper.endsWith('.AS')
+    || upper.endsWith('.DE')
+    || upper.endsWith('.F')
+    || upper.endsWith('.PA')
+    || upper.endsWith('.MI')
+    || upper.endsWith('.MC')
+    || upper.endsWith('.BR')
+  ) {
+    return 'EUR';
+  }
+  return '';
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -151,9 +191,9 @@ function App() {
     setAuthState((prev) => ({ ...prev, checking: true }));
     try {
       const mePayload = await apiJson(API_ME);
-      const displayName = String(mePayload?.display_name || '').trim();
       const userId = String(mePayload?.user_id || '').trim();
       const email = String(mePayload?.email || '').trim();
+      const displayName = resolveDisplayName(mePayload?.display_name, userId, email);
       setAuthState({
         checking: false,
         isAuthenticated: true,
@@ -303,8 +343,11 @@ function App() {
         if (item?.symbol && typeof item?.price === 'number') {
           const symbol = String(item.symbol).toUpperCase();
           map[symbol] = item.price;
-          if (item?.currency) {
-            currencyMap[symbol] = String(item.currency).toUpperCase();
+          const apiCurrency = String(item?.currency || '').toUpperCase();
+          const inferredCurrency = inferCurrencyFromSymbol(symbol);
+          const resolvedCurrency = apiCurrency || inferredCurrency;
+          if (resolvedCurrency) {
+            currencyMap[symbol] = resolvedCurrency;
           }
         }
       }
@@ -786,7 +829,9 @@ function App() {
       currency: quoteCurrencies[symbol],
     };
   }), [previousPrices, prices, quoteCurrencies, watchlistSymbols]);
-  const selectedAlertCurrency = alertSymbol ? (quoteCurrencies[alertSymbol] || 'n/a') : 'n/a';
+  const selectedAlertCurrency = alertSymbol
+    ? (quoteCurrencies[alertSymbol] || inferCurrencyFromSymbol(alertSymbol) || 'n/a')
+    : 'n/a';
   const pageSubtitle = isOpsPage
     ? 'Operations and runtime diagnostics for the stock service.'
     : isWatchlistsPage

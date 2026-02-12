@@ -73,6 +73,7 @@ def _register_https_scheme_fix(app):
 
 # Register when config is loaded with app context (Airflow FAB pushes app context when loading this file).
 # ProxyFix must run before any view so url_for(..., _external=True) sees https from X-Forwarded-Proto.
+# Catch all exceptions so a config error here does not cause 500 on /auth/login/ (FLASK_APP_MUTATOR will still run).
 try:
     from flask import current_app
     try:
@@ -81,8 +82,8 @@ try:
     except Exception:
         pass
     _register_https_scheme_fix(current_app)
-except RuntimeError:
-    # No app context yet (e.g. config loaded before app created); FAB may call FLASK_APP_MUTATOR later.
+except (RuntimeError, AttributeError, TypeError):
+    # No app context yet, or app not fully initialized; FAB will call FLASK_APP_MUTATOR when app is ready.
     pass
 
 

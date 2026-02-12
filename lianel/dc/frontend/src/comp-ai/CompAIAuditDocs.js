@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { compAiApi } from './compAiApi';
 import PageTemplate from '../PageTemplate';
+import { EU_DATE_INPUT_LABEL, EU_DATE_INPUT_PLACEHOLDER, formatFilenameDateEU, formatDateEU } from '../services/dateFormat';
 import './CompAI.css';
 
 const PLACEHOLDERS = {
@@ -28,7 +29,7 @@ function CompAIAuditDocs() {
   const [fillValues, setFillValues] = useState({
     organisation_name: '',
     system_name: '',
-    as_of_date: new Date().toISOString().slice(0, 10),
+    as_of_date: formatDateEU(new Date()),
   });
   const [filledText, setFilledText] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
@@ -86,7 +87,7 @@ function CompAIAuditDocs() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `system-description-${new Date().toISOString().slice(0, 10)}.md`;
+    a.download = `system-description-${formatFilenameDateEU(new Date())}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -129,11 +130,16 @@ function CompAIAuditDocs() {
                     />
                   </label>
                   <label>
-                    <span>As of date</span>
+                    <span>As of date ({EU_DATE_INPUT_LABEL})</span>
                     <input
-                      type="date"
+                      type="text"
+                      inputMode="text"
+                      autoComplete="off"
+                      data-date-format="eu"
                       value={fillValues.as_of_date}
                       onChange={(e) => setFillValues((v) => ({ ...v, as_of_date: e.target.value }))}
+                      placeholder={EU_DATE_INPUT_PLACEHOLDER}
+                      title={`Enter date as ${EU_DATE_INPUT_LABEL}`}
                       className="comp-ai-input"
                     />
                   </label>

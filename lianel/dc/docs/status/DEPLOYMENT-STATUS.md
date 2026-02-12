@@ -1,6 +1,6 @@
 # Deployment Status - Energy Service API Fix & Map Visualization
 **Date**: January 23, 2026  
-**Status**: ✅ **DEPLOYED & TESTED**
+**Status**: ⏸️ **ENERGY PROJECT PAUSED** (Feb 2026) – See [ENERGY-PROJECT-PAUSED.md](./ENERGY-PROJECT-PAUSED.md). The energy service is no longer deployed or started by default; resources freed for new SaaS. Historical status below was **DEPLOYED & TESTED** before pause.
 
 ---
 

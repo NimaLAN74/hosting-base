@@ -23,6 +23,16 @@ pub fn parse_eu_date(candidate: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(trimmed, EU_DATE_FORMAT).ok()
 }
 
+/// Parse a date in DD/MM/YYYY, with ISO date-only fallback for compatibility.
+pub fn parse_eu_or_iso_date(candidate: &str) -> Option<NaiveDate> {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    parse_eu_date(trimmed)
+        .or_else(|| NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok())
+}
+
 /// Serde helpers for Day/Month/Year formatting.
 pub mod serde_eu_date {
     use super::EU_DATE_FORMAT;
@@ -96,5 +106,12 @@ mod tests {
         let dt = Utc.with_ymd_and_hms(2026, 2, 3, 15, 45, 10).unwrap();
         let formatted = format_eu_date_time(dt);
         assert_eq!(formatted, "03/02/2026 15:45:10");
+    }
+
+    #[test]
+    fn parse_eu_or_iso_accepts_both_inputs() {
+        let eu = parse_eu_or_iso_date("03/02/2026").expect("eu parse");
+        let iso = parse_eu_or_iso_date("2026-02-03").expect("iso parse");
+        assert_eq!(eu, iso);
     }
 }
