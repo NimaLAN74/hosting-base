@@ -284,7 +284,7 @@ jobs:
           echo "3. SSH service issues on remote host"
               exit 1
 
-      - name: Sync nginx config (fix login: /auth/ → Keycloak)
+      - name: "Sync nginx config (fix login: /auth/ -> Keycloak)"
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}

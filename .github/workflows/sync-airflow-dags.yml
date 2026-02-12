@@ -163,7 +163,7 @@ jobs:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
-          COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL || 'http://lianel-comp-ai-service:3002' }}
+          COMP_AI_BASE_URL: ${{ secrets.COMP_AI_BASE_URL }}
           COMP_AI_TOKEN: ${{ secrets.COMP_AI_TOKEN }}
         run: |
           echo "Setting Comp-AI Airflow Variables (if COMP_AI_TOKEN is set)..."
@@ -171,15 +171,16 @@ jobs:
             echo "⚠️  COMP_AI_TOKEN not set — skipping variable set. Add COMP_AI_TOKEN (and optionally COMP_AI_BASE_URL) as repo secrets to enable comp_ai_control_tests DAG."
             exit 0
           fi
+          COMP_AI_BASE_URL="${COMP_AI_BASE_URL:-http://lianel-comp-ai-service:3002}"
           # Strip non-ASCII so Airflow/requests don't get 401 or header errors (e.g. ellipsis … in secret)
           COMP_AI_TOKEN_SAFE=$(printf '%s' "$COMP_AI_TOKEN" | tr -cd '[\x20-\x7E]')
-          # Pass COMP_AI_* from runner to remote; find airflow-apiserver container by name
+          # Pass COMP_AI_* from runner to remote; guard against stopped containers.
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" \
-            "CONTAINER=\$(docker ps -q -f name=airflow-apiserver | head -1); if [ -z \"\$CONTAINER\" ]; then echo 'No airflow-apiserver container found'; exit 0; fi; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_BASE_URL '${COMP_AI_BASE_URL}'; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_TOKEN '${COMP_AI_TOKEN_SAFE}'"
+            "CONTAINER=\$(docker ps -aq -f name=airflow-apiserver | head -1); if [ -z \"\$CONTAINER\" ]; then echo 'No airflow-apiserver container found'; exit 0; fi; RUNNING=\$(docker inspect -f '{{.State.Running}}' \"\$CONTAINER\" 2>/dev/null || echo false); if [ \"\$RUNNING\" != 'true' ]; then echo 'airflow-apiserver exists but is not running; skipping variable set'; exit 0; fi; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_BASE_URL '${COMP_AI_BASE_URL}' || exit 0; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_TOKEN '${COMP_AI_TOKEN_SAFE}' || exit 0"
           echo "✅ COMP_AI_BASE_URL and COMP_AI_TOKEN set in Airflow"
 
       - name: Set Comp-AI client_credentials Variables (optional)
@@ -190,19 +191,20 @@ jobs:
           COMP_AI_KEYCLOAK_URL: ${{ secrets.COMP_AI_KEYCLOAK_URL }}
           COMP_AI_CLIENT_ID: ${{ secrets.COMP_AI_CLIENT_ID }}
           COMP_AI_CLIENT_SECRET: ${{ secrets.COMP_AI_CLIENT_SECRET }}
-          COMP_AI_KEYCLOAK_REALM: ${{ secrets.COMP_AI_KEYCLOAK_REALM || 'lianel' }}
+          COMP_AI_KEYCLOAK_REALM: ${{ secrets.COMP_AI_KEYCLOAK_REALM }}
         run: |
           if [ -z "$COMP_AI_KEYCLOAK_URL" ] || [ -z "$COMP_AI_CLIENT_ID" ] || [ -z "$COMP_AI_CLIENT_SECRET" ]; then
             echo "ℹ️  COMP_AI_KEYCLOAK_URL / COMP_AI_CLIENT_ID / COMP_AI_CLIENT_SECRET not all set — skipping. Add these repo secrets to enable token refresh in DAGs (avoids 401 from expired token)."
             exit 0
           fi
+          COMP_AI_KEYCLOAK_REALM="${COMP_AI_KEYCLOAK_REALM:-lianel}"
           COMP_AI_CLIENT_SECRET_SAFE=$(printf '%s' "$COMP_AI_CLIENT_SECRET" | tr -cd '[\x20-\x7E]')
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" \
-            "CONTAINER=\$(docker ps -q -f name=airflow-apiserver | head -1); if [ -z \"\$CONTAINER\" ]; then exit 0; fi; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_KEYCLOAK_URL '${COMP_AI_KEYCLOAK_URL}'; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_CLIENT_ID '${COMP_AI_CLIENT_ID}'; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_CLIENT_SECRET '${COMP_AI_CLIENT_SECRET_SAFE}'; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_KEYCLOAK_REALM '${COMP_AI_KEYCLOAK_REALM}'"
+            "CONTAINER=\$(docker ps -aq -f name=airflow-apiserver | head -1); if [ -z \"\$CONTAINER\" ]; then exit 0; fi; RUNNING=\$(docker inspect -f '{{.State.Running}}' \"\$CONTAINER\" 2>/dev/null || echo false); if [ \"\$RUNNING\" != 'true' ]; then echo 'airflow-apiserver not running; skipping client_credentials variable set'; exit 0; fi; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_KEYCLOAK_URL '${COMP_AI_KEYCLOAK_URL}' || exit 0; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_CLIENT_ID '${COMP_AI_CLIENT_ID}' || exit 0; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_CLIENT_SECRET '${COMP_AI_CLIENT_SECRET_SAFE}' || exit 0; docker exec \"\$CONTAINER\" airflow variables set COMP_AI_KEYCLOAK_REALM '${COMP_AI_KEYCLOAK_REALM}' || exit 0"
           echo "✅ COMP_AI_KEYCLOAK_* and COMP_AI_CLIENT_* set in Airflow (DAGs will use client_credentials)"
 
       - name: Sync Summary
