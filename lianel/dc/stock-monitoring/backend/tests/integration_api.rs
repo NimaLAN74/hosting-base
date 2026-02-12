@@ -65,6 +65,7 @@ async fn test_state() -> AppState {
     let quote_service = QuoteService {
         provider: "yahoo".to_string(),
         cache_ttl: Duration::from_secs(30),
+        data_provider_api_key: None,
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()

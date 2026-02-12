@@ -19,7 +19,6 @@ use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
-use crate::config::AppConfig;
 
 #[derive(Clone)]
 pub struct QuoteService {
