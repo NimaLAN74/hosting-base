@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getLoginUrl, getLogoutUrl } from './apiClient';
 
-function getUserInitials(userId) {
-  const source = String(userId || '').trim();
+function getUserInitials(displayName) {
+  const source = String(displayName || '').trim();
   if (!source) {
     return 'U';
   }
@@ -29,7 +29,8 @@ function StockPageTemplate({
   const isWatchlistsPage = routePath.startsWith('/stock/watchlists');
   const isAlertsPage = routePath.startsWith('/stock/alerts');
   const isOpsPage = routePath.startsWith('/stock/ops');
-  const displayUser = authState.userId || 'User';
+  const displayUser = authState.displayName || authState.email || 'User';
+  const displayEmail = authState.email || '';
   const initials = getUserInitials(displayUser);
 
   useEffect(() => {
@@ -69,7 +70,7 @@ function StockPageTemplate({
                       <div className="user-avatar-large">{initials}</div>
                       <div className="user-info">
                         <div className="user-name">{displayUser}</div>
-                        <div className="user-email">Authenticated session</div>
+                        <div className="user-email">{displayEmail || 'Authenticated session'}</div>
                       </div>
                     </div>
                     <div className="user-dropdown-divider"></div>

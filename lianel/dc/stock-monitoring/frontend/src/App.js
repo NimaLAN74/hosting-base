@@ -129,6 +129,8 @@ function App() {
     checking: true,
     isAuthenticated: true,
     userId: '',
+    displayName: '',
+    email: '',
   });
 
   const applyAuthError = useCallback((err) => {
@@ -137,6 +139,8 @@ function App() {
         checking: false,
         isAuthenticated: false,
         userId: '',
+        displayName: '',
+        email: '',
       });
       return true;
     }
@@ -149,10 +153,13 @@ function App() {
       const mePayload = await apiJson(API_ME);
       const displayName = String(mePayload?.display_name || '').trim();
       const userId = String(mePayload?.user_id || '').trim();
+      const email = String(mePayload?.email || '').trim();
       setAuthState({
         checking: false,
         isAuthenticated: true,
-        userId: displayName || userId,
+        userId,
+        displayName,
+        email,
       });
     } catch (err) {
       if (!applyAuthError(err)) {
@@ -245,6 +252,8 @@ function App() {
             checking: false,
             isAuthenticated: false,
             userId: '',
+            displayName: '',
+            email: '',
           });
         }
         setError(issues.join(' | '));
