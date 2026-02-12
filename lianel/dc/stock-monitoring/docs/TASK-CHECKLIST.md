@@ -78,7 +78,7 @@
 
 ## Phase 7 – Polish
 
-- [ ] **7.1** OpenAPI and Swagger UI — Document all endpoints; serve Swagger at `/swagger-ui` or `/api-doc`.
+- [x] **7.1** OpenAPI and Swagger UI — Documented endpoints and served docs at `/swagger-ui` with OpenAPI JSON at `/api-doc`.
 - [ ] **7.2** Backend tests — Unit and integration tests for main flows (watchlist, alerts, quotes); run in CI.
 - [ ] **7.3** Runbooks and docs — How to run migrations, add symbols, debug alerts; update README/architecture as built.
 - [ ] **7.4** (Optional) Alert hub — List all alerts with filter/search, recent triggers, bulk enable/disable (P1.7).

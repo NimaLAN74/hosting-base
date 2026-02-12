@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -88,6 +88,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
         .route("/api/v1/quotes", get(quotes))
+        .route("/api-doc", get(openapi_doc))
+        .route("/swagger-ui", get(swagger_ui))
+        .route("/swagger-ui/", get(swagger_ui))
         .route("/internal/alerts/evaluate", post(evaluate_alerts_internal));
 
     let protected = Router::new()
@@ -204,6 +207,318 @@ async fn require_auth(
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn openapi_doc() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "openapi": "3.0.3",
+        "info": {
+            "title": "Stock Monitoring API",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": "EU markets MVP API for watchlists, quotes, alerts, notifications, and profile endpoints."
+        },
+        "servers": [
+            { "url": "/", "description": "Direct backend" },
+            { "url": "/api/v1/stock-monitoring", "description": "Nginx proxied base path" }
+        ],
+        "components": {
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT"
+                }
+            }
+        },
+        "paths": {
+            "/health": {
+                "get": {
+                    "summary": "Health check",
+                    "responses": {
+                        "200": { "description": "OK" }
+                    }
+                }
+            },
+            "/api/v1/status": {
+                "get": {
+                    "summary": "Service status",
+                    "responses": {
+                        "200": { "description": "Service metadata and DB connectivity status" }
+                    }
+                }
+            },
+            "/api/v1/quotes": {
+                "get": {
+                    "summary": "Get latest quotes for symbols",
+                    "parameters": [
+                        {
+                            "name": "symbols",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" },
+                            "description": "Comma-separated symbols, e.g. ASML.AS,SAP.DE,ERIC-B.ST"
+                        }
+                    ],
+                    "responses": {
+                        "200": { "description": "Latest quote payload" },
+                        "400": { "description": "Invalid or missing symbols" }
+                    }
+                }
+            },
+            "/api/v1/me": {
+                "get": {
+                    "summary": "Current authenticated user",
+                    "security": [{ "bearerAuth": [] }],
+                    "responses": {
+                        "200": { "description": "User identity profile" },
+                        "401": { "description": "Unauthorized" }
+                    }
+                }
+            },
+            "/api/v1/watchlists": {
+                "get": {
+                    "summary": "List watchlists",
+                    "security": [{ "bearerAuth": [] }],
+                    "responses": {
+                        "200": { "description": "Watchlists for user" },
+                        "401": { "description": "Unauthorized" }
+                    }
+                },
+                "post": {
+                    "summary": "Create watchlist",
+                    "security": [{ "bearerAuth": [] }],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["name"],
+                                    "properties": { "name": { "type": "string" } }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "201": { "description": "Watchlist created" },
+                        "400": { "description": "Validation error" },
+                        "409": { "description": "Duplicate watchlist name" },
+                        "401": { "description": "Unauthorized" }
+                    }
+                }
+            },
+            "/api/v1/watchlists/{watchlist_id}": {
+                "put": {
+                    "summary": "Rename watchlist",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "watchlist_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Watchlist updated" },
+                        "404": { "description": "Watchlist not found" }
+                    }
+                },
+                "delete": {
+                    "summary": "Delete watchlist",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "watchlist_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Watchlist deleted" },
+                        "404": { "description": "Watchlist not found" }
+                    }
+                }
+            },
+            "/api/v1/watchlists/{watchlist_id}/items": {
+                "get": {
+                    "summary": "List watchlist items",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "watchlist_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Watchlist symbols" }
+                    }
+                },
+                "post": {
+                    "summary": "Add item to watchlist",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "watchlist_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "201": { "description": "Item created" },
+                        "400": { "description": "Invalid symbol/MIC" },
+                        "409": { "description": "Duplicate item in watchlist" }
+                    }
+                }
+            },
+            "/api/v1/watchlists/{watchlist_id}/items/{item_id}": {
+                "delete": {
+                    "summary": "Delete watchlist item",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [
+                        {
+                            "name": "watchlist_id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "integer", "format": "int64" }
+                        },
+                        {
+                            "name": "item_id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "integer", "format": "int64" }
+                        }
+                    ],
+                    "responses": {
+                        "200": { "description": "Item deleted" },
+                        "404": { "description": "Item not found" }
+                    }
+                }
+            },
+            "/api/v1/alerts": {
+                "get": {
+                    "summary": "List alerts",
+                    "security": [{ "bearerAuth": [] }],
+                    "responses": {
+                        "200": { "description": "Alerts for user" }
+                    }
+                },
+                "post": {
+                    "summary": "Create alert",
+                    "security": [{ "bearerAuth": [] }],
+                    "responses": {
+                        "201": { "description": "Alert created" },
+                        "400": { "description": "Validation error" }
+                    }
+                }
+            },
+            "/api/v1/alerts/{alert_id}": {
+                "put": {
+                    "summary": "Update alert",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "alert_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Alert updated" },
+                        "404": { "description": "Alert not found" }
+                    }
+                },
+                "delete": {
+                    "summary": "Delete alert",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "alert_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Alert deleted" },
+                        "404": { "description": "Alert not found" }
+                    }
+                }
+            },
+            "/api/v1/notifications": {
+                "get": {
+                    "summary": "List in-app notifications",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [
+                        {
+                            "name": "include_read",
+                            "in": "query",
+                            "required": false,
+                            "schema": { "type": "boolean" }
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "required": false,
+                            "schema": { "type": "integer", "format": "int64" }
+                        }
+                    ],
+                    "responses": {
+                        "200": { "description": "Notifications list" }
+                    }
+                }
+            },
+            "/api/v1/notifications/{notification_id}/read": {
+                "put": {
+                    "summary": "Mark one notification as read",
+                    "security": [{ "bearerAuth": [] }],
+                    "parameters": [{
+                        "name": "notification_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer", "format": "int64" }
+                    }],
+                    "responses": {
+                        "200": { "description": "Mark result" }
+                    }
+                }
+            },
+            "/api/v1/notifications/read-all": {
+                "post": {
+                    "summary": "Mark all notifications as read",
+                    "security": [{ "bearerAuth": [] }],
+                    "responses": {
+                        "200": { "description": "Mark result" }
+                    }
+                }
+            },
+            "/internal/alerts/evaluate": {
+                "post": {
+                    "summary": "Evaluate alerts for all users (internal)",
+                    "responses": {
+                        "200": { "description": "Evaluation summary" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+async fn swagger_ui() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stock Monitoring API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/api-doc',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+      });
+    </script>
+  </body>
+</html>"#)
 }
 
 async fn status(State(state): State<AppState>) -> String {
