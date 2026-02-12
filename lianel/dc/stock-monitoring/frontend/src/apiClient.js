@@ -62,3 +62,8 @@ export function getLoginUrl(returnToPath = '/stock') {
   return `/oauth2/start?rd=${rd}`;
 }
 
+export function getLogoutUrl(returnToPath = '/stock') {
+  const rd = encodeURIComponent(returnToPath || '/stock');
+  return `/oauth2/sign_out?rd=${rd}`;
+}
+

@@ -54,7 +54,10 @@ pub fn create_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/v1/me", get(me))
         .route("/api/v1/watchlists", get(list_watchlists).post(create_watchlist))
-        .route("/api/v1/watchlists/:watchlist_id", delete(delete_watchlist))
+        .route(
+            "/api/v1/watchlists/:watchlist_id",
+            put(update_watchlist).delete(delete_watchlist),
+        )
         .route("/api/v1/watchlists/:watchlist_id/items", get(list_watchlist_items).post(add_watchlist_item))
         .route("/api/v1/watchlists/:watchlist_id/items/:item_id", delete(delete_watchlist_item))
         .route("/api/v1/alerts", get(list_alerts).post(create_alert))
@@ -467,6 +470,11 @@ struct CreateWatchlistRequest {
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateWatchlistRequest {
+    name: String,
+}
+
 #[derive(Debug, Serialize)]
 struct WatchlistItemDto {
     id: i64,
@@ -628,6 +636,74 @@ async fn delete_watchlist(
     .await;
 
     Ok(Json(DeleteResult { ok: true }))
+}
+
+async fn update_watchlist(
+    State(state): State<AppState>,
+    Path((watchlist_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Json(body): Json<UpdateWatchlistRequest>,
+) -> Result<Json<WatchlistDto>, (StatusCode, Json<serde_json::Value>)> {
+    let name = body.name.trim();
+    if name.is_empty() || name.len() > 255 {
+        return Err(bad_request("Invalid watchlist name"));
+    }
+
+    let updated = sqlx::query_as::<_, (i64, String, i64)>(
+        r#"
+        UPDATE stock_monitoring.watchlists w
+        SET name = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE w.id = $2
+          AND w.user_id = $3
+        RETURNING
+          w.id,
+          w.name,
+          (
+            SELECT COALESCE(COUNT(i.id), 0)
+            FROM stock_monitoring.watchlist_items i
+            WHERE i.watchlist_id = w.id
+          ) AS item_count
+        "#,
+    )
+    .bind(name)
+    .bind(watchlist_id)
+    .bind(&user_id.0)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("duplicate key") || msg.contains("unique") {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "Watchlist already exists for this user"
+                })),
+            )
+        } else {
+            internal_error(e)
+        }
+    })?;
+
+    let Some((id, new_name, item_count)) = updated else {
+        return Err(not_found("Watchlist not found"));
+    };
+
+    write_audit(
+        &state.pool,
+        Some(&user_id.0),
+        "watchlist.update",
+        Some("watchlist"),
+        Some(&id.to_string()),
+        Some(serde_json::json!({ "name": new_name })),
+    )
+    .await;
+
+    Ok(Json(WatchlistDto {
+        id,
+        name: new_name,
+        item_count,
+    }))
 }
 
 async fn list_watchlist_items(

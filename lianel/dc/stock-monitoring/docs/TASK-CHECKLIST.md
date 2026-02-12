@@ -58,9 +58,9 @@
 
 - [x] **5.1** Frontend: auth and API client — Keycloak login; Bearer token; API client with base URL `/api/v1/stock-monitoring`.
 - [x] **5.2** Frontend: dashboard — One screen: watchlist symbols, latest price, last update time, simple up/down trend.
-- [ ] **5.3** Frontend: watchlist management — Create/rename/delete watchlists; add/remove symbols (with validation feedback).
+- [x] **5.3** Frontend: watchlist management — Create/rename/delete watchlists; add/remove symbols (with validation feedback).
 - [x] **5.4** Frontend: alert management — Create/edit/delete alerts; set condition type and value; list with enabled/triggered state.
-- [ ] **5.5** Frontend: routing and layout — Routes for Dashboard, Watchlists, Alerts; nav; header with user and logout.
+- [x] **5.5** Frontend: routing and layout — Routes for Dashboard, Watchlists, Alerts; nav; header with user and logout.
 - [ ] **5.6** Nginx: serve frontend — Build React app; serve at `/stock` (or configured path); SPA fallback.
 
 **Phase 5 done when:** Dashboard shows watchlist quotes; watchlist and alert CRUD in UI; Keycloak login end-to-end.

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
-import { ApiError, apiFetch, apiJson, getLoginUrl } from './apiClient';
+import { ApiError, apiFetch, apiJson, getLoginUrl, getLogoutUrl } from './apiClient';
 
 const API_HEALTH = '/health';
 const API_STATUS = '/status';
@@ -71,6 +71,14 @@ function formatMoney(value, currency) {
   return value.toFixed(2);
 }
 
+function formatMoneyWithCurrency(value, currency) {
+  const output = formatMoney(value, currency);
+  if (output === 'n/a') {
+    return output;
+  }
+  return currency && /^[A-Z]{3}$/.test(currency) ? `${output} (${currency})` : output;
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -91,6 +99,7 @@ function App() {
   const [activeWatchlistId, setActiveWatchlistId] = useState(null);
   const [watchlistItems, setWatchlistItems] = useState([]);
   const [newWatchlistName, setNewWatchlistName] = useState('');
+  const [renameWatchlistName, setRenameWatchlistName] = useState('');
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
@@ -387,6 +396,10 @@ function App() {
     });
   }, [applyAuthError, loadAlerts]);
   useEffect(() => {
+    const active = watchlists.find((item) => item.id === activeWatchlistId);
+    setRenameWatchlistName(active?.name || '');
+  }, [activeWatchlistId, watchlists]);
+  useEffect(() => {
     // Trigger alerts when prices cross thresholds (one-shot until condition resets).
     const fired = [];
     setAlerts((prev) => prev.map((alert) => {
@@ -406,7 +419,7 @@ function App() {
           id: `${now}-${alert.id}`,
           createdAt: now,
           severity: 'warning',
-          message: `${alert.symbol} is ${formatMoney(current, quoteCurrencies[alert.symbol])} (${alert.direction} ${formatMoney(alert.target, quoteCurrencies[alert.symbol])})`,
+          message: `${alert.symbol} is ${formatMoneyWithCurrency(current, quoteCurrencies[alert.symbol])} (${alert.direction} ${formatMoneyWithCurrency(alert.target, quoteCurrencies[alert.symbol])})`,
         });
         return { ...alert, active: true, lastTriggeredAt: now };
       }
@@ -595,6 +608,43 @@ function App() {
       setWatchlistBusy(false);
     }
   }, [activeWatchlistId, applyAuthError, loadWatchlistItems, watchlists]);
+  const renameActiveWatchlist = useCallback(async () => {
+    setWatchlistError('');
+    if (!activeWatchlistId) {
+      setWatchlistError('No watchlist selected.');
+      return;
+    }
+
+    const name = renameWatchlistName.trim();
+    if (!name) {
+      setWatchlistError('Enter a new watchlist name.');
+      return;
+    }
+    if (name.length > 255) {
+      setWatchlistError('Watchlist name is too long.');
+      return;
+    }
+    if (watchlists.some((item) => item.id !== activeWatchlistId && String(item.name).trim().toLowerCase() === name.toLowerCase())) {
+      setWatchlistError('Watchlist already exists.');
+      return;
+    }
+
+    setWatchlistBusy(true);
+    try {
+      const updated = await apiJson(`/watchlists/${activeWatchlistId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      setWatchlists((prev) => prev.map((item) => (item.id === activeWatchlistId ? updated : item)));
+      setRenameWatchlistName(String(updated?.name || name));
+    } catch (err) {
+      applyAuthError(err);
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to rename watchlist.');
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }, [activeWatchlistId, applyAuthError, renameWatchlistName, watchlists]);
   const addAlert = useCallback(async () => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
@@ -704,6 +754,9 @@ function App() {
   }, []);
 
   const isOpsPage = routePath.startsWith('/stock/ops');
+  const isWatchlistsPage = routePath.startsWith('/stock/watchlists');
+  const isAlertsPage = routePath.startsWith('/stock/alerts');
+  const isDashboardPage = !isOpsPage && !isWatchlistsPage && !isAlertsPage;
   const displayUser = authState.userId || 'User';
   const displayInitial = displayUser.charAt(0).toUpperCase() || 'U';
   const isAuthReady = !authState.checking;
@@ -723,6 +776,7 @@ function App() {
       currency: quoteCurrencies[symbol],
     };
   }), [previousPrices, prices, quoteCurrencies, watchlistSymbols]);
+  const selectedAlertCurrency = alertSymbol ? (quoteCurrencies[alertSymbol] || 'n/a') : 'n/a';
 
   return (
     <div className="App stock-app">
@@ -745,6 +799,9 @@ function App() {
                   : (authState.isAuthenticated ? displayUser : 'Sign in')}
               </span>
             </a>
+            {authState.isAuthenticated && (
+              <a href={getLogoutUrl('/stock')} className="logout-link">Logout</a>
+            )}
           </div>
         </header>
 
@@ -755,13 +812,23 @@ function App() {
             <p className="page-subtitle">
               {isOpsPage
                 ? 'Operations and runtime diagnostics for the stock service.'
-                : 'Market watchlist, provider quotes, and alert workflows for the EU markets MVP.'}
+                : isWatchlistsPage
+                  ? 'Manage your watchlists and symbols for EU market monitoring.'
+                  : isAlertsPage
+                    ? 'Configure and review alert rules and recent notifications.'
+                    : 'Dashboard view for quotes, trends, and alert/watchlist overview.'}
             </p>
             <div className="quick-links">
               <a href="/services">All Services</a>
               <a href="/profile">Profile</a>
               <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock')}>
-                Market
+                Dashboard
+              </button>
+              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/watchlists')}>
+                Watchlists
+              </button>
+              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/alerts')}>
+                Alerts
               </button>
               <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/ops')}>
                 Ops
@@ -789,10 +856,24 @@ function App() {
           <div className="view-tabs">
             <button
               type="button"
-              className={`view-tab ${!isOpsPage ? 'active' : ''}`}
+              className={`view-tab ${isDashboardPage ? 'active' : ''}`}
               onClick={() => navigateToView('/stock')}
             >
-              Market view
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className={`view-tab ${isWatchlistsPage ? 'active' : ''}`}
+              onClick={() => navigateToView('/stock/watchlists')}
+            >
+              Watchlists
+            </button>
+            <button
+              type="button"
+              className={`view-tab ${isAlertsPage ? 'active' : ''}`}
+              onClick={() => navigateToView('/stock/alerts')}
+            >
+              Alerts
             </button>
             <button
               type="button"
@@ -810,7 +891,7 @@ function App() {
               disabled={loading}
               className="refresh-btn"
             >
-              {loading ? 'Refreshing...' : (isOpsPage ? 'Refresh status' : 'Refresh market data')}
+              {loading ? 'Refreshing...' : (isOpsPage ? 'Refresh status' : 'Refresh data')}
             </button>
             {isOpsPage && (
               <button type="button" className="copy-btn" onClick={copyDiagnostics}>
@@ -919,7 +1000,7 @@ function App() {
           </section>
           )}
 
-          {!isOpsPage && (
+          {isWatchlistsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Watchlist (P0.2 MVP)</p>
@@ -963,6 +1044,26 @@ function App() {
                 </button>
               </div>
             )}
+            {watchlists.length > 0 && (
+              <div className="watchlist-form watchlist-manager">
+                <input
+                  type="text"
+                  value={renameWatchlistName}
+                  onChange={(event) => setRenameWatchlistName(event.target.value)}
+                  className="symbol-input"
+                  placeholder="Rename active watchlist"
+                  aria-label="Rename active watchlist"
+                />
+                <button
+                  type="button"
+                  className="raw-toggle-btn"
+                  onClick={renameActiveWatchlist}
+                  disabled={watchlistBusy}
+                >
+                  Rename active
+                </button>
+              </div>
+            )}
             <div className="watchlist-form">
               <input
                 type="text"
@@ -1001,16 +1102,20 @@ function App() {
           </section>
           )}
 
-          {!isOpsPage && (
+          {isDashboardPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
-              <p className="status-label">Current prices (provider feed)</p>
+              <p className="status-label">Dashboard: current prices (provider feed)</p>
+              <span className="history-count">
+                {watchlistSymbols.length} symbols · {alerts.length} alerts
+              </span>
             </div>
             <div className="history-table-wrapper">
               <table className="history-table market-table">
                 <thead>
                   <tr>
                     <th>Symbol</th>
+                    <th>Currency</th>
                     <th>Latest</th>
                     <th>Previous</th>
                     <th>Trend</th>
@@ -1021,8 +1126,9 @@ function App() {
                   {dashboardRows.map((row) => (
                     <tr key={`price-${row.symbol}`}>
                       <td>{row.symbol}</td>
-                      <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
-                      <td>{formatMoney(row.previous, row.currency)}</td>
+                      <td>{row.currency || 'n/a'}</td>
+                      <td><strong>{formatMoneyWithCurrency(row.current, row.currency)}</strong></td>
+                      <td>{formatMoneyWithCurrency(row.previous, row.currency)}</td>
                       <td className={`trend-cell trend-${row.trend}`}>
                         {row.trend === 'up' ? '▲ Up' : row.trend === 'down' ? '▼ Down' : '• Flat'}
                       </td>
@@ -1035,7 +1141,7 @@ function App() {
           </section>
           )}
 
-          {!isOpsPage && (
+          {isAlertsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">Price alerts (P0.3 MVP)</p>
@@ -1067,6 +1173,7 @@ function App() {
                 Add alert
               </button>
             </div>
+            <p className="status-meta">Selected symbol currency: {selectedAlertCurrency}</p>
             {watchlistSymbols.length === 0 && (
               <p className="status-meta">Add at least one watchlist symbol to create alerts.</p>
             )}
@@ -1078,7 +1185,8 @@ function App() {
                 {alerts.map((alert) => (
                   <div className={`alert-item ${alert.active ? 'active' : ''}`} key={alert.id}>
                     <div>
-                      <strong>{alert.symbol}</strong> {alert.direction} {formatMoney(alert.target, quoteCurrencies[alert.symbol])}
+                      <strong>{alert.symbol}</strong> {alert.direction} {formatMoneyWithCurrency(alert.target, quoteCurrencies[alert.symbol])}
+                      <div className="status-meta">Currency: {quoteCurrencies[alert.symbol] || 'n/a'}</div>
                       <div className="status-meta">
                         {alert.lastTriggeredAt
                           ? `Last triggered: ${new Date(alert.lastTriggeredAt).toLocaleString()}`
@@ -1106,7 +1214,7 @@ function App() {
           </section>
           )}
 
-          {!isOpsPage && (
+          {isAlertsPage && (
           <section className="status-card scope-card">
             <div className="raw-header">
               <p className="status-label">In-app notifications (P0.4 channel)</p>
