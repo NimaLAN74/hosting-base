@@ -147,10 +147,12 @@ function App() {
     setAuthState((prev) => ({ ...prev, checking: true }));
     try {
       const mePayload = await apiJson(API_ME);
+      const displayName = String(mePayload?.display_name || '').trim();
+      const userId = String(mePayload?.user_id || '').trim();
       setAuthState({
         checking: false,
         isAuthenticated: true,
-        userId: String(mePayload?.user_id || '').trim(),
+        userId: displayName || userId,
       });
     } catch (err) {
       if (!applyAuthError(err)) {

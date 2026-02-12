@@ -103,7 +103,6 @@ function StockPageTemplate({
 
         <main className="main">
           <div className="page-header">
-            <a href="/" className="back-to-home-btn">← Back to Home</a>
             <h1 className="page-title">{pageTitle}</h1>
             <p className="page-subtitle">{pageSubtitle}</p>
           </div>

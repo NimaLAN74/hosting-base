@@ -43,6 +43,12 @@ pub struct AppState {
     pub quote_service: QuoteService,
 }
 
+#[derive(Clone)]
+struct UserDisplayName(pub String);
+
+#[derive(Clone)]
+struct UserEmail(pub Option<String>);
+
 /// Build the application router (used by main and by API integration tests).
 pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
@@ -106,9 +112,15 @@ async fn require_auth(
         });
 
     if let Some(token) = token {
-        match state.validator.validate_bearer(&token).await {
-            Ok(sub) => {
-                req.extensions_mut().insert(UserId(sub));
+        match state.validator.validate_bearer_identity(&token).await {
+            Ok(identity) => {
+                let display_name = identity
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| identity.user_id.clone());
+                req.extensions_mut().insert(UserId(identity.user_id));
+                req.extensions_mut().insert(UserDisplayName(display_name));
+                req.extensions_mut().insert(UserEmail(identity.email));
                 return next.run(req).await;
             }
             Err(e) => {
@@ -125,9 +137,20 @@ async fn require_auth(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(String::from);
+    let forwarded_email = headers
+        .get("x-auth-request-email")
+        .or_else(|| headers.get("x-forwarded-email"))
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
     match forwarded_user {
         Some(sub) => {
+            let display_name = sub.clone();
             req.extensions_mut().insert(UserId(sub));
+            req.extensions_mut().insert(UserDisplayName(display_name));
+            req.extensions_mut().insert(UserEmail(forwarded_email));
             next.run(req).await
         }
         None => {
@@ -1337,6 +1360,16 @@ fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<serde_json:
 
 async fn me(
     axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    display_name: Option<axum::extract::Extension<UserDisplayName>>,
+    email: Option<axum::extract::Extension<UserEmail>>,
 ) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "user_id": user_id.0 }))
+    let resolved_display_name = display_name
+        .map(|v| v.0)
+        .unwrap_or_else(|| user_id.0.clone());
+    let resolved_email = email.and_then(|v| v.0);
+    Json(serde_json::json!({
+        "user_id": user_id.0,
+        "display_name": resolved_display_name,
+        "email": resolved_email
+    }))
 }
