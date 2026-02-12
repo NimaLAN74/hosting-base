@@ -59,32 +59,12 @@ function Services() {
     },
     {
       name: 'Stock Monitoring',
-      description: 'Entry page for stock monitoring service and diagnostics',
+      description: 'EU stock monitoring dashboard with watchlists, alerts, and ops views',
       icon: '📈',
-      url: '/stock-monitoring',
+      url: '/stock',
       status: 'active',
       enabled: true,
       gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
-      category: 'Analytics'
-    },
-    {
-      name: 'Stock Monitoring Status',
-      description: 'Service status and health output for stock-monitoring backend',
-      icon: '🩺',
-      url: '/stock-monitoring/status',
-      status: 'active',
-      enabled: true,
-      gradient: 'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
-      category: 'Analytics'
-    },
-    {
-      name: 'Stock Monitoring Endpoints',
-      description: 'Quick test links and endpoint reference',
-      icon: '🧪',
-      url: '/stock-monitoring/endpoints',
-      status: 'active',
-      enabled: true,
-      gradient: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
       category: 'Analytics'
     }
   ];

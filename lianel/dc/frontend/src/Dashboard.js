@@ -130,7 +130,7 @@ function Dashboard() {
       name: 'Stock Monitoring',
       description: 'EU stock monitoring service and operational subpages',
       icon: '📈',
-      url: '/stock-monitoring',
+      url: '/stock',
       status: 'active',
       enabled: true,
       gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',

@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
-import { ApiError, apiFetch, apiJson, getLoginUrl, getLogoutUrl } from './apiClient';
+import { ApiError, apiFetch, apiJson, getLoginUrl } from './apiClient';
+import StockPageTemplate from './StockPageTemplate';
 
 const API_HEALTH = '/health';
 const API_STATUS = '/status';
@@ -129,8 +130,6 @@ function App() {
     isAuthenticated: true,
     userId: '',
   });
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef(null);
 
   const applyAuthError = useCallback((err) => {
     if (err instanceof ApiError && err.status === 401) {
@@ -747,15 +746,6 @@ function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
-        setUserMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const navigateToView = useCallback((path) => {
     if (window.location.pathname !== path) {
@@ -768,20 +758,7 @@ function App() {
   const isWatchlistsPage = routePath.startsWith('/stock/watchlists');
   const isAlertsPage = routePath.startsWith('/stock/alerts');
   const isDashboardPage = !isOpsPage && !isWatchlistsPage && !isAlertsPage;
-  const displayUser = authState.userId || 'User';
-  const displayInitial = displayUser.charAt(0).toUpperCase() || 'U';
   const isAuthReady = !authState.checking;
-  const getUserInitials = useCallback(() => {
-    const source = String(displayUser || '').trim();
-    if (!source) {
-      return 'U';
-    }
-    const parts = source.split(/[\s._-]+/).filter(Boolean);
-    if (parts.length >= 2) {
-      return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-    }
-    return source.substring(0, 2).toUpperCase();
-  }, [displayUser]);
   const dashboardRows = useMemo(() => watchlistSymbols.map((symbol) => {
     const current = prices[symbol];
     const previous = previousPrices[symbol];
@@ -799,105 +776,22 @@ function App() {
     };
   }), [previousPrices, prices, quoteCurrencies, watchlistSymbols]);
   const selectedAlertCurrency = alertSymbol ? (quoteCurrencies[alertSymbol] || 'n/a') : 'n/a';
+  const pageSubtitle = isOpsPage
+    ? 'Operations and runtime diagnostics for the stock service.'
+    : isWatchlistsPage
+      ? 'Manage your watchlists and symbols for EU market monitoring.'
+      : isAlertsPage
+        ? 'Configure and review alert rules and recent notifications.'
+        : 'Dashboard view for quotes, trends, and alert/watchlist overview.';
 
   return (
-    <div className="App stock-app">
-      <div className="container">
-        <header className="header">
-          <a href="/" className="logo">
-            <div className="logo-icon">LW</div>
-            Lianel World
-          </a>
-          <div className="header-right">
-            {authState.checking ? (
-              <span className="last-updated">Auth...</span>
-            ) : authState.isAuthenticated ? (
-              <div className="user-dropdown" ref={userMenuRef}>
-                <button
-                  className="user-dropdown-toggle"
-                  onClick={() => setUserMenuOpen((current) => !current)}
-                  aria-label="User menu"
-                  type="button"
-                >
-                  <div className="user-avatar">
-                    {getUserInitials()}
-                  </div>
-                </button>
-                {userMenuOpen && (
-                  <div className="user-dropdown-menu">
-                    <div className="user-dropdown-header">
-                      <div className="user-avatar-large">
-                        {getUserInitials()}
-                      </div>
-                      <div className="user-info">
-                        <div className="user-name">{displayUser}</div>
-                        <div className="user-email">Authenticated session</div>
-                      </div>
-                    </div>
-                    <div className="user-dropdown-divider"></div>
-                    <a href="/profile" className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
-                      <span className="dropdown-icon">👤</span>
-                      Profile
-                    </a>
-                    <a href="/services" className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
-                      <span className="dropdown-icon">🧩</span>
-                      Services
-                    </a>
-                    <a href="/stock-monitoring" className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
-                      <span className="dropdown-icon">📈</span>
-                      Stock service hub
-                    </a>
-                    <a href={getLogoutUrl('/stock')} className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
-                      <span className="dropdown-icon">🚪</span>
-                      Logout
-                    </a>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <a
-                href={getLoginUrl(routePath)}
-                className="profile-link"
-                aria-label="Sign in with Keycloak"
-              >
-                <span className="profile-avatar">{displayInitial}</span>
-                <span>Sign in</span>
-              </a>
-            )}
-          </div>
-        </header>
-
-        <main className="main">
-          <div className="page-header">
-            <a href="/" className="back-to-home-btn">← Back to Home</a>
-            <h1 className="page-title">Stock Exchange Monitoring</h1>
-            <p className="page-subtitle">
-              {isOpsPage
-                ? 'Operations and runtime diagnostics for the stock service.'
-                : isWatchlistsPage
-                  ? 'Manage your watchlists and symbols for EU market monitoring.'
-                  : isAlertsPage
-                    ? 'Configure and review alert rules and recent notifications.'
-                    : 'Dashboard view for quotes, trends, and alert/watchlist overview.'}
-            </p>
-            <div className="quick-links">
-              <a href="/services">All Services</a>
-              <a href="/profile">Profile</a>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock')}>
-                Dashboard
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/watchlists')}>
-                Watchlists
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/alerts')}>
-                Alerts
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/ops')}>
-                Ops
-              </button>
-              <a href="/stock-monitoring/endpoints">Endpoints</a>
-            </div>
-          </div>
+    <StockPageTemplate
+      authState={authState}
+      routePath={routePath}
+      pageTitle="Stock Exchange Monitoring"
+      pageSubtitle={pageSubtitle}
+      onNavigate={navigateToView}
+    >
 
           {isAuthReady && !authState.isAuthenticated && (
             <div className="stock-error auth-required">
@@ -914,62 +808,6 @@ function App() {
               </button>
             </div>
           )}
-
-          <div className="view-tabs">
-            <button
-              type="button"
-              className={`view-tab ${isDashboardPage ? 'active' : ''}`}
-              onClick={() => navigateToView('/stock')}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              className={`view-tab ${isWatchlistsPage ? 'active' : ''}`}
-              onClick={() => navigateToView('/stock/watchlists')}
-            >
-              Watchlists
-            </button>
-            <button
-              type="button"
-              className={`view-tab ${isAlertsPage ? 'active' : ''}`}
-              onClick={() => navigateToView('/stock/alerts')}
-            >
-              Alerts
-            </button>
-            <button
-              type="button"
-              className={`view-tab ${isOpsPage ? 'active' : ''}`}
-              onClick={() => navigateToView('/stock/ops')}
-            >
-              Ops view
-            </button>
-          </div>
-          <section className="status-card scope-card stock-nav-panel">
-            <div className="raw-header">
-              <p className="status-label">Subpage navigation</p>
-            </div>
-            <div className="quick-links">
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock')}>
-                Dashboard
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/watchlists')}>
-                Watchlists
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/alerts')}>
-                Alerts
-              </button>
-              <button type="button" className="inline-link-btn" onClick={() => navigateToView('/stock/ops')}>
-                Ops
-              </button>
-              <a href="/stock-monitoring">Hub</a>
-              <a href="/stock-monitoring/status">Status</a>
-              <a href="/stock-monitoring/endpoints">Endpoints</a>
-            </div>
-            <p className="status-meta">
-              Use tabs for stock app views. Use Hub/Status/Endpoints for parent app pages and runbook-oriented access.
-            </p>
-          </section>
 
           <div className="status-toolbar">
             <button
@@ -1389,13 +1227,7 @@ function App() {
             )}
           </section>
           )}
-        </main>
-
-        <footer className="footer">
-          <p>&copy; 2026 Lianel World. All rights reserved.</p>
-        </footer>
-      </div>
-    </div>
+    </StockPageTemplate>
   );
 }
 
