@@ -9,7 +9,6 @@ const API_ME = '/me';
 const MAX_HISTORY_ITEMS = 20;
 const WARN_LATENCY_MS = 800;
 const CRITICAL_LATENCY_MS = 2000;
-const NOTIFICATIONS_STORAGE_KEY = 'stock_monitoring_notifications_v1';
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const SWEDISH_LOCALE = 'sv-SE';
@@ -82,6 +81,17 @@ function normalizeAlertFromApi(item) {
     active: Boolean(item?.triggered),
     createdAt: new Date().toISOString(),
     lastTriggeredAt: item?.triggered ? new Date().toISOString() : null,
+  };
+}
+
+function normalizeNotificationFromApi(item) {
+  const id = Number(item?.id);
+  const createdAtMs = Number(item?.created_at_ms);
+  return {
+    id: Number.isFinite(id) ? String(id) : '',
+    createdAt: Number.isFinite(createdAtMs) ? new Date(createdAtMs).toISOString() : new Date().toISOString(),
+    message: String(item?.message || '').trim(),
+    read: Boolean(item?.read),
   };
 }
 
@@ -183,15 +193,7 @@ function App() {
   const [quotesError, setQuotesError] = useState('');
   const [alerts, setAlerts] = useState([]);
   const [alertsBusy, setAlertsBusy] = useState(false);
-  const [notifications, setNotifications] = useState(() => {
-    try {
-      const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [notifications, setNotifications] = useState([]);
   const [alertSymbol, setAlertSymbol] = useState('');
   const [alertDirection, setAlertDirection] = useState('above');
   const [alertTarget, setAlertTarget] = useState('');
@@ -438,6 +440,15 @@ function App() {
     const items = Array.isArray(payload) ? payload : [];
     setAlerts(items.map(normalizeAlertFromApi).filter((item) => item.id && item.symbol));
   }, []);
+  const loadNotifications = useCallback(async () => {
+    const payload = await apiJson('/notifications?include_read=false&limit=50');
+    const items = Array.isArray(payload) ? payload : [];
+    setNotifications(
+      items
+        .map(normalizeNotificationFromApi)
+        .filter((item) => item.id && item.message)
+    );
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -456,14 +467,11 @@ function App() {
       loadData({ silent: true });
       fetchQuotes();
       loadAlerts().catch(() => {});
+      loadNotifications().catch(() => {});
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [autoRefresh, fetchQuotes, loadAlerts, loadData]);
-
-  useEffect(() => {
-    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
-  }, [notifications]);
+  }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
   useEffect(() => {
     const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
     if (!symbols.includes(alertSymbol)) {
@@ -483,42 +491,15 @@ function App() {
     });
   }, [applyAuthError, loadAlerts]);
   useEffect(() => {
+    loadNotifications().catch((err) => {
+      applyAuthError(err);
+      setAlertError(err instanceof Error ? err.message : 'Failed to load notifications');
+    });
+  }, [applyAuthError, loadNotifications]);
+  useEffect(() => {
     const active = watchlists.find((item) => item.id === activeWatchlistId);
     setRenameWatchlistName(active?.name || '');
   }, [activeWatchlistId, watchlists]);
-  useEffect(() => {
-    // Trigger alerts when prices cross thresholds (one-shot until condition resets).
-    const fired = [];
-    setAlerts((prev) => prev.map((alert) => {
-      if (!alert.enabled) {
-        return alert.active ? { ...alert, active: false } : alert;
-      }
-      const current = prices[alert.symbol];
-      if (typeof current !== 'number' || Number.isNaN(current)) {
-        return alert.active ? { ...alert, active: false } : alert;
-      }
-      const conditionMet = alert.direction === 'above'
-        ? current >= alert.target
-        : current <= alert.target;
-      if (conditionMet && !alert.active) {
-        const now = new Date().toISOString();
-        fired.push({
-          id: `${now}-${alert.id}`,
-          createdAt: now,
-          severity: 'warning',
-          message: `${alert.symbol} is ${formatMoneyWithCurrency(current, quoteCurrencies[alert.symbol])} (${alert.direction} ${formatMoneyWithCurrency(alert.target, quoteCurrencies[alert.symbol])})`,
-        });
-        return { ...alert, active: true, lastTriggeredAt: now };
-      }
-      if (!conditionMet && alert.active) {
-        return { ...alert, active: false };
-      }
-      return alert;
-    }));
-    if (fired.length > 0) {
-      setNotifications((prev) => [...fired, ...prev].slice(0, 50));
-    }
-  }, [prices, quoteCurrencies]);
   const isHealthy = useMemo(() => health.toLowerCase() === 'ok', [health]);
   const dbConnected = useMemo(
     () => (status?.database || '').toLowerCase() === 'connected',
@@ -804,9 +785,15 @@ function App() {
       setAlertsBusy(false);
     }
   }, [applyAuthError]);
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
+  const clearNotifications = useCallback(async () => {
+    try {
+      await apiJson('/notifications/read-all', { method: 'POST' });
+      await loadNotifications();
+    } catch (err) {
+      applyAuthError(err);
+      setAlertError(err instanceof Error ? err.message : 'Failed to clear notifications.');
+    }
+  }, [applyAuthError, loadNotifications]);
   const changeActiveWatchlist = useCallback(async (nextId) => {
     if (!Number.isInteger(nextId) || nextId <= 0 || nextId === activeWatchlistId) {
       return;
@@ -820,8 +807,8 @@ function App() {
     }
   }, [activeWatchlistId, loadWatchlistItems]);
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadData(), fetchQuotes(), loadAlerts()]);
-  }, [fetchQuotes, loadAlerts, loadData]);
+    await Promise.all([loadData(), fetchQuotes(), loadAlerts(), loadNotifications()]);
+  }, [fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
   useEffect(() => {
     fetchQuotes();

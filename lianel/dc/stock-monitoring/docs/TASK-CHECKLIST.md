@@ -69,8 +69,8 @@
 
 ## Phase 6 – Notifications (P0.4)
 
-- [ ] **6.1** Notifications: one channel — Implement either email (on trigger) or in-app (notifications table + GET API + UI list).
-- [ ] **6.2** Wire trigger to notification — From alert evaluation, on trigger: send email or insert in-app notification.
+- [x] **6.1** Notifications: one channel — Implemented in-app channel (notifications table + GET API + UI list).
+- [x] **6.2** Wire trigger to notification — Alert evaluation inserts in-app notification when condition triggers.
 
 **Phase 6 done when:** When an alert triggers, user receives notification via chosen channel.
 

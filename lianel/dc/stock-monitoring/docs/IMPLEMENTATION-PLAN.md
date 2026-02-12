@@ -417,8 +417,8 @@ Use this as a sequential checklist; complete each step before moving to the next
 - [ ] **5.4** Frontend: alert management
 - [ ] **5.5** Frontend: routing and layout
 - [x] **5.6** Nginx: serve frontend at /stock
-- [ ] **6.1** Notifications: one channel (email or in-app)
-- [ ] **6.2** Wire trigger to notification
+- [x] **6.1** Notifications: one channel (email or in-app)
+- [x] **6.2** Wire trigger to notification
 - [ ] **7.1** OpenAPI and Swagger UI
 - [ ] **7.2** Backend tests
 - [ ] **7.3** Runbooks and docs

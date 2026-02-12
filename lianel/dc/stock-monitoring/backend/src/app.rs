@@ -100,6 +100,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/watchlists/:watchlist_id/items/:item_id", delete(delete_watchlist_item))
         .route("/api/v1/alerts", get(list_alerts).post(create_alert))
         .route("/api/v1/alerts/:alert_id", put(update_alert).delete(delete_alert))
+        .route("/api/v1/notifications", get(list_notifications))
+        .route("/api/v1/notifications/:notification_id/read", put(mark_notification_read))
+        .route("/api/v1/notifications/read-all", post(mark_all_notifications_read))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -617,6 +620,26 @@ struct DeleteResult {
     ok: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct NotificationDto {
+    id: i64,
+    alert_id: Option<i64>,
+    message: String,
+    read: bool,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotificationsQuery {
+    include_read: Option<bool>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct MarkReadResult {
+    ok: bool,
+}
+
 async fn list_watchlists(
     State(state): State<AppState>,
     axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
@@ -975,6 +998,95 @@ async fn list_alerts(
     Ok(Json(out))
 }
 
+async fn list_notifications(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+    Query(query): Query<NotificationsQuery>,
+) -> Result<Json<Vec<NotificationDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let include_read = query.include_read.unwrap_or(false);
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let rows = sqlx::query_as::<_, (i64, Option<i64>, String, bool, i64)>(
+        r#"
+        SELECT
+            id,
+            alert_id,
+            message,
+            (read_at IS NOT NULL) AS is_read,
+            (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS created_at_ms
+        FROM stock_monitoring.notifications
+        WHERE user_id = $1
+          AND ($2::boolean = true OR read_at IS NULL)
+        ORDER BY created_at DESC, id DESC
+        LIMIT $3
+        "#,
+    )
+    .bind(&user_id.0)
+    .bind(include_read)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let out = rows
+        .into_iter()
+        .map(|(id, alert_id, message, is_read, created_at_ms)| NotificationDto {
+            id,
+            alert_id,
+            message,
+            read: is_read,
+            created_at_ms,
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(out))
+}
+
+async fn mark_notification_read(
+    State(state): State<AppState>,
+    Path((notification_id,)): Path<(i64,)>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<MarkReadResult>, (StatusCode, Json<serde_json::Value>)> {
+    let updated = sqlx::query(
+        r#"
+        UPDATE stock_monitoring.notifications
+        SET read_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND user_id = $2
+          AND read_at IS NULL
+        "#,
+    )
+    .bind(notification_id)
+    .bind(&user_id.0)
+    .execute(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    Ok(Json(MarkReadResult {
+        ok: updated.rows_affected() > 0,
+    }))
+}
+
+async fn mark_all_notifications_read(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<UserId>,
+) -> Result<Json<MarkReadResult>, (StatusCode, Json<serde_json::Value>)> {
+    let updated = sqlx::query(
+        r#"
+        UPDATE stock_monitoring.notifications
+        SET read_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND read_at IS NULL
+        "#,
+    )
+    .bind(&user_id.0)
+    .execute(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    Ok(Json(MarkReadResult {
+        ok: updated.rows_affected() > 0,
+    }))
+}
+
 async fn evaluate_alerts_internal(
     State(state): State<AppState>,
 ) -> Result<Json<AlertEvaluationResult>, (StatusCode, Json<serde_json::Value>)> {
@@ -1061,6 +1173,36 @@ async fn evaluate_alerts_for_user(state: &AppState, user_id: &str) -> anyhow::Re
             .execute(&state.pool)
             .await?;
             if updated.rows_affected() > 0 {
+                let direction_label = if condition_type == "above" {
+                    "above"
+                } else {
+                    "below"
+                };
+                let threshold = format!("{:.4}", condition_value);
+                let current_price = format!("{:.4}", quote.price);
+                let currency_label = quote
+                    .currency
+                    .as_deref()
+                    .map(|v| format!(" {}", v))
+                    .unwrap_or_default();
+                let message = format!(
+                    "Alert triggered for {}: price is {} {} (current {}{}).",
+                    symbol, direction_label, threshold, current_price, currency_label
+                );
+                write_notification(
+                    &state.pool,
+                    user_id,
+                    Some(alert_id),
+                    &message,
+                    Some(serde_json::json!({
+                        "symbol": symbol,
+                        "condition_type": condition_type,
+                        "condition_value": condition_value,
+                        "price": quote.price,
+                        "currency": quote.currency
+                    })),
+                )
+                .await;
                 write_audit(
                     &state.pool,
                     Some(user_id),
@@ -1397,6 +1539,27 @@ async fn write_audit(
     .bind(action)
     .bind(resource_type)
     .bind(resource_id)
+    .bind(details.unwrap_or_else(|| serde_json::json!({})).to_string())
+    .execute(pool)
+    .await;
+}
+
+async fn write_notification(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+    alert_id: Option<i64>,
+    message: &str,
+    details: Option<serde_json::Value>,
+) {
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO stock_monitoring.notifications (user_id, alert_id, message, details)
+        VALUES ($1, $2, $3, $4::jsonb)
+        "#,
+    )
+    .bind(user_id)
+    .bind(alert_id)
+    .bind(message)
     .bind(details.unwrap_or_else(|| serde_json::json!({})).to_string())
     .execute(pool)
     .await;
