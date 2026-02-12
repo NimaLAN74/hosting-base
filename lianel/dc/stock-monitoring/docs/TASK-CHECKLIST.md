@@ -61,7 +61,7 @@
 - [x] **5.3** Frontend: watchlist management — Create/rename/delete watchlists; add/remove symbols (with validation feedback).
 - [x] **5.4** Frontend: alert management — Create/edit/delete alerts; set condition type and value; list with enabled/triggered state.
 - [x] **5.5** Frontend: routing and layout — Routes for Dashboard, Watchlists, Alerts; nav; header with user and logout.
-- [ ] **5.6** Nginx: serve frontend — Build React app; serve at `/stock` (or configured path); SPA fallback.
+- [x] **5.6** Nginx: serve frontend — Build React app; serve at `/stock` (or configured path); SPA fallback.
 
 **Phase 5 done when:** Dashboard shows watchlist quotes; watchlist and alert CRUD in UI; Keycloak login end-to-end.
 
