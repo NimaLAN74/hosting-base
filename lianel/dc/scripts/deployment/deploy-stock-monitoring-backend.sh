@@ -28,6 +28,16 @@ fi
 echo "Using directory: $DC_DIR"
 cd "$DC_DIR"
 
+ENV_FILE="$DC_DIR/.env"
+if [ -n "${STOCK_MONITORING_DATA_PROVIDER_API_KEY:-}" ]; then
+  touch "$ENV_FILE"
+  tmp_env_file="$(mktemp)"
+  grep -v '^STOCK_MONITORING_DATA_PROVIDER_API_KEY=' "$ENV_FILE" > "$tmp_env_file" || true
+  printf 'STOCK_MONITORING_DATA_PROVIDER_API_KEY=%s\n' "$STOCK_MONITORING_DATA_PROVIDER_API_KEY" >> "$tmp_env_file"
+  mv "$tmp_env_file" "$ENV_FILE"
+  echo "Configured STOCK_MONITORING_DATA_PROVIDER_API_KEY in $ENV_FILE"
+fi
+
 if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
   echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin 2>/dev/null || true
 fi
