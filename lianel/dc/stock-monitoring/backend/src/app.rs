@@ -1364,9 +1364,9 @@ async fn me(
     email: Option<axum::extract::Extension<UserEmail>>,
 ) -> Json<serde_json::Value> {
     let resolved_display_name = display_name
-        .map(|v| v.0)
+        .map(|axum::extract::Extension(v)| v.0)
         .unwrap_or_else(|| user_id.0.clone());
-    let resolved_email = email.and_then(|v| v.0);
+    let resolved_email = email.and_then(|axum::extract::Extension(v)| v.0);
     Json(serde_json::json!({
         "user_id": user_id.0,
         "display_name": resolved_display_name,
