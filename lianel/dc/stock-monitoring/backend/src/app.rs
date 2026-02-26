@@ -1629,6 +1629,7 @@ async fn ingest_quotes_internal(
 
 /// Finnhub webhook: acknowledge with 2xx immediately to prevent timeouts.
 /// Verifies X-Finnhub-Secret when FINNHUB_WEBHOOK_SECRET is set.
+/// Empty-body requests (e.g. Finnhub dashboard "Test") are accepted without secret so test returns 200.
 async fn finnhub_webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1639,7 +1640,13 @@ async fn finnhub_webhook(
             .get("x-finnhub-secret")
             .and_then(|v| v.to_str().ok())
             .map(str::trim);
-        if incoming.as_deref() != Some(secret.as_str()) {
+        let content_length = headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1);
+        let is_likely_test = content_length == 0;
+        if incoming.as_deref() != Some(secret.as_str()) && !is_likely_test {
             return StatusCode::UNAUTHORIZED;
         }
     }

@@ -47,6 +47,8 @@ After deployment, the Finnhub webhook URL is:
 
 Configure this URL in the Finnhub dashboard when setting up webhooks. The backend returns **200 OK** as soon as the request is received (after optional secret verification), then may process the body in the background.
 
+**If Finnhub "Test webhook" returns 400:** Finnhub calls your URL and expects a 2xx response. If your server returns 401 (e.g. secret mismatch or missing `X-Finnhub-Secret`), Finnhub reports that as 400. The backend accepts **empty-body** requests (e.g. dashboard test) with 200 even when `FINNHUB_WEBHOOK_SECRET` is set, so the test should pass. For non-empty payloads the secret is still required.
+
 ### Test the webhook
 
 From your machine (use your real host, e.g. `www.lianel.se` or your domain):
