@@ -87,7 +87,7 @@ jobs:
         with:
           workspaces: lianel/dc/stock-monitoring/backend
 
-      - name: Run tests (unit + integration: config, DB, quotes, openapi, auth, watchlist, alerts)
+      - name: 'Run tests (unit + integration: config, DB, quotes, openapi, auth, watchlist, alerts)'
         env:
           POSTGRES_HOST: 127.0.0.1
           POSTGRES_PORT: 5432
