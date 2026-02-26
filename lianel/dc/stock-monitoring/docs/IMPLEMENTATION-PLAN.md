@@ -420,9 +420,9 @@ Use this as a sequential checklist; complete each step before moving to the next
 - [x] **6.1** Notifications: one channel (email or in-app)
 - [x] **6.2** Wire trigger to notification
 - [x] **7.1** OpenAPI and Swagger UI
-- [ ] **7.2** Backend tests
-- [ ] **7.3** Runbooks and docs
-- [ ] **7.4** (Optional) Alert hub
+- [x] **7.2** Backend tests
+- [x] **7.3** Runbooks and docs
+- [x] **7.4** (Optional) Alert hub
 
 ---
 

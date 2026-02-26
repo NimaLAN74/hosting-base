@@ -843,7 +843,7 @@ async fn fetch_alpha_vantage_quotes(
     out
 }
 
-fn map_to_alpha_vantage_symbol(symbol: &str) -> String {
+pub(crate) fn map_to_alpha_vantage_symbol(symbol: &str) -> String {
     let upper = symbol.to_uppercase();
     if upper.ends_with(".ST") {
         return upper.replace(".ST", ".STO");
@@ -929,7 +929,7 @@ fn to_stooq_symbol(symbol: &str) -> String {
     upper
 }
 
-fn infer_currency_from_symbol(symbol: &str) -> Option<String> {
+pub(crate) fn infer_currency_from_symbol(symbol: &str) -> Option<String> {
     let upper = symbol.to_uppercase();
     if upper.ends_with(".L") || upper.ends_with(".UK") {
         return Some("GBP".to_string());
@@ -2026,4 +2026,41 @@ async fn me(
         "display_name": resolved_display_name,
         "email": resolved_email
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{infer_currency_from_symbol, map_to_alpha_vantage_symbol};
+
+    #[test]
+    fn infer_currency_from_symbol_eur_exchanges() {
+        assert_eq!(infer_currency_from_symbol("SAP.DE"), Some("EUR".to_string()));
+        assert_eq!(infer_currency_from_symbol("ASML.AS"), Some("EUR".to_string()));
+        assert_eq!(infer_currency_from_symbol("AIR.PA"), Some("EUR".to_string()));
+    }
+
+    #[test]
+    fn infer_currency_from_symbol_gbp_sek_sto() {
+        assert_eq!(infer_currency_from_symbol("SHEL.L"), Some("GBP".to_string()));
+        assert_eq!(infer_currency_from_symbol("VOLV-B.ST"), Some("SEK".to_string()));
+        assert_eq!(infer_currency_from_symbol("ERIC-B.ST"), Some("SEK".to_string()));
+    }
+
+    #[test]
+    fn infer_currency_from_symbol_unknown_returns_none() {
+        assert_eq!(infer_currency_from_symbol("AAPL"), None);
+        assert_eq!(infer_currency_from_symbol("MSFT.US"), None);
+    }
+
+    #[test]
+    fn map_to_alpha_vantage_stockholm() {
+        assert_eq!(map_to_alpha_vantage_symbol("VOLV-B.ST"), "VOLV-B.STO");
+        assert_eq!(map_to_alpha_vantage_symbol("eric-b.st"), "ERIC-B.STO");
+    }
+
+    #[test]
+    fn map_to_alpha_vantage_other_unchanged() {
+        assert_eq!(map_to_alpha_vantage_symbol("SAP.DE"), "SAP.DE");
+        assert_eq!(map_to_alpha_vantage_symbol("ASML.AS"), "ASML.AS");
+    }
 }

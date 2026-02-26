@@ -275,3 +275,47 @@ Backend must serve routes under `/api/v1/...` so that after rewrite the paths ma
 
 **Document owner:** Product / engineering.  
 **Next steps:** Follow [TASK-CHECKLIST.md](./TASK-CHECKLIST.md) from Phase 1 (migration, backend auth, compose, Nginx).
+
+---
+
+## 8. As built (MVP)
+
+Summary of what is deployed and how to operate it.
+
+### 8.1 Services and ports
+
+| Component | Container / service | Port | Notes |
+|-----------|----------------------|------|--------|
+| Backend | `lianel-stock-monitoring-service` | 3003 | Rust/Axum; health at `/health`, API at `/api/v1/*` |
+| Frontend | Served by Nginx | — | Static build at `/stock` (or configured path) |
+| DB | Shared PostgreSQL | 5432 | Schema `stock_monitoring`; migrations 022, 023 |
+
+### 8.2 Backend environment (as built)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | No | Default 3003 |
+| `POSTGRES_HOST` | Yes* | DB host (*or use `DATABASE_URL`) |
+| `POSTGRES_PORT` | Yes* | Default 5432 |
+| `POSTGRES_USER` | Yes* | DB user |
+| `POSTGRES_PASSWORD` | Yes* | DB password |
+| `POSTGRES_DB` | Yes* | Database name |
+| `KEYCLOAK_URL` | No | JWKS URL (default https://auth.lianel.se) |
+| `KEYCLOAK_REALM` | No | Realm (default lianel) |
+| `STOCK_MONITORING_QUOTE_PROVIDER` | No | e.g. yahoo, alpha_vantage |
+| `STOCK_MONITORING_DATA_PROVIDER_API_KEY` | If provider needs it | API key for quote provider |
+| `STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS` | No | In-memory quote cache TTL |
+
+### 8.3 Runbooks (ops)
+
+| Topic | Runbook |
+|-------|---------|
+| Run migrations 022/023 (local and prod) | [STOCK-MONITORING-MIGRATIONS.md](../../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md) |
+| Add symbols (watchlists, ingest when implemented) | [STOCK-MONITORING-SYMBOLS.md](../../docs/runbooks/STOCK-MONITORING-SYMBOLS.md) |
+| Debug alert evaluation | [STOCK-MONITORING-ALERT-DEBUG.md](../../docs/runbooks/STOCK-MONITORING-ALERT-DEBUG.md) |
+
+### 8.4 CI/CD
+
+- **Workflow:** `.github/workflows/stock-monitoring-ci-deploy.yml`
+- **CI:** On push/PR to backend or migrations: Postgres service, migrations 022/023, `cargo test` (unit + integration), `cargo build --release`, then image build/push.
+- **CD:** On push to `master`/`main`: deploy to remote host, run migrations on prod DB, restart service, health check.

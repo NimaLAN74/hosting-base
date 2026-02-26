@@ -21,20 +21,28 @@ Stock monitoring and analysis product. **Scope: global markets; MVP focuses on E
 - **Geography:** Expand to North America and other regions after MVP.
 - See `docs/EU-MARKETS-MVP.md` and `docs/status/STOCK-EXCHANGE-MONITORING-SERVICE-FUNCTION-LIST.md`.
 
-## Quick start (when implemented)
+## Quick start
 
 ```bash
-# Backend
+# Backend (requires Postgres; set POSTGRES_* or DATABASE_URL)
 cd stock-monitoring/backend && cargo run
 
 # Frontend
 cd stock-monitoring/frontend && npm install && npm start
 ```
 
+Apply DB migrations 022 and 023 before first backend run; see runbooks below.
+
+## Runbooks (ops)
+
+- **Migrations:** [STOCK-MONITORING-MIGRATIONS.md](../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md)
+- **Symbols:** [STOCK-MONITORING-SYMBOLS.md](../docs/runbooks/STOCK-MONITORING-SYMBOLS.md)
+- **Alert debugging:** [STOCK-MONITORING-ALERT-DEBUG.md](../docs/runbooks/STOCK-MONITORING-ALERT-DEBUG.md)
+
 ## Related docs
 
 - **Task checklist:** `stock-monitoring/docs/TASK-CHECKLIST.md` (checkbox list to follow; tick as you complete each task).
 - **Implementation plan:** `stock-monitoring/docs/IMPLEMENTATION-PLAN.md` (phases and steps for implementing each part).
-- **Architecture design:** `stock-monitoring/docs/ARCHITECTURE-DESIGN.md` (components, deployment, Nginx, Keycloak, Airflow; aligned with Comp-AI and Energy).
+- **Architecture design:** `stock-monitoring/docs/ARCHITECTURE-DESIGN.md` (components, deployment, Nginx, Keycloak, Airflow; includes as-built section and runbook links).
 - Function list and priorities: `lianel/dc/docs/status/STOCK-EXCHANGE-MONITORING-SERVICE-FUNCTION-LIST.md`
 - EU MVP details: `stock-monitoring/docs/EU-MARKETS-MVP.md`

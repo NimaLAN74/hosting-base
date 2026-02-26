@@ -2,14 +2,17 @@
 
 Rust API for stock exchange monitoring and analysis. **MVP: EU markets.**
 
-**TDD:** Integration tests in `tests/` (config + DB pool). Run with Postgres available and `POSTGRES_PASSWORD` set.  
-**CI:** Every push to stock-monitoring (or migration 022) runs migration, `cargo test`, build, push image, and deploy. **HTTPS** for external access once Nginx location is added (task 1.6).
+**Tests:** Unit tests in `src/app.rs` (currency/symbol helpers); integration tests in `tests/` (config, DB, health, status, quotes, openapi, auth, watchlist CRUD, alert CRUD). Run with Postgres and `POSTGRES_*` (or `DATABASE_URL`).  
+**CI:** `.github/workflows/stock-monitoring-ci-deploy.yml` – on push/PR: migrations 022/023, `cargo test`, build, image push; on main/master: deploy and prod migrations.
 
-## Endpoints (planned)
+## Endpoints (as built)
 
 - `GET /health` – health check (no auth)
 - `GET /api/v1/status` – service info + DB connected
-- Watchlists, alerts, and quote endpoints to be added per function list.
+- `GET /api/v1/quotes?symbols=...` – quotes (provider + cache)
+- `GET /api-doc`, `GET /swagger-ui` – OpenAPI docs
+- `GET /api/v1/me`, watchlists, alerts, notifications – protected (JWT or `x-auth-request-user`)
+- `POST /internal/alerts/evaluate` – internal; used by Airflow DAG
 
 ## Run locally
 
@@ -18,23 +21,32 @@ export POSTGRES_PASSWORD=postgres  # or your DB password
 PORT=3003 cargo run
 ```
 
-## Tests (TDD)
+Apply migrations 022 and 023 first; see [STOCK-MONITORING-MIGRATIONS.md](../../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md).
+
+## Tests
 
 ```bash
 export POSTGRES_HOST=127.0.0.1 POSTGRES_PASSWORD=postgres POSTGRES_DB=postgres
 cargo test
 ```
 
-CI runs these against a Postgres service container after applying migration 022.
+CI runs all tests against a Postgres service after applying 022/023.
 
 ## Environment
 
 - `PORT` – default 3003
-- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` – required for DB.
-- `KEYCLOAK_URL`, `KEYCLOAK_REALM` – for JWT validation via JWKS (defaults: https://auth.lianel.se, lianel). No client secret needed.
+- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` – for DB (or `DATABASE_URL`)
+- `KEYCLOAK_URL`, `KEYCLOAK_REALM` – JWT validation via JWKS (defaults: https://auth.lianel.se, lianel)
+- `STOCK_MONITORING_QUOTE_PROVIDER`, `STOCK_MONITORING_DATA_PROVIDER_API_KEY`, `STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS` – quote provider and cache
+
+## Runbooks
+
+- Migrations: [STOCK-MONITORING-MIGRATIONS.md](../../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md)
+- Symbols: [STOCK-MONITORING-SYMBOLS.md](../../docs/runbooks/STOCK-MONITORING-SYMBOLS.md)
+- Alert debugging: [STOCK-MONITORING-ALERT-DEBUG.md](../../docs/runbooks/STOCK-MONITORING-ALERT-DEBUG.md)
 
 ## Shared vs specific
 
 - **Auth:** Keycloak (shared infra).
-- **Database:** Schema `stock_monitoring` in shared Postgres; migrations in `lianel/dc/database/migrations/`.
-- **Data feeds:** EU market data provider TBD (e.g. Alpha Vantage, Polygon, or EU-focused provider).
+- **Database:** Schema `stock_monitoring` in shared Postgres; migrations 022, 023 in `lianel/dc/database/migrations/`.
+- **Quotes:** On-demand from provider (Yahoo, Alpha Vantage, etc.) with in-memory cache; optional ingest DAG later.

@@ -198,6 +198,9 @@ function App() {
   const [alertDirection, setAlertDirection] = useState('above');
   const [alertTarget, setAlertTarget] = useState('');
   const [alertError, setAlertError] = useState('');
+  const [alertSearchFilter, setAlertSearchFilter] = useState('');
+  const [alertStatusFilter, setAlertStatusFilter] = useState('all');
+  const [selectedAlertIds, setSelectedAlertIds] = useState(new Set());
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [authState, setAuthState] = useState({
     checking: true,
@@ -785,6 +788,53 @@ function App() {
       setAlertsBusy(false);
     }
   }, [applyAuthError]);
+  const filteredAlerts = useMemo(() => {
+    const search = alertSearchFilter.trim().toLowerCase();
+    return alerts.filter((a) => {
+      if (search && !a.symbol.toLowerCase().includes(search)) return false;
+      if (alertStatusFilter === 'enabled' && !a.enabled) return false;
+      if (alertStatusFilter === 'disabled' && a.enabled) return false;
+      if (alertStatusFilter === 'triggered' && !a.active) return false;
+      return true;
+    });
+  }, [alerts, alertSearchFilter, alertStatusFilter]);
+  const triggeredCount = useMemo(() => alerts.filter((a) => a.active).length, [alerts]);
+  const toggleSelectAlert = useCallback((alertId) => {
+    setSelectedAlertIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(alertId)) next.delete(alertId);
+      else next.add(alertId);
+      return next;
+    });
+  }, []);
+  const selectAllFiltered = useCallback(() => {
+    setSelectedAlertIds(new Set(filteredAlerts.map((a) => a.id)));
+  }, [filteredAlerts]);
+  const deselectAll = useCallback(() => setSelectedAlertIds(new Set()), []);
+  const bulkSetEnabled = useCallback(async (enabled) => {
+    if (selectedAlertIds.size === 0) return;
+    setAlertError('');
+    setAlertsBusy(true);
+    try {
+      await Promise.all(
+        Array.from(selectedAlertIds).map((id) =>
+          apiJson(`/alerts/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+          })
+        )
+      );
+      const updatedList = await apiJson('/alerts');
+      setAlerts(updatedList.map(normalizeAlertFromApi).filter((item) => item.id && item.symbol));
+      setSelectedAlertIds(new Set());
+    } catch (err) {
+      applyAuthError(err);
+      setAlertError(err instanceof Error ? err.message : 'Bulk update failed.');
+    } finally {
+      setAlertsBusy(false);
+    }
+  }, [applyAuthError, selectedAlertIds]);
   const clearNotifications = useCallback(async () => {
     try {
       await apiJson('/notifications/read-all', { method: 'POST' });
@@ -1147,6 +1197,55 @@ function App() {
               <p className="status-label">Price alerts (P0.3 MVP)</p>
               <span className="history-count">{alerts.length} alerts</span>
             </div>
+            {triggeredCount > 0 && (
+              <div className="alert-hub-recent">
+                <span className="status-meta">{triggeredCount} alert{triggeredCount !== 1 ? 's' : ''} have triggered.</span>
+                <button
+                  type="button"
+                  className="raw-toggle-btn"
+                  onClick={() => setAlertStatusFilter('triggered')}
+                >
+                  Show triggered
+                </button>
+              </div>
+            )}
+            <div className="alert-hub-toolbar">
+              <input
+                type="text"
+                className="alert-search-input"
+                placeholder="Search by symbol"
+                value={alertSearchFilter}
+                onChange={(event) => setAlertSearchFilter(event.target.value)}
+              />
+              <div className="alert-hub-filters">
+                {['all', 'enabled', 'disabled', 'triggered'].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={`filter-chip ${alertStatusFilter === f ? 'active' : ''}`}
+                    onClick={() => setAlertStatusFilter(f)}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {filteredAlerts.length > 0 && (
+                <div className="alert-hub-bulk">
+                  <button type="button" className="raw-toggle-btn" onClick={selectAllFiltered}>Select all</button>
+                  <button type="button" className="raw-toggle-btn" onClick={deselectAll}>Deselect all</button>
+                  {selectedAlertIds.size > 0 && (
+                    <>
+                      <button type="button" className="raw-toggle-btn" onClick={() => bulkSetEnabled(true)} disabled={alertsBusy}>
+                        Enable selected ({selectedAlertIds.size})
+                      </button>
+                      <button type="button" className="raw-toggle-btn" onClick={() => bulkSetEnabled(false)} disabled={alertsBusy}>
+                        Disable selected ({selectedAlertIds.size})
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="alert-form">
               <select
                 value={alertSymbol}
@@ -1181,35 +1280,47 @@ function App() {
             {alerts.length === 0 ? (
               <p className="status-meta">No alerts yet.</p>
             ) : (
-              <div className="alerts-list">
-                {alerts.map((alert) => (
-                  <div className={`alert-item ${alert.active ? 'active' : ''}`} key={alert.id}>
-                    <div>
-                      <strong>{alert.symbol}</strong> {alert.direction} {formatMoneyWithCurrency(alert.target, quoteCurrencies[alert.symbol])}
-                      <div className="status-meta">Currency: {quoteCurrencies[alert.symbol] || 'n/a'}</div>
-                      <div className="status-meta">
-                        {alert.lastTriggeredAt
-                          ? `Last triggered: ${formatDateTimeSwedish(alert.lastTriggeredAt)}`
-                          : `Created: ${formatDateTimeSwedish(alert.createdAt)}`}
-                      </div>
-                    </div>
-                    <div className="alert-actions">
-                      <label className="toggle-inline">
+              <>
+                <p className="status-meta">Showing {filteredAlerts.length} of {alerts.length} alerts</p>
+                <div className="alerts-list">
+                  {filteredAlerts.map((alert) => (
+                    <div className={`alert-item ${alert.active ? 'active' : ''}`} key={alert.id}>
+                      <label className="alert-item-select">
                         <input
                           type="checkbox"
-                          checked={alert.enabled}
-                          onChange={(event) => toggleAlert(alert.id, event.target.checked)}
+                          checked={selectedAlertIds.has(alert.id)}
+                          onChange={() => toggleSelectAlert(alert.id)}
                           disabled={alertsBusy}
                         />
-                        Enabled
+                        <span className="sr-only">Select</span>
                       </label>
-                      <button type="button" className="delete-btn" onClick={() => removeAlert(alert.id)} disabled={alertsBusy}>
-                        Delete
-                      </button>
+                      <div>
+                        <strong>{alert.symbol}</strong> {alert.direction} {formatMoneyWithCurrency(alert.target, quoteCurrencies[alert.symbol])}
+                        <div className="status-meta">Currency: {quoteCurrencies[alert.symbol] || 'n/a'}</div>
+                        <div className="status-meta">
+                          {alert.lastTriggeredAt
+                            ? `Last triggered: ${formatDateTimeSwedish(alert.lastTriggeredAt)}`
+                            : `Created: ${formatDateTimeSwedish(alert.createdAt)}`}
+                        </div>
+                      </div>
+                      <div className="alert-actions">
+                        <label className="toggle-inline">
+                          <input
+                            type="checkbox"
+                            checked={alert.enabled}
+                            onChange={(event) => toggleAlert(alert.id, event.target.checked)}
+                            disabled={alertsBusy}
+                          />
+                          Enabled
+                        </label>
+                        <button type="button" className="delete-btn" onClick={() => removeAlert(alert.id)} disabled={alertsBusy}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
           </section>
           )}

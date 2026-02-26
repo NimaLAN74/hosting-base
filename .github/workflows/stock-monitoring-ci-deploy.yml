@@ -17,6 +17,15 @@ on:
       - 'lianel/dc/dags/stock_monitoring_alerts_dag.py'
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/stock-monitoring/backend/**'
+      - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
+      - 'lianel/dc/database/migrations/023_stock_monitoring_notifications.sql'
+      - '.github/workflows/stock-monitoring-ci-deploy.yml'
   workflow_dispatch:
 
 env:
@@ -78,7 +87,7 @@ jobs:
         with:
           workspaces: lianel/dc/stock-monitoring/backend
 
-      - name: Run tests (config, DB pool, schema, API /health and /api/v1/status)
+      - name: Run tests (unit + integration: config, DB, quotes, openapi, auth, watchlist, alerts)
         env:
           POSTGRES_HOST: 127.0.0.1
           POSTGRES_PORT: 5432
@@ -87,6 +96,7 @@ jobs:
           POSTGRES_DB: postgres
         run: |
           cd lianel/dc/stock-monitoring/backend && cargo test
+          echo "✅ All tests passed (unit: infer_currency, map_to_alpha_vantage; integration: health, status, quotes, openapi, auth, watchlist CRUD, alert CRUD)"
 
       - name: Build release binary
         env:
@@ -270,7 +280,7 @@ jobs:
       - name: Summary
         run: |
           echo "## Stock Monitoring Backend – CI and CD" >> $GITHUB_STEP_SUMMARY
-          echo "- **CI**: migrations 022/023 + cargo test (config, DB, schema, API /health, /api/v1/status)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI**: migrations 022/023 + cargo test (unit + integration: quotes, openapi, auth, watchlist, alerts)" >> $GITHUB_STEP_SUMMARY
           echo "- **CD**: image push, deploy, migrations on prod, health verify" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ env.REGISTRY }}/${{ github.repository }}/lianel-stock-monitoring-service:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Deploy**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
