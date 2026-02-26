@@ -204,12 +204,14 @@ jobs:
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-service:latest"
           echo "Deploying: $IMAGE_LC"
+          # Build env exports for remote (only pass non-empty to avoid shell issues)
+          REMOTE_ENV="GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}'"
+          [ -n "${STOCK_MONITORING_DATA_PROVIDER_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_DATA_PROVIDER_API_KEY='${STOCK_MONITORING_DATA_PROVIDER_API_KEY}'"
+          [ -n "${FINNHUB_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_API_KEY='${FINNHUB_API_KEY}'"
+          [ -n "${FINNHUB_WEBHOOK_SECRET:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_WEBHOOK_SECRET='${FINNHUB_WEBHOOK_SECRET}'"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' \
-             STOCK_MONITORING_DATA_PROVIDER_API_KEY='${STOCK_MONITORING_DATA_PROVIDER_API_KEY}' \
-             FINNHUB_API_KEY='${FINNHUB_API_KEY}' FINNHUB_WEBHOOK_SECRET='${FINNHUB_WEBHOOK_SECRET}' \
-             /tmp/deploy-stock-monitoring-backend.sh '$IMAGE_LC'"
+            "${REMOTE_ENV} /tmp/deploy-stock-monitoring-backend.sh '${IMAGE_LC}'"
           echo "✅ Deployed"
 
       - name: Run migrations 022/023 on production DB

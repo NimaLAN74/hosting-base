@@ -16,6 +16,28 @@ This runbook documents the webhook URL, environment variables, and how to set th
 
 ---
 
+## How to access the remote host
+
+Remote host access is documented in **`lianel/dc/scripts/SSH-CONFIG.md`**. Summary:
+
+| Item | Value |
+|------|--------|
+| **Host** | `72.60.80.84` |
+| **User** | `root` |
+| **SSH key** | `~/.ssh/id_ed25519_host` |
+
+**Connect:**
+```bash
+ssh -F /dev/null -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_host root@72.60.80.84
+```
+
+**Run a command on the remote:**
+```bash
+ssh -F /dev/null -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_host root@72.60.80.84 "<command>"
+```
+
+---
+
 ## Webhook URL
 
 After deployment, the Finnhub webhook URL is:
@@ -49,21 +71,34 @@ Configure this URL in the Finnhub dashboard when setting up webhooks. The backen
    - `FINNHUB_WEBHOOK_SECRET` (your Finnhub webhook secret)
 2. Push to `master`/`main` (or trigger the Stock Monitoring CI/deploy workflow). The deploy job passes these to the remote and **deploy-stock-monitoring-backend.sh** writes them into the remote `lianel/dc/.env` (or `hosting-base/lianel/dc/.env`), then restarts the stock-monitoring service.
 
-### Option B: SSH script (keys not in GitHub)
+### Option B: Add values on remote host via SSH
 
-From the repo root, with an SSH key that can log in to the remote host:
+Use the project’s SSH key and host (see **How to access the remote host** above).
+
+**B1 – Script (recommended)**  
+From repo root:
 
 ```bash
-# Set vars (or put them in your local .env and source it)
-export REMOTE_HOST=your-server
+export REMOTE_HOST=72.60.80.84
 export REMOTE_USER=root
+export SSH_KEY=~/.ssh/id_ed25519_host
 export FINNHUB_API_KEY=your-api-key
 export FINNHUB_WEBHOOK_SECRET=your-webhook-secret
 
 bash lianel/dc/scripts/deployment/add-finnhub-keys-remote-env.sh
 ```
 
-The script SSHs to the remote, appends/updates `FINNHUB_API_KEY` and `FINNHUB_WEBHOOK_SECRET` in the remote `.env`, and restarts the stock-monitoring service.
+The script SSHs to the remote, updates `FINNHUB_API_KEY` and `FINNHUB_WEBHOOK_SECRET` in the remote `.env` (under `/root/hosting-base/lianel/dc` or `/root/lianel/dc`), and restarts the stock-monitoring service.
+
+**B2 – One-liner (direct SSH)**  
+Set the two Finnhub vars, then run (values are expanded on your machine and sent to the remote):
+
+```bash
+export FINNHUB_API_KEY=your-api-key
+export FINNHUB_WEBHOOK_SECRET=your-webhook-secret
+
+ssh -F /dev/null -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_host root@72.60.80.84 "DC=\$(for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/docker-compose.infra.yaml\" ] && echo \"\$d\" && break; done); touch \"\$DC/.env\"; grep -v '^FINNHUB_API_KEY=' \"\$DC/.env\" | grep -v '^FINNHUB_WEBHOOK_SECRET=' > /tmp/env.new; echo \"FINNHUB_API_KEY=${FINNHUB_API_KEY}\" >> /tmp/env.new; echo \"FINNHUB_WEBHOOK_SECRET=${FINNHUB_WEBHOOK_SECRET}\" >> /tmp/env.new; mv /tmp/env.new \"\$DC/.env\"; cd \"\$DC\" && docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d --force-recreate --no-deps stock-monitoring-service; echo Done"
+```
 
 ---
 
