@@ -15,6 +15,15 @@ use tower::ServiceExt;
 
 const X_AUTH_REQUEST_USER: HeaderName = HeaderName::from_static("x-auth-request-user");
 
+/// Extract id from JSON (backend returns numeric id).
+fn json_id(v: &serde_json::Value) -> Option<String> {
+    v.get("id").and_then(|n| {
+        n.as_i64()
+            .map(|i| i.to_string())
+            .or_else(|| n.as_str().map(String::from))
+    })
+}
+
 #[tokio::test]
 async fn health_returns_200_ok() {
     let state = test_state().await;
@@ -183,7 +192,7 @@ async fn watchlist_flow_crud() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let wl_id = created.get("id").and_then(|v| v.as_str()).expect("watchlist id");
+    let wl_id = json_id(&created).expect("watchlist id");
 
     // List watchlists
     let req = request_with_test_user("GET", "/api/v1/watchlists", None);
@@ -192,9 +201,7 @@ async fn watchlist_flow_crud() {
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let list: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let items = list.as_array().unwrap();
-    assert!(items
-        .iter()
-        .any(|o| o.get("id").and_then(|v| v.as_str()) == Some(wl_id)));
+    assert!(items.iter().any(|o| json_id(o).as_deref() == Some(wl_id.as_str())));
 
     // Add item
     let req = request_with_test_user(
@@ -216,7 +223,7 @@ async fn watchlist_flow_crud() {
         .iter()
         .find(|o| o.get("symbol").and_then(|v| v.as_str()) == Some("AAPL"))
         .unwrap();
-    let item_id = item.get("id").and_then(|v| v.as_str()).expect("item id");
+    let item_id = json_id(item).expect("item id");
 
     // Delete item
     let req = request_with_test_user(
@@ -248,7 +255,7 @@ async fn alert_flow_crud() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let alert_id = created.get("id").and_then(|v| v.as_str()).expect("alert id");
+    let alert_id = json_id(&created).expect("alert id");
 
     // List alerts
     let req = request_with_test_user("GET", "/api/v1/alerts", None);
@@ -260,7 +267,7 @@ async fn alert_flow_crud() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|o| o.get("id").and_then(|v| v.as_str()) == Some(alert_id)));
+        .any(|o| json_id(o).as_deref() == Some(alert_id.as_str())));
 
     // Update (e.g. disable)
     let req = request_with_test_user(
