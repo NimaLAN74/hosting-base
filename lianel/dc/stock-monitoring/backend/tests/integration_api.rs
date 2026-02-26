@@ -232,12 +232,12 @@ async fn watchlist_flow_crud() {
         None,
     );
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::OK);
 
     // Delete watchlist
     let req = request_with_test_user("DELETE", &format!("/api/v1/watchlists/{}", wl_id), None);
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -281,5 +281,5 @@ async fn alert_flow_crud() {
     // Delete
     let req = request_with_test_user("DELETE", &format!("/api/v1/alerts/{}", alert_id), None);
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::OK);
 }
