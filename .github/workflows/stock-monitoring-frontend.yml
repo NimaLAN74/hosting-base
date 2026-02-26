@@ -33,6 +33,7 @@ jobs:
       - name: Install dependencies
         env:
           NODE_ENV: development
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           cd lianel/dc/stock-monitoring/frontend
           if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
@@ -43,6 +44,8 @@ jobs:
           echo "TODO: restore enforced test execution after isolating root cause."
 
       - name: Build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           cd lianel/dc/stock-monitoring/frontend && npm run build
           echo "✅ Build complete"
