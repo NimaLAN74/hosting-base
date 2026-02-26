@@ -186,6 +186,15 @@ function App() {
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [symbolInput, setSymbolInput] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
+  const [symbolProviders, setSymbolProviders] = useState([]);
+  const [selectedSymbolProvider, setSelectedSymbolProvider] = useState('');
+  const [symbolSearchQuery, setSymbolSearchQuery] = useState('');
+  const [symbolSearchExchange, setSymbolSearchExchange] = useState('US');
+  const [symbolSearchResults, setSymbolSearchResults] = useState([]);
+  const [symbolSearchLoading, setSymbolSearchLoading] = useState(false);
+  const [symbolSearchError, setSymbolSearchError] = useState('');
+  const [selectedSymbolIds, setSelectedSymbolIds] = useState(new Set());
+  const [symbolBrowserOpen, setSymbolBrowserOpen] = useState(true);
   const [prices, setPrices] = useState({});
   const [previousPrices, setPreviousPrices] = useState({});
   const [quoteCurrencies, setQuoteCurrencies] = useState({});
@@ -488,6 +497,11 @@ function App() {
     });
   }, [applyAuthError, loadWatchlists]);
   useEffect(() => {
+    if (authState.isAuthenticated && !authState.checking) {
+      loadSymbolProviders().catch(() => {});
+    }
+  }, [authState.isAuthenticated, authState.checking, loadSymbolProviders]);
+  useEffect(() => {
     loadAlerts().catch((err) => {
       applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to load alerts');
@@ -716,6 +730,110 @@ function App() {
       setWatchlistBusy(false);
     }
   }, [activeWatchlistId, applyAuthError, renameWatchlistName, watchlists]);
+
+  const loadSymbolProviders = useCallback(async () => {
+    try {
+      const list = await apiJson('/symbols/providers');
+      setSymbolProviders(Array.isArray(list) ? list : []);
+      if (Array.isArray(list) && list.length > 0 && !selectedSymbolProvider) {
+        setSelectedSymbolProvider(list[0].id || list[0].name?.toLowerCase?.() || '');
+      }
+    } catch (err) {
+      applyAuthError(err);
+      setSymbolProviders([]);
+    }
+  }, [applyAuthError, selectedSymbolProvider]);
+
+  const loadSymbols = useCallback(async (mode) => {
+    const provider = selectedSymbolProvider || symbolProviders[0]?.id;
+    if (!provider) {
+      setSymbolSearchError('Select a data provider first.');
+      return;
+    }
+    setSymbolSearchError('');
+    setSymbolSearchLoading(true);
+    setSymbolSearchResults([]);
+    setSelectedSymbolIds(new Set());
+    try {
+      const params = new URLSearchParams({ provider });
+      if (mode === 'search') {
+        const q = symbolSearchQuery.trim();
+        if (!q) {
+          setSymbolSearchError('Enter a search term (e.g. company name or ticker).');
+          setSymbolSearchLoading(false);
+          return;
+        }
+        params.set('q', q);
+      } else {
+        params.set('exchange', (symbolSearchExchange || 'US').trim());
+      }
+      const list = await apiJson(`/symbols?${params.toString()}`);
+      setSymbolSearchResults(Array.isArray(list) ? list : []);
+      if (Array.isArray(list) && list.length === 0 && mode === 'search') {
+        setSymbolSearchError('No symbols found. Try a different search.');
+      }
+    } catch (err) {
+      applyAuthError(err);
+      setSymbolSearchError(err instanceof Error ? err.message : 'Failed to load symbols.');
+      setSymbolSearchResults([]);
+    } finally {
+      setSymbolSearchLoading(false);
+    }
+  }, [applyAuthError, selectedSymbolProvider, symbolProviders, symbolSearchExchange, symbolSearchQuery]);
+
+  const toggleSymbolSelection = useCallback((symbol) => {
+    setSelectedSymbolIds((prev) => {
+      const next = new Set(prev);
+      const key = String(symbol).toUpperCase();
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const selectAllSymbols = useCallback(() => {
+    setSelectedSymbolIds(new Set(symbolSearchResults.map((s) => String(s.symbol || s.display_symbol || '').toUpperCase()).filter(Boolean)));
+  }, [symbolSearchResults]);
+
+  const deselectAllSymbols = useCallback(() => setSelectedSymbolIds(new Set()), []);
+
+  const addSelectedToWatchlist = useCallback(async () => {
+    if (!activeWatchlistId) {
+      setWatchlistError('No watchlist selected.');
+      return;
+    }
+    const toAdd = Array.from(selectedSymbolIds).filter(Boolean);
+    if (toAdd.length === 0) {
+      setWatchlistError('Select at least one symbol from the list.');
+      return;
+    }
+    const existing = new Set(watchlistItems.map((item) => String(item.symbol).toUpperCase()));
+    const newSymbols = toAdd.filter((s) => !existing.has(s));
+    if (newSymbols.length === 0) {
+      setWatchlistError('Selected symbols are already in the watchlist.');
+      return;
+    }
+    setWatchlistError('');
+    setWatchlistBusy(true);
+    try {
+      for (const symbol of newSymbols) {
+        await apiJson(`/watchlists/${activeWatchlistId}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol }),
+        });
+      }
+      await loadWatchlistItems(activeWatchlistId);
+      setSelectedSymbolIds(new Set());
+      setSymbolSearchError('');
+    } catch (err) {
+      applyAuthError(err);
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to add symbols.');
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }, [activeWatchlistId, applyAuthError, loadWatchlistItems, selectedSymbolIds, watchlistItems]);
+
   const addAlert = useCallback(async () => {
     setAlertError('');
     const symbol = alertSymbol.toUpperCase().trim();
@@ -1132,6 +1250,122 @@ function App() {
               <button type="button" className="raw-toggle-btn" onClick={addSymbol} disabled={watchlistBusy}>
                 Add symbol
               </button>
+            </div>
+            <div className="symbol-browser">
+              <button
+                type="button"
+                className="symbol-browser-toggle"
+                onClick={() => setSymbolBrowserOpen((o) => !o)}
+                aria-expanded={symbolBrowserOpen}
+              >
+                {symbolBrowserOpen ? '▼ Hide' : '▶ Show'} browse symbols (search or load by exchange)
+              </button>
+              {symbolBrowserOpen && (
+                <div className="symbol-browser-panel">
+                  <h3 className="symbol-browser-title">Browse and add symbols</h3>
+                  <p className="symbol-browser-subtitle">Choose a provider, then search by name/ticker or load symbols by exchange.</p>
+                  <div className="watchlist-form symbol-browser-provider">
+                    <label htmlFor="symbol-provider">Provider</label>
+                    <select
+                      id="symbol-provider"
+                      value={selectedSymbolProvider}
+                      onChange={(e) => setSelectedSymbolProvider(e.target.value)}
+                      aria-label="Data provider for symbol list"
+                    >
+                      {symbolProviders.length === 0 && (
+                        <option value="">Loading…</option>
+                      )}
+                      {symbolProviders.map((p) => (
+                        <option key={p.id || p.name} value={p.id || p.name}>
+                          {p.name || p.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="symbol-browser-actions">
+                    <div className="watchlist-form">
+                      <input
+                        type="text"
+                        value={symbolSearchQuery}
+                        onChange={(e) => setSymbolSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), loadSymbols('search'))}
+                        placeholder="Search (e.g. Apple, AAPL)"
+                        aria-label="Search symbols"
+                        className="symbol-input"
+                      />
+                      <button
+                        type="button"
+                        className="raw-toggle-btn"
+                        onClick={() => loadSymbols('search')}
+                        disabled={symbolSearchLoading}
+                      >
+                        {symbolSearchLoading ? 'Searching…' : 'Search'}
+                      </button>
+                    </div>
+                    <div className="watchlist-form">
+                      <input
+                        type="text"
+                        value={symbolSearchExchange}
+                        onChange={(e) => setSymbolSearchExchange(e.target.value)}
+                        placeholder="Exchange (e.g. US)"
+                        aria-label="Exchange code"
+                        className="symbol-input symbol-input-exchange"
+                      />
+                      <button
+                        type="button"
+                        className="raw-toggle-btn"
+                        onClick={() => loadSymbols('exchange')}
+                        disabled={symbolSearchLoading}
+                      >
+                        {symbolSearchLoading ? 'Loading…' : 'Load by exchange'}
+                      </button>
+                    </div>
+                  </div>
+                  {symbolSearchError && <p className="watchlist-error">{symbolSearchError}</p>}
+                  {symbolSearchResults.length > 0 && (
+                    <div className="symbol-browser-results">
+                      <div className="symbol-browser-results-toolbar">
+                        <button type="button" className="raw-toggle-btn" onClick={selectAllSymbols}>Select all</button>
+                        <button type="button" className="raw-toggle-btn" onClick={deselectAllSymbols}>Deselect all</button>
+                        <span className="symbol-browser-selected">{selectedSymbolIds.size} selected</span>
+                        <button
+                          type="button"
+                          className="raw-toggle-btn primary"
+                          onClick={addSelectedToWatchlist}
+                          disabled={watchlistBusy || selectedSymbolIds.size === 0}
+                        >
+                          Add selected to watchlist
+                        </button>
+                      </div>
+                      <ul className="symbol-browser-list" aria-label="Search results">
+                        {symbolSearchResults.map((item) => {
+                          const sym = String(item.symbol || item.display_symbol || '').toUpperCase();
+                          const label = item.description ? `${sym} — ${item.description}` : sym;
+                          const inWatchlist = watchlistSymbols.includes(sym);
+                          return (
+                            <li key={sym} className="symbol-browser-item">
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSymbolIds.has(sym)}
+                                  onChange={() => toggleSymbolSelection(sym)}
+                                  disabled={inWatchlist}
+                                />
+                                <span className="symbol-browser-symbol">{sym}</span>
+                                {item.description && <span className="symbol-browser-desc">{item.description}</span>}
+                                {inWatchlist && <span className="symbol-browser-in-wl">(in watchlist)</span>}
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                  {!symbolSearchLoading && symbolSearchResults.length === 0 && (
+                    <p className="symbol-browser-hint">Search by name or ticker, or load by exchange (e.g. US), to see symbols.</p>
+                  )}
+                </div>
+              )}
             </div>
             {watchlistError && <p className="watchlist-error">{watchlistError}</p>}
             <div className="watchlist-chips">

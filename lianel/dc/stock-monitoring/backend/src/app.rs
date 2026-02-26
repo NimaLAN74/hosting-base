@@ -115,6 +115,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/notifications", get(list_notifications))
         .route("/api/v1/notifications/:notification_id/read", put(mark_notification_read))
         .route("/api/v1/notifications/read-all", post(mark_all_notifications_read))
+        .route("/api/v1/symbols/providers", get(symbols_providers))
+        .route("/api/v1/symbols", get(symbols_list))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -583,6 +585,28 @@ struct QuotesResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct SymbolProviderDto {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SymbolDto {
+    symbol: String,
+    display_symbol: String,
+    description: Option<String>,
+    #[serde(rename = "type")]
+    type_: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SymbolsQuery {
+    provider: Option<String>,
+    q: Option<String>,
+    exchange: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct AlertEvaluationResult {
     ok: bool,
     users_evaluated: usize,
@@ -652,6 +676,27 @@ struct FinnhubQuoteResponse {
     /// Error message when API key invalid or rate limited
     #[serde(default)]
     error: Option<String>,
+}
+
+/// Finnhub search: GET /search?q=... and stock/symbol?exchange=...
+#[derive(Debug, Deserialize)]
+struct FinnhubSearchResultItem {
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(rename = "displaySymbol", default)]
+    display_symbol: Option<String>,
+    #[serde(default)]
+    symbol: String,
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinnhubSearchEnvelope {
+    #[serde(default)]
+    count: Option<u32>,
+    #[serde(default)]
+    result: Option<Vec<FinnhubSearchResultItem>>,
 }
 
 async fn quotes(
@@ -750,6 +795,66 @@ async fn quotes(
         quotes,
         warnings,
     }))
+}
+
+async fn symbols_providers(State(_state): State<AppState>) -> Json<Vec<SymbolProviderDto>> {
+    let list = vec![SymbolProviderDto {
+        id: "finnhub".to_string(),
+        name: "Finnhub".to_string(),
+    }];
+    Json(list)
+}
+
+async fn symbols_list(
+    State(state): State<AppState>,
+    Query(query): Query<SymbolsQuery>,
+) -> Result<Json<Vec<SymbolDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let provider = query
+        .provider
+        .as_deref()
+        .unwrap_or("finnhub")
+        .trim()
+        .to_lowercase();
+    if provider != "finnhub" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Unsupported provider",
+                "detail": "Only provider=finnhub is supported"
+            })),
+        ));
+    }
+    let api_key = match state.quote_service.finnhub_api_key.as_deref() {
+        Some(k) if !k.is_empty() => k,
+        _ => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Symbol list unavailable",
+                    "detail": "Finnhub API key not configured"
+                })),
+            ));
+        }
+    };
+
+    let symbols = if let Some(ref q) = query.q {
+        let q = q.trim();
+        if q.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Empty search query",
+                    "detail": "Use q=... for search (e.g. q=apple)"
+                })),
+            ));
+        }
+        fetch_finnhub_search(&state.quote_service.http, api_key, q).await
+    } else {
+        let exchange = query.exchange.as_deref().unwrap_or("US").trim();
+        fetch_finnhub_symbols_by_exchange(&state.quote_service.http, api_key, exchange).await
+    };
+
+    Ok(Json(symbols))
 }
 
 fn parse_symbols(raw: Option<&str>) -> Result<Vec<String>, (StatusCode, Json<serde_json::Value>)> {
@@ -896,6 +1001,67 @@ async fn fetch_finnhub_quotes(
         });
     }
     out
+}
+
+/// Finnhub search: GET /api/v1/search?q=QUERY&token=TOKEN
+async fn fetch_finnhub_search(
+    http: &reqwest::Client,
+    api_key: &str,
+    q: &str,
+) -> Vec<SymbolDto> {
+    let url = "https://finnhub.io/api/v1/search";
+    let response = http
+        .get(url)
+        .query(&[("q", q), ("token", api_key)])
+        .send()
+        .await;
+    let Ok(resp) = response else {
+        return Vec::new();
+    };
+    let Ok(envelope) = resp.json::<FinnhubSearchEnvelope>().await else {
+        return Vec::new();
+    };
+    let Some(items) = envelope.result else {
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .map(|r| SymbolDto {
+            symbol: r.symbol.clone(),
+            display_symbol: r.display_symbol.unwrap_or(r.symbol),
+            description: r.description,
+            type_: r.type_,
+        })
+        .collect()
+}
+
+/// Finnhub stock symbols by exchange: GET /api/v1/stock/symbol?exchange=US&token=TOKEN
+async fn fetch_finnhub_symbols_by_exchange(
+    http: &reqwest::Client,
+    api_key: &str,
+    exchange: &str,
+) -> Vec<SymbolDto> {
+    let url = "https://finnhub.io/api/v1/stock/symbol";
+    let response = http
+        .get(url)
+        .query(&[("exchange", exchange), ("token", api_key)])
+        .send()
+        .await;
+    let Ok(resp) = response else {
+        return Vec::new();
+    };
+    let Ok(items) = resp.json::<Vec<FinnhubSearchResultItem>>().await else {
+        return Vec::new();
+    };
+    items
+        .into_iter()
+        .map(|r| SymbolDto {
+            symbol: r.symbol.clone(),
+            display_symbol: r.display_symbol.unwrap_or(r.symbol),
+            description: r.description,
+            type_: r.type_,
+        })
+        .collect()
 }
 
 async fn fetch_alpha_vantage_quotes(

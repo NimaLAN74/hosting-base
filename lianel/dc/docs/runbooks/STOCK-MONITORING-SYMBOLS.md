@@ -66,17 +66,14 @@ curl -s -X POST "https://<host>/api/v1/stock-monitoring/api/v1/watchlists/<WATCH
 
 ---
 
-## 3. Ingest DAG – symbol list (when implemented)
+## 3. Ingest DAG – symbol list
 
-The **ingest DAG** (`stock_monitoring_ingest`) is currently a **placeholder**: it does not yet fetch real quotes or use a configurable symbol list.
+The **ingest DAG** (`stock_monitoring_ingest`) warms the backend quote cache on a schedule by calling `GET /api/v1/quotes?symbols=...`. The backend fetches from its providers (Yahoo/Stooq/Alpha Vantage) and caches; the alerts DAG runs a few minutes after to evaluate price alerts.
 
-When implemented:
-
-- **Where to configure symbols:** In the DAG code or in Airflow Variables (e.g. a list of EU symbols or symbol+MIC pairs). Alternatively, the DAG could query the backend or DB for “all symbols in watchlists and alerts” to drive ingestion.
-- **Provider format:** The backend quote service supports provider-specific mapping (e.g. `.ST` → `.STO` for Alpha Vantage). The ingest pipeline should use the same symbol format as the backend so that alert evaluation sees consistent symbols.
-- **Schedule:** Ingest runs on a schedule (e.g. hourly 08–17 UTC weekdays); the alerts DAG runs shortly after to evaluate alerts.
-
-Until the ingest DAG is implemented, **quotes are fetched on demand** by the backend from the configured data provider (e.g. Yahoo or Alpha Vantage) when users open the dashboard or when the alert evaluation job runs. No separate “add symbols for ingest” step is required for MVP.
+- **Where to configure symbols:** Set the Airflow Variable **`stock_monitoring_ingest_symbols`** (comma-separated), e.g. `ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L,AAPL`. If unset, the DAG uses a default EU set (ASML.AS, SAP.DE, VOLV-B.ST, SHEL.L).
+- **Provider format:** Use the same symbol format as the backend (e.g. `.ST` for Stockholm; backend maps to `.STO` for Alpha Vantage when needed). When **Finnhub** is configured (`STOCK_MONITORING_FINNHUB_API_KEY` or `FINNHUB_API_KEY`), the backend tries Finnhub first; Finnhub accepts US symbols (e.g. AAPL) and many international tickers (see [Finnhub docs](https://finnhub.io/docs/api/quote)).
+- **Schedule:** Ingest runs hourly 08–17 UTC on weekdays; the alerts DAG (`stock_monitoring_alerts`) runs at :05 past the hour and waits for this DAG’s success.
+- **Internal URL:** The DAG calls the backend using `STOCK_MONITORING_INTERNAL_URL` (default `http://lianel-stock-monitoring-service:3003`). Ensure Airflow workers can reach this URL.
 
 ---
 
@@ -87,6 +84,45 @@ Until the ingest DAG is implemented, **quotes are fetched on demand** by the bac
 | Symbol rejected (400) | Ensure format is valid (alphanumeric + optional `.MIC`). See backend validation in `app.rs` (symbol normalization). |
 | No quote for symbol | Provider may not support that exchange or symbol; check backend logs and provider docs. |
 | Alert never fires | See runbook **STOCK-MONITORING-ALERT-DEBUG.md** (quote availability, condition, enabled, already notified). |
+
+---
+
+## 5. Getting symbol lists from Finnhub
+
+When Finnhub is configured (`FINNHUB_API_KEY`), you can get symbol lists with the same token.
+
+### Symbol search (by name or ticker)
+
+Returns best-matching symbols (stocks, ETFs, etc.) for a query:
+
+```bash
+# Replace YOUR_FINNHUB_API_KEY with your key (or use the one in remote .env)
+curl -sS "https://finnhub.io/api/v1/search?q=AAPL&token=YOUR_FINNHUB_API_KEY"
+```
+
+**Response:** `{"count":N,"result":[{"description":"...","displaySymbol":"AAPL","symbol":"AAPL","type":"Common Stock"},...]}`
+
+Use `q` for company name or ticker (e.g. `q=Apple`, `q=ASML`).
+
+### Stock symbols by exchange
+
+Returns all symbols for an exchange (US, EU, etc.):
+
+```bash
+curl -sS "https://finnhub.io/api/v1/stock/symbol?exchange=US&token=YOUR_FINNHUB_API_KEY"
+# Common exchanges: US, EU, LON, XETRA, AS, etc.
+```
+
+**Response:** Array of `{"symbol","displaySymbol","description","type","currency","mic",...}`. For very large lists Finnhub may redirect to a static file URL.
+
+**From the remote host** (reuse the key from the container):
+
+```bash
+KEY=$(docker exec lianel-stock-monitoring-service env | grep "^FINNHUB_API_KEY=" | cut -d= -f2-)
+curl -sS "https://finnhub.io/api/v1/search?q=ASML&token=${KEY}"
+```
+
+See [Finnhub Stock Symbols](https://finnhub.io/docs/api/stock-symbols) and [Symbol Search](https://finnhub.io/docs/api/symbol-search).
 
 ---
 

@@ -303,7 +303,8 @@ Summary of what is deployed and how to operate it.
 | `KEYCLOAK_URL` | No | JWKS URL (default https://auth.lianel.se) |
 | `KEYCLOAK_REALM` | No | Realm (default lianel) |
 | `STOCK_MONITORING_QUOTE_PROVIDER` | No | e.g. yahoo, alpha_vantage |
-| `STOCK_MONITORING_DATA_PROVIDER_API_KEY` | If provider needs it | API key for quote provider |
+| `STOCK_MONITORING_DATA_PROVIDER_API_KEY` | If provider needs it | API key for Alpha Vantage fallback |
+| `STOCK_MONITORING_FINNHUB_API_KEY` or `FINNHUB_API_KEY` | No | When set, Finnhub.io is used as quote source (see [Finnhub Quote API](https://finnhub.io/docs/api/quote)) |
 | `STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS` | No | In-memory quote cache TTL |
 
 ### 8.3 Runbooks (ops)

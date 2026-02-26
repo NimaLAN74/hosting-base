@@ -318,3 +318,28 @@ async fn alert_flow_crud() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn symbols_providers_returns_200_and_list() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let req = request_with_test_user("GET", "/api/v1/symbols/providers", None);
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = json.as_array().expect("response is array");
+    assert!(!arr.is_empty(), "at least one provider");
+    let first = &arr[0];
+    assert_eq!(first.get("id").and_then(|v| v.as_str()), Some("finnhub"));
+    assert_eq!(first.get("name").and_then(|v| v.as_str()), Some("Finnhub"));
+}
+
+#[tokio::test]
+async fn symbols_list_without_finnhub_key_returns_503() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let req = request_with_test_user("GET", "/api/v1/symbols?provider=finnhub&exchange=US", None);
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}

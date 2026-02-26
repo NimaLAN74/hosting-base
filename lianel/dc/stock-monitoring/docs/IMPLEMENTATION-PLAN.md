@@ -404,7 +404,7 @@ Use this as a sequential checklist; complete each step before moving to the next
 - [ ] **2.4** Backend: symbol validation (EU)
 - [ ] **3.1** Quote storage decision and doc
 - [ ] **3.2** Migration 023 quote cache (if needed)
-- [ ] **3.3** Airflow: ingest DAG implementation
+- [x] **3.3** Airflow: ingest DAG implementation
 - [ ] **3.4** Backend: quotes API
 - [ ] **3.5** Backend: last update / status for dashboard
 - [ ] **4.1** Backend: alert model and DB
