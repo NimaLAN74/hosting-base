@@ -462,6 +462,19 @@ function App() {
     );
   }, []);
 
+  const loadSymbolProviders = useCallback(async () => {
+    try {
+      const list = await apiJson('/symbols/providers');
+      setSymbolProviders(Array.isArray(list) ? list : []);
+      if (Array.isArray(list) && list.length > 0 && !selectedSymbolProvider) {
+        setSelectedSymbolProvider(list[0].id || list[0].name?.toLowerCase?.() || '');
+      }
+    } catch (err) {
+      applyAuthError(err);
+      setSymbolProviders([]);
+    }
+  }, [applyAuthError, selectedSymbolProvider]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -730,19 +743,6 @@ function App() {
       setWatchlistBusy(false);
     }
   }, [activeWatchlistId, applyAuthError, renameWatchlistName, watchlists]);
-
-  const loadSymbolProviders = useCallback(async () => {
-    try {
-      const list = await apiJson('/symbols/providers');
-      setSymbolProviders(Array.isArray(list) ? list : []);
-      if (Array.isArray(list) && list.length > 0 && !selectedSymbolProvider) {
-        setSelectedSymbolProvider(list[0].id || list[0].name?.toLowerCase?.() || '');
-      }
-    } catch (err) {
-      applyAuthError(err);
-      setSymbolProviders([]);
-    }
-  }, [applyAuthError, selectedSymbolProvider]);
 
   const loadSymbols = useCallback(async (mode) => {
     const provider = selectedSymbolProvider || symbolProviders[0]?.id;
