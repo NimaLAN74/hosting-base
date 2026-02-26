@@ -47,6 +47,36 @@ After deployment, the Finnhub webhook URL is:
 
 Configure this URL in the Finnhub dashboard when setting up webhooks. The backend returns **200 OK** as soon as the request is received (after optional secret verification), then may process the body in the background.
 
+### Test the webhook
+
+From your machine (use your real host, e.g. `www.lianel.se` or your domain):
+
+```bash
+# Replace YOUR_HOST with your host (e.g. www.lianel.se). Use HTTPS.
+WEBHOOK_URL="https://YOUR_HOST/api/v1/stock-monitoring/internal/webhooks/finnhub"
+
+# 1) POST without secret – expect 200 if FINNHUB_WEBHOOK_SECRET is unset on server, or 401 if set
+curl -sS -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d '{}'
+# Expected: 200 or 401
+
+# 2) POST with X-Finnhub-Secret – expect 200 when secret matches server’s FINNHUB_WEBHOOK_SECRET
+curl -sS -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -H "X-Finnhub-Secret: YOUR_WEBHOOK_SECRET" \
+  -d '{}'
+# Expected: 200
+```
+
+To test from the **remote host** (after SSH) against the backend directly:
+
+```bash
+# On remote: hit the container (no nginx)
+docker exec lianel-stock-monitoring-service curl -sS -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:3003/internal/webhooks/finnhub \
+  -H "Content-Type: application/json" -d '{}'
+# Expected: 200
+```
+
 ---
 
 ## Environment variables

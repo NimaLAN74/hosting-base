@@ -98,7 +98,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/swagger-ui/", get(swagger_ui))
         .route("/internal/alerts/evaluate", post(evaluate_alerts_internal))
         .route("/internal/quotes/ingest", post(ingest_quotes_internal))
-        .route("/internal/webhooks/finnhub", post(finnhub_webhook));
+        .route("/internal/webhooks/finnhub", post(finnhub_webhook))
+        .route("/api/v1/internal/webhooks/finnhub", post(finnhub_webhook));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
