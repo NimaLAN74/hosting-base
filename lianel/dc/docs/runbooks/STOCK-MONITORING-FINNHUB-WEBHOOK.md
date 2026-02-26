@@ -94,6 +94,34 @@ docker exec lianel-stock-monitoring-service curl -sS -o /dev/null -w "%{http_cod
 
 ---
 
+## Do we get data from Finnhub?
+
+**Yes, when `FINNHUB_API_KEY` is set** on the host where the stock-monitoring backend runs (e.g. in the remote `.env`). The backend uses Finnhub as the **first** quote source: when a client requests quotes (e.g. GET `/api/v1/quotes?symbols=AAPL`), it calls Finnhub; any symbols Finnhub doesn’t resolve are then tried via Yahoo and Stooq.
+
+**How to verify**
+
+1. **Check that the key is set on the remote** (after SSH):
+   ```bash
+   docker exec lianel-stock-monitoring-service env | grep -E 'FINNHUB_API_KEY|STOCK_MONITORING_FINNHUB'
+   ```
+   You should see `FINNHUB_API_KEY=...` (value redacted in output is fine).
+
+2. **Request quotes** (use a valid auth token or session for `/api/v1/quotes`):
+   ```bash
+   curl -sS "https://www.lianel.se/api/v1/stock-monitoring/api/v1/quotes?symbols=AAPL" -H "Authorization: Bearer YOUR_JWT"
+   ```
+   If you get back a quote with a positive `price` for AAPL, the backend is returning data; with the key set, that data is coming from Finnhub first (then fallbacks only for symbols Finnhub doesn’t return).
+
+If `FINNHUB_API_KEY` is not set on the server, the backend does **not** call Finnhub and uses only Yahoo/Stooq (and optional Alpha Vantage) for quotes.
+
+**If Finnhub returns "Invalid API key":** The value in `.env` must be your **API Key** from [Finnhub Dashboard](https://finnhub.io/dashboard) (Profile → API Key), not the webhook secret. Update the remote `.env` (e.g. run `add-finnhub-keys-remote-env.sh` with the correct `FINNHUB_API_KEY`) and restart the service. Then verify with:
+
+```bash
+bash lianel/dc/scripts/maintenance/verify-finnhub-remote.sh
+```
+
+---
+
 ## Remote host .env (pipeline or SSH)
 
 ### Option A: Pipeline (GitHub secrets)

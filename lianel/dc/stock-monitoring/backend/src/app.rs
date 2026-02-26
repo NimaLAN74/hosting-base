@@ -649,6 +649,9 @@ struct FinnhubQuoteResponse {
     /// Current price
     #[serde(default)]
     c: f64,
+    /// Error message when API key invalid or rate limited
+    #[serde(default)]
+    error: Option<String>,
 }
 
 async fn quotes(
@@ -878,6 +881,10 @@ async fn fetch_finnhub_quotes(
         let Ok(payload) = resp.json::<FinnhubQuoteResponse>().await else {
             continue;
         };
+        if let Some(ref err) = payload.error {
+            tracing::warn!("Finnhub quote for {}: {}", symbol_for_request, err);
+            continue;
+        }
         if !payload.c.is_finite() || payload.c <= 0.0 {
             continue;
         }
