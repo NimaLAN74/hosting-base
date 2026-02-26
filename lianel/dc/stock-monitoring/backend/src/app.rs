@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::{header::AUTHORIZATION, Request, StatusCode},
+    http::{header::AUTHORIZATION, HeaderMap, Request, StatusCode},
     middleware,
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
@@ -25,6 +25,9 @@ pub struct QuoteService {
     pub provider: String,
     pub cache_ttl: Duration,
     pub data_provider_api_key: Option<String>,
+    pub finnhub_api_key: Option<String>,
+    /// Sent as X-Finnhub-Secret on outbound Finnhub API requests when set.
+    pub finnhub_webhook_secret: Option<String>,
     pub http: reqwest::Client,
     pub cache: Arc<RwLock<HashMap<String, CachedQuote>>>,
 }
@@ -42,6 +45,8 @@ pub struct AppState {
     pub pool: sqlx::PgPool,
     pub validator: Arc<KeycloakJwtValidator>,
     pub quote_service: QuoteService,
+    /// Verified against X-Finnhub-Secret on incoming webhook POSTs when set.
+    pub finnhub_webhook_secret: Option<String>,
 }
 
 #[derive(Clone)]
@@ -91,7 +96,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api-doc", get(openapi_doc))
         .route("/swagger-ui", get(swagger_ui))
         .route("/swagger-ui/", get(swagger_ui))
-        .route("/internal/alerts/evaluate", post(evaluate_alerts_internal));
+        .route("/internal/alerts/evaluate", post(evaluate_alerts_internal))
+        .route("/internal/quotes/ingest", post(ingest_quotes_internal))
+        .route("/internal/webhooks/finnhub", post(finnhub_webhook));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -492,6 +499,14 @@ async fn openapi_doc() -> Json<serde_json::Value> {
                         "200": { "description": "Evaluation summary" }
                     }
                 }
+            },
+            "/internal/quotes/ingest": {
+                "post": {
+                    "summary": "Push quotes into cache (internal)",
+                    "responses": {
+                        "200": { "description": "Ingest result with count" }
+                    }
+                }
             }
         }
     }))
@@ -574,6 +589,25 @@ struct AlertEvaluationResult {
 }
 
 #[derive(Debug, Deserialize)]
+struct IngestQuoteItem {
+    symbol: String,
+    price: f64,
+    #[serde(default)]
+    currency: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngestQuotesRequest {
+    quotes: Vec<IngestQuoteItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct IngestQuotesResult {
+    ok: bool,
+    ingested: usize,
+}
+
+#[derive(Debug, Deserialize)]
 struct YahooQuoteEnvelope {
     #[serde(rename = "quoteResponse")]
     quote_response: YahooQuoteResponse,
@@ -606,6 +640,14 @@ struct AlphaVantageGlobalQuoteEnvelope {
 struct AlphaVantageGlobalQuote {
     #[serde(rename = "05. price")]
     price: Option<String>,
+}
+
+/// Finnhub.io quote API: https://finnhub.io/docs/api/quote
+#[derive(Debug, Deserialize)]
+struct FinnhubQuoteResponse {
+    /// Current price
+    #[serde(default)]
+    c: f64,
 }
 
 async fn quotes(
@@ -757,13 +799,23 @@ async fn fetch_provider_quotes(
     let mut all = Vec::new();
     let http = &quote_service.http;
 
-    // First attempt: Yahoo bulk endpoint.
-    match fetch_yahoo_quotes(http, symbols).await {
-        Ok(mut quotes) => {
-            all.append(&mut quotes);
-        }
-        Err(err) => {
-            tracing::warn!("Yahoo quote fetch failed: {}", err);
+    // Finnhub (finnhub.io): when API key is set, try first for all symbols.
+    if let Some(api_key) = quote_service.finnhub_api_key.as_deref() {
+        let webhook_secret = quote_service.finnhub_webhook_secret.as_deref();
+        let mut finnhub_quotes = fetch_finnhub_quotes(http, symbols, api_key, webhook_secret).await;
+        all.append(&mut finnhub_quotes);
+    }
+
+    // Yahoo bulk endpoint (when Finnhub did not resolve all).
+    let unresolved_after_finnhub: Vec<String> = symbols
+        .iter()
+        .filter(|symbol| !all.iter().any(|q| q.symbol.eq_ignore_ascii_case(symbol)))
+        .cloned()
+        .collect();
+    if !unresolved_after_finnhub.is_empty() {
+        match fetch_yahoo_quotes(http, &unresolved_after_finnhub).await {
+            Ok(mut quotes) => all.append(&mut quotes),
+            Err(err) => tracing::warn!("Yahoo quote fetch failed: {}", err),
         }
     }
 
@@ -794,9 +846,48 @@ async fn fetch_provider_quotes(
     }
 
     if all.is_empty() {
-        anyhow::bail!("Provider fetch returned no data (Yahoo/Stooq)");
+        anyhow::bail!("Provider fetch returned no data (Finnhub/Yahoo/Stooq)");
     }
     Ok(all)
+}
+
+/// Finnhub.io quote API: GET /api/v1/quote?symbol=SYMBOL&token=TOKEN
+/// When webhook_secret is set, sends X-Finnhub-Secret header per Finnhub requirement.
+async fn fetch_finnhub_quotes(
+    http: &reqwest::Client,
+    symbols: &[String],
+    api_key: &str,
+    webhook_secret: Option<&str>,
+) -> Vec<CachedQuote> {
+    const BASE: &str = "https://finnhub.io/api/v1/quote";
+    let mut out = Vec::new();
+    for original_symbol in symbols {
+        let symbol_for_request = original_symbol.trim();
+        if symbol_for_request.is_empty() {
+            continue;
+        }
+        let mut req = http.get(BASE).query(&[("symbol", symbol_for_request), ("token", api_key)]);
+        if let Some(secret) = webhook_secret {
+            req = req.header("X-Finnhub-Secret", secret);
+        }
+        let response = req.send().await;
+        let Ok(resp) = response else {
+            continue;
+        };
+        let Ok(payload) = resp.json::<FinnhubQuoteResponse>().await else {
+            continue;
+        };
+        if !payload.c.is_finite() || payload.c <= 0.0 {
+            continue;
+        }
+        out.push(CachedQuote {
+            symbol: original_symbol.to_uppercase(),
+            price: payload.c,
+            currency: infer_currency_from_symbol(original_symbol),
+            fetched_at_ms: current_time_ms(),
+        });
+    }
+    out
 }
 
 async fn fetch_alpha_vantage_quotes(
@@ -1507,6 +1598,56 @@ async fn evaluate_alerts_internal(
         users_evaluated: users,
         evaluated_at_ms: current_time_ms(),
     }))
+}
+
+async fn ingest_quotes_internal(
+    State(state): State<AppState>,
+    Json(body): Json<IngestQuotesRequest>,
+) -> Result<Json<IngestQuotesResult>, (StatusCode, Json<serde_json::Value>)> {
+    let now_ms = current_time_ms();
+    let mut ingested = 0usize;
+    let mut cache = state.quote_service.cache.write().await;
+    for item in body.quotes {
+        let symbol = item.symbol.trim().to_uppercase();
+        if symbol.is_empty() || !item.price.is_finite() || item.price <= 0.0 {
+            continue;
+        }
+        cache.insert(
+            symbol.clone(),
+            CachedQuote {
+                symbol,
+                price: item.price,
+                currency: item.currency.filter(|s| !s.trim().is_empty()),
+                fetched_at_ms: now_ms,
+            },
+        );
+        ingested += 1;
+    }
+    Ok(Json(IngestQuotesResult { ok: true, ingested }))
+}
+
+/// Finnhub webhook: acknowledge with 2xx immediately to prevent timeouts.
+/// Verifies X-Finnhub-Secret when FINNHUB_WEBHOOK_SECRET is set.
+async fn finnhub_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Body,
+) -> StatusCode {
+    if let Some(ref secret) = state.finnhub_webhook_secret {
+        let incoming = headers
+            .get("x-finnhub-secret")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim);
+        if incoming.as_deref() != Some(secret.as_str()) {
+            return StatusCode::UNAUTHORIZED;
+        }
+    }
+    // Acknowledge before any processing to prevent Finnhub disabling the endpoint.
+    tokio::spawn(async move {
+        let _ = axum::body::to_bytes(body, usize::MAX).await;
+        // Optionally log or process the event here.
+    });
+    StatusCode::OK
 }
 
 async fn evaluate_alerts_all_users(state: &AppState) -> anyhow::Result<usize> {

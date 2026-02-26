@@ -27,6 +27,8 @@ async fn main() -> anyhow::Result<()> {
         provider: config.quote_provider.clone(),
         cache_ttl: Duration::from_secs(config.quote_cache_ttl_seconds),
         data_provider_api_key: config.data_provider_api_key.clone(),
+        finnhub_api_key: config.finnhub_api_key.clone(),
+        finnhub_webhook_secret: config.finnhub_webhook_secret.clone(),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()?,
@@ -37,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         pool: pool.clone(),
         validator: validator.clone(),
         quote_service,
+        finnhub_webhook_secret: config.finnhub_webhook_secret.clone(),
     };
 
     let app = create_router(state);

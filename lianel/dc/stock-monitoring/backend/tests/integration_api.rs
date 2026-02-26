@@ -78,6 +78,8 @@ async fn test_state() -> AppState {
         provider: "yahoo".to_string(),
         cache_ttl: Duration::from_secs(30),
         data_provider_api_key: None,
+        finnhub_api_key: None,
+        finnhub_webhook_secret: None,
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()
@@ -88,6 +90,7 @@ async fn test_state() -> AppState {
         pool,
         validator,
         quote_service,
+        finnhub_webhook_secret: None,
     }
 }
 
@@ -135,6 +138,38 @@ async fn quotes_with_symbols_returns_200_and_shape() {
     assert!(json.get("as_of_ms").is_some());
     assert!(json.get("quotes").is_some());
     assert!(json.get("warnings").is_some());
+}
+
+#[tokio::test]
+async fn internal_quotes_ingest_accepts_and_caches() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let body = r#"{"quotes":[{"symbol":"INGESTTEST","price":99.5,"currency":"EUR"}]}"#;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/internal/quotes/ingest")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.get("ok").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(json.get("ingested").and_then(|v| v.as_u64()), Some(1));
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/quotes?symbols=INGESTTEST")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let quotes = json.get("quotes").and_then(|v| v.as_array()).unwrap();
+    let q = quotes.iter().find(|o| o.get("symbol").and_then(|v| v.as_str()) == Some("INGESTTEST")).unwrap();
+    assert_eq!(q.get("price").and_then(|v| v.as_f64()), Some(99.5));
+    assert_eq!(q.get("currency").and_then(|v| v.as_str()), Some("EUR"));
 }
 
 #[tokio::test]

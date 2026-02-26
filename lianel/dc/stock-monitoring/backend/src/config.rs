@@ -21,6 +21,10 @@ pub struct AppConfig {
     pub quote_cache_ttl_seconds: u64,
     /// Optional API key for secondary provider fallback (e.g. Alpha Vantage).
     pub data_provider_api_key: Option<String>,
+    /// Optional Finnhub API key (finnhub.io). When set, Finnhub is used as a quote source.
+    pub finnhub_api_key: Option<String>,
+    /// Optional Finnhub webhook secret. Sent as X-Finnhub-Secret on outbound requests; verified on webhook POST.
+    pub finnhub_webhook_secret: Option<String>,
 }
 
 impl AppConfig {
@@ -59,6 +63,16 @@ impl AppConfig {
                 .parse()
                 .context("Invalid STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")?,
             data_provider_api_key: env::var("STOCK_MONITORING_DATA_PROVIDER_API_KEY")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            finnhub_api_key: env::var("STOCK_MONITORING_FINNHUB_API_KEY")
+                .or_else(|_| env::var("FINNHUB_API_KEY"))
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            finnhub_webhook_secret: env::var("STOCK_MONITORING_FINNHUB_WEBHOOK_SECRET")
+                .or_else(|_| env::var("FINNHUB_WEBHOOK_SECRET"))
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),
