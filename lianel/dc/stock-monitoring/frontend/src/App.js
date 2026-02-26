@@ -1232,6 +1232,7 @@ function App() {
                 </button>
               </div>
             )}
+            <span className="watchlist-section-label">Add symbol manually</span>
             <div className="watchlist-form">
               <input
                 type="text"
@@ -1244,7 +1245,7 @@ function App() {
                   }
                 }}
                 className="symbol-input"
-                placeholder="Add symbol (e.g. SAN.MC)"
+                placeholder="e.g. AAPL, SAN.MC"
                 aria-label="Add symbol to watchlist"
               />
               <button type="button" className="raw-toggle-btn" onClick={addSymbol} disabled={watchlistBusy}>
@@ -1258,12 +1259,12 @@ function App() {
                 onClick={() => setSymbolBrowserOpen((o) => !o)}
                 aria-expanded={symbolBrowserOpen}
               >
-                {symbolBrowserOpen ? '▼ Hide' : '▶ Show'} browse symbols (search or load by exchange)
+                {symbolBrowserOpen ? '▼ Hide' : '▶ Show'} Browse symbols (search or load by exchange)
               </button>
               {symbolBrowserOpen && (
                 <div className="symbol-browser-panel">
                   <h3 className="symbol-browser-title">Browse and add symbols</h3>
-                  <p className="symbol-browser-subtitle">Choose a provider, then search by name/ticker or load symbols by exchange.</p>
+                  <p className="symbol-browser-subtitle">Choose a provider, then search by name or ticker, or load all symbols for an exchange.</p>
                   <div className="watchlist-form symbol-browser-provider">
                     <label htmlFor="symbol-provider">Provider</label>
                     <select
@@ -1283,42 +1284,48 @@ function App() {
                     </select>
                   </div>
                   <div className="symbol-browser-actions">
-                    <div className="watchlist-form">
-                      <input
-                        type="text"
-                        value={symbolSearchQuery}
-                        onChange={(e) => setSymbolSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), loadSymbols('search'))}
-                        placeholder="Search (e.g. Apple, AAPL)"
-                        aria-label="Search symbols"
-                        className="symbol-input"
-                      />
-                      <button
-                        type="button"
-                        className="raw-toggle-btn"
-                        onClick={() => loadSymbols('search')}
-                        disabled={symbolSearchLoading}
-                      >
-                        {symbolSearchLoading ? 'Searching…' : 'Search'}
-                      </button>
+                    <div className="symbol-browser-action-block">
+                      <span className="action-label">Search by name or ticker</span>
+                      <div className="watchlist-form">
+                        <input
+                          type="text"
+                          value={symbolSearchQuery}
+                          onChange={(e) => setSymbolSearchQuery(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), loadSymbols('search'))}
+                          placeholder="e.g. Apple, AAPL"
+                          aria-label="Search symbols"
+                          className="symbol-input"
+                        />
+                        <button
+                          type="button"
+                          className="raw-toggle-btn"
+                          onClick={() => loadSymbols('search')}
+                          disabled={symbolSearchLoading}
+                        >
+                          {symbolSearchLoading ? 'Searching…' : 'Search'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="watchlist-form">
-                      <input
-                        type="text"
-                        value={symbolSearchExchange}
-                        onChange={(e) => setSymbolSearchExchange(e.target.value)}
-                        placeholder="Exchange (e.g. US)"
-                        aria-label="Exchange code"
-                        className="symbol-input symbol-input-exchange"
-                      />
-                      <button
-                        type="button"
-                        className="raw-toggle-btn"
-                        onClick={() => loadSymbols('exchange')}
-                        disabled={symbolSearchLoading}
-                      >
-                        {symbolSearchLoading ? 'Loading…' : 'Load by exchange'}
-                      </button>
+                    <div className="symbol-browser-action-block">
+                      <span className="action-label">Load by exchange</span>
+                      <div className="watchlist-form">
+                        <input
+                          type="text"
+                          value={symbolSearchExchange}
+                          onChange={(e) => setSymbolSearchExchange(e.target.value)}
+                          placeholder="e.g. US, LON"
+                          aria-label="Exchange code"
+                          className="symbol-input symbol-input-exchange"
+                        />
+                        <button
+                          type="button"
+                          className="raw-toggle-btn"
+                          onClick={() => loadSymbols('exchange')}
+                          disabled={symbolSearchLoading}
+                        >
+                          {symbolSearchLoading ? 'Loading…' : 'Load'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   {symbolSearchError && <p className="watchlist-error">{symbolSearchError}</p>}
@@ -1368,6 +1375,7 @@ function App() {
               )}
             </div>
             {watchlistError && <p className="watchlist-error">{watchlistError}</p>}
+            <span className="watchlist-section-label">Symbols in this watchlist</span>
             <div className="watchlist-chips">
               {watchlistSymbols.map((symbol) => (
                 <div className="watchlist-chip" key={symbol}>
