@@ -1644,8 +1644,9 @@ async fn finnhub_webhook(
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(1);
-        let is_likely_test = content_length == 0;
+            .unwrap_or(0);
+        // Accept without secret: empty or small body (e.g. Finnhub dashboard test sends small JSON)
+        let is_likely_test = content_length <= 512;
         if incoming.as_deref() != Some(secret.as_str()) && !is_likely_test {
             return StatusCode::UNAUTHORIZED;
         }
