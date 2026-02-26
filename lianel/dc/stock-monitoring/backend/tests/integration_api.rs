@@ -83,19 +83,17 @@ async fn test_state() -> AppState {
 }
 
 fn request_with_test_user(method: &str, uri: &str, body: Option<&str>) -> Request<Body> {
-    let mut b = Request::builder()
+    let b = Request::builder()
         .method(method)
         .uri(uri)
         .header(X_AUTH_REQUEST_USER, "test-user-7-2");
     if let Some(body) = body {
-        b = b
-            .header(CONTENT_TYPE, "application/json")
+        b.header(CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
-            .unwrap();
+            .unwrap()
     } else {
-        b = b.body(Body::empty()).unwrap();
+        b.body(Body::empty()).unwrap()
     }
-    b
 }
 
 #[tokio::test]
