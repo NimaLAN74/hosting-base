@@ -336,10 +336,13 @@ async fn symbols_providers_returns_200_and_list() {
 }
 
 #[tokio::test]
-async fn symbols_list_without_finnhub_key_returns_503() {
+async fn symbols_list_returns_200_from_db() {
     let state = test_state().await;
     let app = create_router(state);
     let req = request_with_test_user("GET", "/api/v1/symbols?provider=finnhub&exchange=US", None);
     let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.is_array(), "response must be array of symbols");
 }

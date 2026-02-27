@@ -3,16 +3,18 @@
 Rust API for stock exchange monitoring and analysis. **MVP: EU markets.**
 
 **Tests:** Unit tests in `src/app.rs` (currency/symbol helpers); integration tests in `tests/` (config, DB, health, status, quotes, openapi, auth, watchlist CRUD, alert CRUD). Run with Postgres and `POSTGRES_*` (or `DATABASE_URL`).  
-**CI:** `.github/workflows/stock-monitoring-ci-deploy.yml` – on push/PR: migrations 022/023, `cargo test`, build, image push; on main/master: deploy and prod migrations.
+**CI:** `.github/workflows/stock-monitoring-ci-deploy.yml` – on push/PR: migrations 022/023/024, `cargo test`, build, image push; on main/master: deploy and prod migrations.
 
 ## Endpoints (as built)
 
 - `GET /health` – health check (no auth)
 - `GET /api/v1/status` – service info + DB connected
 - `GET /api/v1/quotes?symbols=...` – quotes (provider + cache)
+- `GET /api/v1/symbols/providers`, `GET /api/v1/symbols?provider=&q=|exchange=` – symbol list from DB (synced by DAG; no live API calls)
 - `GET /api-doc`, `GET /swagger-ui` – OpenAPI docs
 - `GET /api/v1/me`, watchlists, alerts, notifications – protected (JWT or `x-auth-request-user`)
 - `POST /internal/alerts/evaluate` – internal; used by Airflow DAG
+- `POST /internal/symbols/refresh?provider=finnhub` – internal; syncs Finnhub symbols into DB (used by DAG `stock_monitoring_symbol_sync`)
 
 ## Run locally
 
@@ -21,7 +23,7 @@ export POSTGRES_PASSWORD=postgres  # or your DB password
 PORT=3003 cargo run
 ```
 
-Apply migrations 022 and 023 first; see [STOCK-MONITORING-MIGRATIONS.md](../../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md).
+Apply migrations 022, 023, and 024 first; see [STOCK-MONITORING-MIGRATIONS.md](../../docs/runbooks/STOCK-MONITORING-MIGRATIONS.md). After deploy, run the symbol sync DAG (or `POST /internal/symbols/refresh?provider=finnhub`) once so the symbol list is populated.
 
 ## Tests
 
@@ -49,5 +51,5 @@ CI runs all tests against a Postgres service after applying 022/023.
 ## Shared vs specific
 
 - **Auth:** Keycloak (shared infra).
-- **Database:** Schema `stock_monitoring` in shared Postgres; migrations 022, 023 in `lianel/dc/database/migrations/`.
+- **Database:** Schema `stock_monitoring` in shared Postgres; migrations 022, 023, 024 in `lianel/dc/database/migrations/`. Table `symbols` is filled by DAG `stock_monitoring_symbol_sync` (or manual refresh).
 - **Quotes:** On-demand from provider: Finnhub (when API key set), Yahoo, Stooq, Alpha Vantage; in-memory cache; ingest DAG warms cache on schedule.

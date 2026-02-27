@@ -98,6 +98,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/swagger-ui/", get(swagger_ui))
         .route("/internal/alerts/evaluate", post(evaluate_alerts_internal))
         .route("/internal/quotes/ingest", post(ingest_quotes_internal))
+        .route("/internal/symbols/refresh", post(symbols_refresh_internal))
         .route("/internal/webhooks/finnhub", post(finnhub_webhook))
         .route("/api/v1/internal/webhooks/finnhub", post(finnhub_webhook));
 
@@ -606,6 +607,18 @@ struct SymbolsQuery {
     exchange: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SymbolsRefreshQuery {
+    provider: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SymbolsRefreshResult {
+    ok: bool,
+    provider: String,
+    synced: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct AlertEvaluationResult {
     ok: bool,
@@ -824,37 +837,126 @@ async fn symbols_list(
             })),
         ));
     }
+
+    let exchange_filter = query.exchange.as_deref().unwrap_or("").trim();
+    let search_pattern = query.q.as_deref().unwrap_or("").trim();
+
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        r#"
+        SELECT symbol, display_symbol, description, "type"
+        FROM stock_monitoring.symbols
+        WHERE provider = $1
+          AND ($2 = '' OR exchange = $2)
+          AND ($3 = '' OR symbol ILIKE '%' || $3 || '%' OR display_symbol ILIKE '%' || $3 || '%' OR description ILIKE '%' || $3 || '%')
+        ORDER BY symbol
+        LIMIT 5000
+        "#,
+    )
+    .bind(provider.as_str())
+    .bind(exchange_filter)
+    .bind(search_pattern)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("symbols list from DB: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "Failed to load symbol list",
+                "detail": "Database error"
+            })),
+        )
+    })?;
+
+    let symbols = rows
+        .into_iter()
+        .map(|(symbol, display_symbol, description, type_)| SymbolDto {
+            symbol,
+            display_symbol,
+            description,
+            type_,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(symbols))
+}
+
+/// Exchanges to sync from Finnhub (US, LON, AS=Amsterdam, DE=Xetra).
+const FINNHUB_SYNC_EXCHANGES: &[&str] = &["US", "LON", "AS", "DE"];
+
+async fn symbols_refresh_internal(
+    State(state): State<AppState>,
+    Query(query): Query<SymbolsRefreshQuery>,
+) -> Result<Json<SymbolsRefreshResult>, (StatusCode, Json<serde_json::Value>)> {
+    let provider = query.provider.as_deref().unwrap_or("finnhub").trim().to_lowercase();
+    if provider != "finnhub" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Unsupported provider",
+                "detail": "Only provider=finnhub is supported for refresh"
+            })),
+        ));
+    }
     let api_key = match state.quote_service.finnhub_api_key.as_deref() {
         Some(k) if !k.is_empty() => k,
         _ => {
             return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
-                    "error": "Symbol list unavailable",
+                    "error": "Symbol refresh unavailable",
                     "detail": "Finnhub API key not configured"
                 })),
             ));
         }
     };
 
-    let symbols = if let Some(ref q) = query.q {
-        let q = q.trim();
-        if q.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "Empty search query",
-                    "detail": "Use q=... for search (e.g. q=apple)"
-                })),
-            ));
+    let mut synced = 0usize;
+    for exchange in FINNHUB_SYNC_EXCHANGES {
+        let batch = fetch_finnhub_symbols_by_exchange(
+            &state.quote_service.http,
+            api_key,
+            exchange,
+        )
+        .await;
+        for dto in batch {
+            let symbol = dto.symbol.trim().to_uppercase();
+            if symbol.is_empty() {
+                continue;
+            }
+            let display_symbol = dto.display_symbol.trim();
+            let display_symbol = if display_symbol.is_empty() { symbol.clone() } else { display_symbol.to_string() };
+            let result = sqlx::query(
+                r#"
+                INSERT INTO stock_monitoring.symbols (provider, symbol, display_symbol, description, "type", exchange, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+                ON CONFLICT (provider, symbol) DO UPDATE SET
+                    display_symbol = EXCLUDED.display_symbol,
+                    description = EXCLUDED.description,
+                    "type" = EXCLUDED."type",
+                    exchange = EXCLUDED.exchange,
+                    updated_at = CURRENT_TIMESTAMP
+                "#,
+            )
+            .bind(provider.as_str())
+            .bind(&symbol)
+            .bind(display_symbol)
+            .bind(dto.description.as_deref())
+            .bind(dto.type_.as_deref())
+            .bind(exchange)
+            .execute(&state.pool)
+            .await;
+            if result.is_ok() {
+                synced += 1;
+            }
         }
-        fetch_finnhub_search(&state.quote_service.http, api_key, q).await
-    } else {
-        let exchange = query.exchange.as_deref().unwrap_or("US").trim();
-        fetch_finnhub_symbols_by_exchange(&state.quote_service.http, api_key, exchange).await
-    };
+    }
 
-    Ok(Json(symbols))
+    Ok(Json(SymbolsRefreshResult {
+        ok: true,
+        provider,
+        synced,
+    }))
 }
 
 fn parse_symbols(raw: Option<&str>) -> Result<Vec<String>, (StatusCode, Json<serde_json::Value>)> {
