@@ -30,7 +30,7 @@ cd "$DC_DIR"
 
 ENV_FILE="$DC_DIR/.env"
 touch "$ENV_FILE"
-for var in STOCK_MONITORING_DATA_PROVIDER_API_KEY FINNHUB_API_KEY FINNHUB_WEBHOOK_SECRET; do
+for var in STOCK_MONITORING_DATA_PROVIDER_API_KEY FINNHUB_API_KEY FINNHUB_WEBHOOK_SECRET REDIS_URL; do
   eval "val=\${${var}:-}"
   if [ -n "$val" ]; then
     tmp_env_file="$(mktemp)"

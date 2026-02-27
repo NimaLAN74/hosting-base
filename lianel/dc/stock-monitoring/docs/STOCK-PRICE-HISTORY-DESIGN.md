@@ -90,7 +90,7 @@ If you only need “price at end of day”:
 ### Deployment checklist (real-time chart with Redis)
 
 1. **Migrations**: 025, 026, 027 applied (workflow runs them on deploy).
-2. **REDIS_URL**: Set in `.env` (or as GitHub secret `REDIS_URL` so the deploy script writes it). Use DB 1 if sharing Redis with Airflow: `redis://:${REDIS_PASSWORD}@redis:6379/1`.
+2. **REDIS_URL**: Set in `.env` (or as GitHub secret `REDIS_URL`). Use DB 1 if sharing Redis with Airflow (Celery uses 0). If Redis runs in the Airflow stack, attach its container to `lianel-network` and use the container name: `redis://:${REDIS_PASSWORD}@dc-redis-1:6379/1` (so the stock-monitoring container can resolve the host).
 3. **DAGs**: `stock_monitoring_ingest_dag` (hourly 08–17 UTC weekdays) and `stock_monitoring_price_history_roll` (00:05 UTC daily) deployed and enabled.
 4. **Backend**: Built with `--features redis` (Dockerfile does this). Container reads REDIS_URL and writes/reads intraday in Redis.
 5. **Frontend**: Chart modal polls price-history every 5s when open; no extra config.

@@ -218,6 +218,7 @@ jobs:
           STOCK_MONITORING_DATA_PROVIDER_API_KEY: ${{ secrets['STOCK_MONITORING_DATA_PROVIDER_API_KEY'] }}
           FINNHUB_API_KEY: ${{ secrets['FINNHUB_API_KEY'] }}
           FINNHUB_WEBHOOK_SECRET: ${{ secrets['FINNHUB_WEBHOOK_SECRET'] }}
+          REDIS_URL: ${{ secrets['REDIS_URL'] }}
         run: |
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-service:latest"
@@ -227,6 +228,7 @@ jobs:
           [ -n "${STOCK_MONITORING_DATA_PROVIDER_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_DATA_PROVIDER_API_KEY='${STOCK_MONITORING_DATA_PROVIDER_API_KEY}'"
           [ -n "${FINNHUB_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_API_KEY='${FINNHUB_API_KEY}'"
           [ -n "${FINNHUB_WEBHOOK_SECRET:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_WEBHOOK_SECRET='${FINNHUB_WEBHOOK_SECRET}'"
+          [ -n "${REDIS_URL:-}" ] && REMOTE_ENV="$REMOTE_ENV REDIS_URL='${REDIS_URL}'"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "${REMOTE_ENV} /tmp/deploy-stock-monitoring-backend.sh '${IMAGE_LC}'"

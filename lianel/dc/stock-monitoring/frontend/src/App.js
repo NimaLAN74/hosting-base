@@ -530,6 +530,15 @@ function App() {
 
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
+
+  // Real-time chart: poll price-history every 5s while the history modal is open so Redis/DB intraday updates show immediately.
+  useEffect(() => {
+    if (!selectedSymbolForHistory) return undefined;
+    const intervalId = setInterval(() => {
+      loadPriceHistory(selectedSymbolForHistory);
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [selectedSymbolForHistory, loadPriceHistory]);
   useEffect(() => {
     const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
     if (!symbols.includes(alertSymbol)) {
