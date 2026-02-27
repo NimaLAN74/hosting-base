@@ -1109,14 +1109,6 @@ async fn price_history_roll_daily(
     }))
 }
 
-/// True if the error is "relation does not exist" (e.g. migrations 025/026 not applied).
-fn is_missing_table(err: &sqlx::Error) -> bool {
-    if let sqlx::Error::Database(e) = err {
-        return e.code().as_deref() == Some("42P01");
-    }
-    false
-}
-
 async fn price_history(
     State(state): State<AppState>,
     Query(query): Query<PriceHistoryQuery>,
@@ -1147,16 +1139,9 @@ async fn price_history(
     .await
     {
         Ok(rows) => rows,
-        Err(e) if is_missing_table(&e) => {
-            tracing::info!("price_history_daily table missing (migrations 025/026?), returning empty");
-            vec![]
-        }
         Err(e) => {
-            tracing::warn!("price_history daily: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to load history"})),
-            ));
+            tracing::warn!("price_history daily (returning empty): {}", e);
+            vec![]
         }
     };
 
@@ -1174,16 +1159,9 @@ async fn price_history(
     .await
     {
         Ok(rows) => rows,
-        Err(e) if is_missing_table(&e) => {
-            tracing::info!("price_history_intraday table missing (migrations 025/026?), returning empty");
-            vec![]
-        }
         Err(e) => {
-            tracing::warn!("price_history intraday: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to load intraday"})),
-            ));
+            tracing::warn!("price_history intraday (returning empty): {}", e);
+            vec![]
         }
     };
 
