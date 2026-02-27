@@ -1058,6 +1058,83 @@ body {
   white-space: nowrap;
 }
 
+.symbol-history-btn {
+  background: none;
+  border: none;
+  color: var(--secondary-blue);
+  font-weight: 700;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.symbol-history-btn:hover {
+  color: var(--accent-gold);
+}
+
+.history-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.history-modal {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border: 2px solid #475569;
+  border-radius: 12px;
+  max-width: 90vw;
+  width: 700px;
+  max-height: 90vh;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.history-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #334155;
+}
+
+.history-modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #f8fafc;
+}
+
+.history-modal-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+}
+
+.history-modal-close:hover {
+  color: #fff;
+}
+
+.history-modal-body {
+  padding: 20px;
+  min-height: 200px;
+}
+
+.history-loading,
+.history-empty {
+  color: #94a3b8;
+  margin: 0;
+}
+
 @media (max-width: 880px) {
   .alert-form {
     grid-template-columns: 1fr;

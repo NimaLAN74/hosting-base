@@ -12,11 +12,14 @@ on:
       - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
       - 'lianel/dc/database/migrations/023_stock_monitoring_notifications.sql'
       - 'lianel/dc/database/migrations/024_stock_monitoring_symbols.sql'
+      - 'lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql'
+      - 'lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql'
       - 'lianel/dc/docker-compose.stock-monitoring.yaml'
       - 'lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh'
       - 'lianel/dc/dags/stock_monitoring_ingest_dag.py'
       - 'lianel/dc/dags/stock_monitoring_alerts_dag.py'
       - 'lianel/dc/dags/stock_monitoring_symbol_sync_dag.py'
+      - 'lianel/dc/dags/stock_monitoring_price_history_roll_dag.py'
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
   pull_request:
@@ -28,6 +31,8 @@ on:
       - 'lianel/dc/database/migrations/022_stock_monitoring_schema.sql'
       - 'lianel/dc/database/migrations/023_stock_monitoring_notifications.sql'
       - 'lianel/dc/database/migrations/024_stock_monitoring_symbols.sql'
+      - 'lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql'
+      - 'lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
   workflow_dispatch:
 
@@ -71,7 +76,7 @@ jobs:
             sleep 1
           done
 
-      - name: Run migrations 022/023/024 (stock_monitoring schema + notifications + symbols)
+      - name: Run migrations 022/023/024/025/026 (stock_monitoring schema + notifications + symbols + price history)
         env:
           PGPASSWORD: postgres
         run: |
@@ -82,7 +87,11 @@ jobs:
             -f lianel/dc/database/migrations/023_stock_monitoring_notifications.sql
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
             -f lianel/dc/database/migrations/024_stock_monitoring_symbols.sql
-          echo "✅ Migrations 022/023/024 applied"
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql
+          echo "✅ Migrations 022/023/024/025/026 applied"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -190,10 +199,10 @@ jobs:
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
             lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh \
             lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
-            lianel/dc/dags/stock_monitoring_ingest_dag.py lianel/dc/dags/stock_monitoring_alerts_dag.py lianel/dc/dags/stock_monitoring_symbol_sync_dag.py \
+            lianel/dc/dags/stock_monitoring_ingest_dag.py lianel/dc/dags/stock_monitoring_alerts_dag.py lianel/dc/dags/stock_monitoring_symbol_sync_dag.py lianel/dc/dags/stock_monitoring_price_history_roll_dag.py \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
-            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_ingest_dag.py /tmp/stock_monitoring_alerts_dag.py /tmp/stock_monitoring_symbol_sync_dag.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
+            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_ingest_dag.py /tmp/stock_monitoring_alerts_dag.py /tmp/stock_monitoring_symbol_sync_dag.py /tmp/stock_monitoring_price_history_roll_dag.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
           echo "✅ Script and compose synced"
 
       - name: Deploy to remote host (stock backend only)
@@ -229,6 +238,8 @@ jobs:
             lianel/dc/database/migrations/022_stock_monitoring_schema.sql \
             lianel/dc/database/migrations/023_stock_monitoring_notifications.sql \
             lianel/dc/database/migrations/024_stock_monitoring_symbols.sql \
+            lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql \
+            lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
             "set -euo pipefail; \
@@ -253,7 +264,11 @@ jobs:
                docker run --rm --network host -v /tmp/023_stock_monitoring_notifications.sql:/tmp/023_stock_monitoring_notifications.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/023_stock_monitoring_notifications.sql && \
                docker run --rm --network host -v /tmp/024_stock_monitoring_symbols.sql:/tmp/024_stock_monitoring_symbols.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
-               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/024_stock_monitoring_symbols.sql); then \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/024_stock_monitoring_symbols.sql && \
+               docker run --rm --network host -v /tmp/025_stock_monitoring_price_history_daily.sql:/tmp/025_stock_monitoring_price_history_daily.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/025_stock_monitoring_price_history_daily.sql && \
+               docker run --rm --network host -v /tmp/026_stock_monitoring_price_history_intraday.sql:/tmp/026_stock_monitoring_price_history_intraday.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/026_stock_monitoring_price_history_intraday.sql); then \
                echo \"⚠️ Migration with \$DB_MIG_USER failed, retrying with app user \$DB_APP_USER\"; \
                docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; \
@@ -261,12 +276,16 @@ jobs:
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/023_stock_monitoring_notifications.sql; \
                docker run --rm --network host -v /tmp/024_stock_monitoring_symbols.sql:/tmp/024_stock_monitoring_symbols.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/024_stock_monitoring_symbols.sql; \
+               docker run --rm --network host -v /tmp/025_stock_monitoring_price_history_daily.sql:/tmp/025_stock_monitoring_price_history_daily.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+                 psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/025_stock_monitoring_price_history_daily.sql; \
+               docker run --rm --network host -v /tmp/026_stock_monitoring_price_history_intraday.sql:/tmp/026_stock_monitoring_price_history_intraday.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+                 psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/026_stock_monitoring_price_history_intraday.sql; \
              fi; \
              docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -tAc \"SELECT to_regclass('stock_monitoring.watchlists')\" | grep -q 'stock_monitoring.watchlists'; \
              docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
-               psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -c \"SELECT 1 FROM stock_monitoring.symbols LIMIT 1\" >/dev/null"
-          echo "✅ Migrations 022/023/024 on production"
+               psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -c \"SELECT 1 FROM stock_monitoring.price_history_daily LIMIT 1\" >/dev/null"
+          echo "✅ Migrations 022/023/024/025/026 on production"
 
       - name: Restart stock backend after DB migration
         env:

@@ -1,4 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
 import './App.css';
 import { ApiError, apiFetch, apiJson, getLoginUrl } from './apiClient';
 import StockPageTemplate from './StockPageTemplate';
@@ -211,6 +220,9 @@ function App() {
   const [alertStatusFilter, setAlertStatusFilter] = useState('all');
   const [selectedAlertIds, setSelectedAlertIds] = useState(new Set());
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const [selectedSymbolForHistory, setSelectedSymbolForHistory] = useState(null);
+  const [priceHistoryData, setPriceHistoryData] = useState(null);
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
   const [authState, setAuthState] = useState({
     checking: true,
     isAuthenticated: true,
@@ -474,6 +486,27 @@ function App() {
       setSymbolProviders([]);
     }
   }, [applyAuthError, selectedSymbolProvider]);
+
+  const loadPriceHistory = useCallback(async (symbol) => {
+    if (!symbol) return;
+    setPriceHistoryLoading(true);
+    setPriceHistoryData(null);
+    try {
+      const params = new URLSearchParams({ symbol, days: '90' });
+      const data = await apiJson(`/price-history?${params.toString()}`);
+      setPriceHistoryData(data);
+    } catch (err) {
+      applyAuthError(err);
+      setPriceHistoryData(null);
+    } finally {
+      setPriceHistoryLoading(false);
+    }
+  }, [applyAuthError]);
+
+  const openHistoryForSymbol = useCallback((symbol) => {
+    setSelectedSymbolForHistory(symbol);
+    loadPriceHistory(symbol);
+  }, [loadPriceHistory]);
 
   useEffect(() => {
     loadData();
@@ -1416,7 +1449,16 @@ function App() {
                 <tbody>
                   {dashboardRows.map((row) => (
                     <tr key={`price-${row.symbol}`}>
-                      <td>{row.symbol}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="symbol-history-btn"
+                          onClick={() => openHistoryForSymbol(row.symbol)}
+                          title="View price history"
+                        >
+                          {row.symbol}
+                        </button>
+                      </td>
                       <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
                       <td>{formatMoney(row.previous, row.currency)}</td>
                       <td className={`trend-cell trend-${row.trend}`}>
@@ -1429,6 +1471,60 @@ function App() {
               </table>
             </div>
           </section>
+          )}
+
+          {selectedSymbolForHistory && (
+            <div className="history-modal-overlay" role="dialog" aria-modal="true" aria-label="Price history">
+              <div className="history-modal">
+                <div className="history-modal-header">
+                  <h3>Price history – {selectedSymbolForHistory}</h3>
+                  <button
+                    type="button"
+                    className="history-modal-close"
+                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryData(null); }}
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="history-modal-body">
+                  {priceHistoryLoading && <p className="history-loading">Loading…</p>}
+                  {!priceHistoryLoading && priceHistoryData && (() => {
+                    const daily = (priceHistoryData.daily || []).map((d) => ({
+                      label: d.trade_date,
+                      ts: new Date(d.trade_date).getTime(),
+                      price: d.close_price,
+                    }));
+                    const intraday = (priceHistoryData.intraday_today || []).map((i) => ({
+                      label: i.observed_at.slice(0, 19).replace('T', ' '),
+                      ts: new Date(i.observed_at).getTime(),
+                      price: i.price,
+                    }));
+                    const combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
+                    if (combined.length === 0) {
+                      return <p className="history-empty">No history yet for this symbol.</p>;
+                    }
+                    return (
+                      <ResponsiveContainer width="100%" height={320}>
+                        <AreaChart data={combined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="var(--primary-blue)" stopOpacity={0.4} />
+                              <stop offset="100%" stopColor="var(--primary-blue)" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                          <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(v) => v.length > 10 ? v.slice(0, 10) : v} />
+                          <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} domain={['auto', 'auto']} tickFormatter={(v) => Number(v).toFixed(2)} />
+                          <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} labelStyle={{ color: '#e2e8f0' }} formatter={(value) => [formatMoney(value), 'Price']} />
+                          <Area type="monotone" dataKey="price" stroke="var(--secondary-blue)" strokeWidth={2} fill="url(#priceGradient)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
           )}
 
           {isAlertsPage && (

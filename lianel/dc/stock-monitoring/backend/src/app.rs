@@ -99,6 +99,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/internal/alerts/evaluate", post(evaluate_alerts_internal))
         .route("/internal/quotes/ingest", post(ingest_quotes_internal))
         .route("/internal/symbols/refresh", post(symbols_refresh_internal))
+        .route("/internal/price-history/roll-daily", post(price_history_roll_daily))
         .route("/internal/webhooks/finnhub", post(finnhub_webhook))
         .route("/api/v1/internal/webhooks/finnhub", post(finnhub_webhook));
 
@@ -118,6 +119,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/notifications/read-all", post(mark_all_notifications_read))
         .route("/api/v1/symbols/providers", get(symbols_providers))
         .route("/api/v1/symbols", get(symbols_list))
+        .route("/api/v1/price-history", get(price_history))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -619,6 +621,34 @@ struct SymbolsRefreshResult {
     synced: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct PriceHistoryQuery {
+    symbol: Option<String>,
+    days: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct PriceHistoryDailyPoint {
+    trade_date: String,
+    open_price: f64,
+    high_price: f64,
+    low_price: f64,
+    close_price: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct PriceHistoryIntradayPoint {
+    observed_at: String,
+    price: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct PriceHistoryResponse {
+    symbol: String,
+    daily: Vec<PriceHistoryDailyPoint>,
+    intraday_today: Vec<PriceHistoryIntradayPoint>,
+}
+
 #[derive(Debug, Serialize)]
 struct AlertEvaluationResult {
     ok: bool,
@@ -747,7 +777,7 @@ async fn quotes(
         match fetch_provider_quotes(&state.quote_service, &missing).await {
             Ok(items) => {
                 let mut write_cache = state.quote_service.cache.write().await;
-                for item in items {
+                for item in &items {
                     let resolved_currency = item
                         .currency
                         .clone()
@@ -767,6 +797,14 @@ async fn quotes(
                         stale: false,
                     });
                 }
+                let pool = state.pool.clone();
+                let intraday_items: Vec<(String, f64)> = items.iter().map(|i| (i.symbol.clone(), i.price)).collect();
+                let observed_at_secs = current_time_secs();
+                tokio::spawn(async move {
+                    if let Err(e) = persist_intraday_quotes(&pool, &intraday_items, observed_at_secs).await {
+                        tracing::warn!("persist intraday: {}", e);
+                    }
+                });
             }
             Err(err) => {
                 warnings.push(err.to_string());
@@ -1001,6 +1039,154 @@ async fn symbols_refresh_internal(
         ok: true,
         provider,
         synced,
+    }))
+}
+
+#[derive(Debug, Serialize)]
+struct PriceHistoryRollResult {
+    ok: bool,
+    daily_rows: u64,
+    intraday_deleted: u64,
+}
+
+async fn price_history_roll_daily(
+    State(state): State<AppState>,
+) -> Result<Json<PriceHistoryRollResult>, (StatusCode, Json<serde_json::Value>)> {
+    let pool = &state.pool;
+    let daily_rows = sqlx::query(
+        r#"
+        INSERT INTO stock_monitoring.price_history_daily (symbol, trade_date, open_price, high_price, low_price, close_price)
+        SELECT
+            symbol,
+            (observed_at AT TIME ZONE 'UTC')::date AS trade_date,
+            (array_agg(price ORDER BY observed_at))[1] AS open_price,
+            max(price) AS high_price,
+            min(price) AS low_price,
+            (array_agg(price ORDER BY observed_at DESC))[1] AS close_price
+        FROM stock_monitoring.price_history_intraday
+        WHERE (observed_at AT TIME ZONE 'UTC')::date < (now() AT TIME ZONE 'UTC')::date
+        GROUP BY symbol, (observed_at AT TIME ZONE 'UTC')::date
+        ON CONFLICT (symbol, trade_date) DO UPDATE SET
+            open_price = EXCLUDED.open_price,
+            high_price = EXCLUDED.high_price,
+            low_price = EXCLUDED.low_price,
+            close_price = EXCLUDED.close_price,
+            updated_at = CURRENT_TIMESTAMP
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("price_history roll: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Roll failed"})),
+        )
+    })?;
+    let daily_rows = daily_rows.rows_affected();
+
+    let intraday_deleted = sqlx::query(
+        r#"
+        DELETE FROM stock_monitoring.price_history_intraday
+        WHERE (observed_at AT TIME ZONE 'UTC')::date < (now() AT TIME ZONE 'UTC')::date
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("price_history intraday delete: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Delete failed"})),
+        )
+    })?;
+    let intraday_deleted = intraday_deleted.rows_affected();
+
+    Ok(Json(PriceHistoryRollResult {
+        ok: true,
+        daily_rows,
+        intraday_deleted,
+    }))
+}
+
+async fn price_history(
+    State(state): State<AppState>,
+    Query(query): Query<PriceHistoryQuery>,
+) -> Result<Json<PriceHistoryResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = query
+        .symbol
+        .as_deref()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL"})),
+        ))?;
+    let days = query.days.unwrap_or(90).min(365);
+
+    let daily_rows = sqlx::query_as::<_, (String, f64, f64, f64, f64)>(
+        r#"
+        SELECT trade_date::text, open_price, high_price, low_price, close_price
+        FROM stock_monitoring.price_history_daily
+        WHERE symbol = $1
+        ORDER BY trade_date DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(symbol.as_str())
+    .bind(days as i64)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("price_history daily: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to load history"})),
+        )
+    })?;
+
+    let intraday_rows = sqlx::query_as::<_, (String, f64)>(
+        r#"
+        SELECT observed_at::text, price
+        FROM stock_monitoring.price_history_intraday
+        WHERE symbol = $1
+          AND (observed_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
+        ORDER BY observed_at
+        "#,
+    )
+    .bind(symbol.as_str())
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("price_history intraday: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to load intraday"})),
+        )
+    })?;
+
+    let daily = daily_rows
+        .into_iter()
+        .map(|(d, o, h, l, c)| PriceHistoryDailyPoint {
+            trade_date: d,
+            open_price: o,
+            high_price: h,
+            low_price: l,
+            close_price: c,
+        })
+        .collect();
+    let intraday_today = intraday_rows
+        .into_iter()
+        .map(|(t, p)| PriceHistoryIntradayPoint {
+            observed_at: t,
+            price: p,
+        })
+        .collect();
+
+    Ok(Json(PriceHistoryResponse {
+        symbol: symbol.clone(),
+        daily,
+        intraday_today,
     }))
 }
 
@@ -1384,6 +1570,38 @@ fn current_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis() as u64
+}
+
+fn current_time_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs() as i64
+}
+
+async fn persist_intraday_quotes(
+    pool: &sqlx::PgPool,
+    items: &[(String, f64)],
+    observed_at_secs: i64,
+) -> anyhow::Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let observed_at = observed_at_secs as f64;
+    for (symbol, price) in items {
+        sqlx::query(
+            r#"
+            INSERT INTO stock_monitoring.price_history_intraday (symbol, observed_at, price)
+            VALUES ($1, to_timestamp($2), $3)
+            "#,
+        )
+        .bind(symbol)
+        .bind(observed_at)
+        .bind(price)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
