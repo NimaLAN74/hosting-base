@@ -74,4 +74,10 @@ If you only need “price at end of day”:
 2. **Daily OHLC** (`stock_monitoring.price_history_daily`): One row per symbol per day (open, high, low, close).
 3. **On quote fetch**: Backend appends to `price_history_intraday` (fire-and-forget) so every fetched price is recorded for the current day.
 4. **EOD roll** (DAG `stock_monitoring_price_history_roll`, 00:05 UTC): Aggregates intraday rows for past days into OHLC, inserts/updates `price_history_daily`, then deletes those rows from `price_history_intraday`. So only “today” remains in the cache.
-5. **Dashboard**: Clicking a symbol opens a gradient area chart over daily close + today’s intraday points (API `GET /api/v1/price-history?symbol=...&days=90`).
+5. **Dashboard**: Clicking a symbol opens a gradient area chart over daily close + today’s intraday points (API `GET /api/v1/price-history?symbol=...&days=90`). If the API returns no data, the UI shows the current dashboard price as a single “Now” point when available.
+
+### Troubleshooting: “No history yet” or empty chart
+
+- **Backend** returns empty when the DB queries fail (missing table or permission). The handler logs a warning and returns 200 with empty arrays so the UI does not 500.
+- **Check**: Migrations 025 and 026 must be applied on the same DB the app uses. The deploy workflow runs them; if the app user is not `airflow`, grant `SELECT` (and for intraday, `INSERT`) on `stock_monitoring.price_history_daily` and `stock_monitoring.price_history_intraday` to that user.
+- **Logs**: Look for `price_history daily (returning empty)` or `persist intraday:` in the stock-monitoring backend logs to see the underlying error (e.g. relation does not exist, permission denied).

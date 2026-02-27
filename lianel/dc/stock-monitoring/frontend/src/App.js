@@ -1500,7 +1500,14 @@ function App() {
                       ts: new Date(i.observed_at).getTime(),
                       price: i.price,
                     }));
-                    const combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
+                    let combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
+                    if (combined.length === 0) {
+                      const currentPrice = prices[selectedSymbolForHistory];
+                      if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
+                        const now = new Date();
+                        combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                      }
+                    }
                     if (combined.length === 0) {
                       return <p className="history-empty">No history yet for this symbol.</p>;
                     }
