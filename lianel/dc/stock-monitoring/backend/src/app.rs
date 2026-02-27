@@ -884,6 +884,9 @@ async fn symbols_list(
 /// Exchanges to sync from Finnhub (US, LON, AS=Amsterdam, DE=Xetra).
 const FINNHUB_SYNC_EXCHANGES: &[&str] = &["US", "LON", "AS", "DE"];
 
+/// Batch size for symbol upserts to avoid long-running single queries and timeouts.
+const SYMBOL_UPSERT_BATCH_SIZE: usize = 250;
+
 async fn symbols_refresh_internal(
     State(state): State<AppState>,
     Query(query): Query<SymbolsRefreshQuery>,
@@ -911,7 +914,16 @@ async fn symbols_refresh_internal(
         }
     };
 
-    let mut synced = 0usize;
+    #[derive(Clone)]
+    struct SymbolRow {
+        symbol: String,
+        display_symbol: String,
+        description: Option<String>,
+        type_: Option<String>,
+        exchange: String,
+    }
+
+    let mut all_rows: Vec<SymbolRow> = Vec::new();
     for exchange in FINNHUB_SYNC_EXCHANGES {
         let batch = fetch_finnhub_symbols_by_exchange(
             &state.quote_service.http,
@@ -926,29 +938,62 @@ async fn symbols_refresh_internal(
             }
             let display_symbol = dto.display_symbol.trim();
             let display_symbol = if display_symbol.is_empty() { symbol.clone() } else { display_symbol.to_string() };
-            let result = sqlx::query(
-                r#"
+            all_rows.push(SymbolRow {
+                symbol,
+                display_symbol,
+                description: dto.description,
+                type_: dto.type_,
+                exchange: exchange.to_string(),
+            });
+        }
+    }
+
+    let mut synced = 0usize;
+    for chunk in all_rows.chunks(SYMBOL_UPSERT_BATCH_SIZE) {
+        let n = chunk.len();
+        let mut query_str = r#"
                 INSERT INTO stock_monitoring.symbols (provider, symbol, display_symbol, description, "type", exchange, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+                VALUES "#
+            .to_string();
+        let mut first = true;
+        for i in 0..n {
+            if !first {
+                query_str.push_str(", ");
+            }
+            first = false;
+            let base = i * 6;
+            query_str.push_str(&format!(
+                "(${}, ${}, ${}, ${}, ${}, ${}, CURRENT_TIMESTAMP)",
+                base + 1,
+                base + 2,
+                base + 3,
+                base + 4,
+                base + 5,
+                base + 6
+            ));
+        }
+        query_str.push_str(
+            r#"
                 ON CONFLICT (provider, symbol) DO UPDATE SET
                     display_symbol = EXCLUDED.display_symbol,
                     description = EXCLUDED.description,
                     "type" = EXCLUDED."type",
                     exchange = EXCLUDED.exchange,
-                    updated_at = CURRENT_TIMESTAMP
-                "#,
-            )
-            .bind(provider.as_str())
-            .bind(&symbol)
-            .bind(display_symbol)
-            .bind(dto.description.as_deref())
-            .bind(dto.type_.as_deref())
-            .bind(exchange)
-            .execute(&state.pool)
-            .await;
-            if result.is_ok() {
-                synced += 1;
-            }
+                    updated_at = CURRENT_TIMESTAMP"#,
+        );
+
+        let mut q = sqlx::query(&query_str);
+        for row in chunk {
+            q = q
+                .bind(provider.as_str())
+                .bind(&row.symbol)
+                .bind(&row.display_symbol)
+                .bind(row.description.as_deref())
+                .bind(row.type_.as_deref())
+                .bind(&row.exchange);
+        }
+        if let Ok(result) = q.execute(&state.pool).await {
+            synced += result.rows_affected() as usize;
         }
     }
 
