@@ -1403,14 +1403,14 @@ function App() {
               </span>
             </div>
             <div className="history-table-wrapper">
-              <table className="history-table market-table">
+              <table className="history-table market-table" aria-label="Dashboard prices">
                 <thead>
                   <tr>
-                    <th>Symbol</th>
-                    <th>Latest</th>
-                    <th>Previous</th>
-                    <th>Trend</th>
-                    <th>As of</th>
+                    <th scope="col">Symbol</th>
+                    <th scope="col">Latest</th>
+                    <th scope="col">Previous</th>
+                    <th scope="col">Trend</th>
+                    <th scope="col">As of</th>
                   </tr>
                 </thead>
                 <tbody>
