@@ -1663,20 +1663,28 @@ async fn redis_fetch_intraday_today(
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "1970-01-01".to_string());
     let key = redis_intraday_key(symbol, &date_str);
-    let pairs: Vec<(String, f64)> = conn.zrange_withscores(&key, 0, -1).await?;
-    let out: Vec<(String, f64)> = pairs
-        .into_iter()
-        .filter_map(|(price_str, score)| {
-            price_str.parse::<f64>().ok().map(|price| {
-                let observed_at = chrono::Utc
-                    .timestamp_opt(score as i64, 0)
-                    .single()
-                    .map(|dt| format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ")))
-                    .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
-                (observed_at, price)
-            })
-        })
-        .collect();
+    let raw: Vec<String> = redis::cmd("ZRANGE")
+        .arg(&key)
+        .arg(0)
+        .arg(-1)
+        .arg("WITHSCORES")
+        .query_async(&mut conn)
+        .await?;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 1 < raw.len() {
+        let price_str = &raw[i];
+        let score_str = &raw[i + 1];
+        if let (Ok(price), Ok(score)) = (price_str.parse::<f64>(), score_str.parse::<f64>()) {
+            let observed_at = chrono::Utc
+                .timestamp_opt(score as i64, 0)
+                .single()
+                .map(|dt| format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ")))
+                .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
+            out.push((observed_at, price));
+        }
+        i += 2;
+    }
     Ok(out)
 }
 
