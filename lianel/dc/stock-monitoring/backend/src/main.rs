@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         cache: Arc::new(RwLock::new(HashMap::new())),
     };
 
+    #[cfg(feature = "redis")]
     let redis = if let Some(ref url) = config.redis_url {
         match redis::Client::open(url.as_str()) {
             Ok(client) => match client.get_multiplexed_tokio_connection().await {
@@ -61,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         validator: validator.clone(),
         quote_service,
         finnhub_webhook_secret: config.finnhub_webhook_secret.clone(),
+        #[cfg(feature = "redis")]
         redis,
     };
 

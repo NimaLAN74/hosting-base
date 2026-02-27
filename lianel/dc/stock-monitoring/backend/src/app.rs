@@ -40,8 +40,10 @@ pub struct CachedQuote {
     pub fetched_at_ms: u64,
 }
 
-/// Redis key for intraday points: stock:intraday:{symbol}:{yyyy-mm-dd}. Sorted set: score = observed_at_secs, member = price string.
+/// Redis key prefix for intraday points (when feature "redis" enabled): stock:intraday:{symbol}:{yyyy-mm-dd}.
+#[cfg(feature = "redis")]
 const REDIS_INTRADAY_KEY_PREFIX: &str = "stock:intraday";
+#[cfg(feature = "redis")]
 const REDIS_INTRADAY_TTL_SECS: usize = 25 * 3600; // 25 hours so key expires after EOD roll
 
 #[derive(Clone)]
@@ -51,7 +53,8 @@ pub struct AppState {
     pub quote_service: QuoteService,
     /// Verified against X-Finnhub-Secret on incoming webhook POSTs when set.
     pub finnhub_webhook_secret: Option<String>,
-    /// When set, intraday points are written to and read from Redis (shared across instances).
+    /// When feature "redis" is enabled and set, intraday points are written/read from Redis.
+    #[cfg(feature = "redis")]
     pub redis: Option<redis::aio::MultiplexedConnection>,
 }
 
@@ -814,6 +817,7 @@ async fn quotes(
                         }
                     }
                 });
+                #[cfg(feature = "redis")]
                 if let Some(redis) = state.redis.clone() {
                     let items = intraday_items;
                     let observed = observed_at_secs;
@@ -1202,6 +1206,7 @@ async fn price_history(
         })
         .collect();
 
+    #[cfg(feature = "redis")]
     if let Some(redis) = state.redis.clone() {
         match redis_fetch_intraday_today(redis, &symbol).await {
             Ok(redis_points) => {
@@ -1624,11 +1629,12 @@ fn current_time_secs() -> i64 {
         .as_secs() as i64
 }
 
+#[cfg(feature = "redis")]
 fn redis_intraday_key(symbol: &str, date_yyyy_mm_dd: &str) -> String {
     format!("{}:{}:{}", REDIS_INTRADAY_KEY_PREFIX, symbol, date_yyyy_mm_dd)
 }
 
-/// Push intraday points to Redis (sorted set: score = observed_at_secs, member = price string). Key TTL 25h.
+#[cfg(feature = "redis")]
 async fn redis_push_intraday(
     mut conn: redis::aio::MultiplexedConnection,
     items: &[(String, f64)],
@@ -1660,7 +1666,7 @@ async fn redis_push_intraday(
     Ok(())
 }
 
-/// Fetch today's intraday points for a symbol from Redis. Returns (observed_at_iso, price) sorted by time.
+#[cfg(feature = "redis")]
 async fn redis_fetch_intraday_today(
     mut conn: redis::aio::MultiplexedConnection,
     symbol: &str,

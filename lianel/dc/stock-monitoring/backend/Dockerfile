@@ -5,7 +5,7 @@ RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
 
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
-RUN cargo build --release
+RUN cargo build --release --features redis
 
 FROM alpine:latest
 WORKDIR /app
