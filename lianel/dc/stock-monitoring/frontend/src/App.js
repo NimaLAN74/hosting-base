@@ -1407,7 +1407,6 @@ function App() {
                 <thead>
                   <tr>
                     <th>Symbol</th>
-                    <th>Currency</th>
                     <th>Latest</th>
                     <th>Previous</th>
                     <th>Trend</th>
@@ -1418,7 +1417,6 @@ function App() {
                   {dashboardRows.map((row) => (
                     <tr key={`price-${row.symbol}`}>
                       <td>{row.symbol}</td>
-                      <td>{row.currency || 'n/a'}</td>
                       <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
                       <td>{formatMoney(row.previous, row.currency)}</td>
                       <td className={`trend-cell trend-${row.trend}`}>

@@ -1369,6 +1369,13 @@ pub(crate) fn infer_currency_from_symbol(symbol: &str) -> Option<String> {
     if upper.ends_with(".SW") {
         return Some("CHF".to_string());
     }
+    // US-style symbols (no exchange suffix): e.g. AAPL, MSFT from Finnhub/Nasdaq/NYSE -> USD
+    if !upper.contains('.') && upper.len() <= 5 && upper.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Some("USD".to_string());
+    }
+    if upper.ends_with(".US") || upper.ends_with(".U") {
+        return Some("USD".to_string());
+    }
     None
 }
 
@@ -2517,9 +2524,16 @@ mod tests {
     }
 
     #[test]
+    fn infer_currency_from_symbol_us_style_returns_usd() {
+        assert_eq!(infer_currency_from_symbol("AAPL"), Some("USD".to_string()));
+        assert_eq!(infer_currency_from_symbol("MSFT"), Some("USD".to_string()));
+        assert_eq!(infer_currency_from_symbol("MSFT.US"), Some("USD".to_string()));
+    }
+
+    #[test]
     fn infer_currency_from_symbol_unknown_returns_none() {
-        assert_eq!(infer_currency_from_symbol("AAPL"), None);
-        assert_eq!(infer_currency_from_symbol("MSFT.US"), None);
+        assert_eq!(infer_currency_from_symbol("ABCDEF"), None);
+        assert_eq!(infer_currency_from_symbol("X.XX"), None);
     }
 
     #[test]
