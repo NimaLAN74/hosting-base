@@ -854,6 +854,30 @@ async fn quotes(
     quotes.extend(cached);
     quotes.extend(fetched_quotes);
     quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
+    // Persist all returned quotes as intraday points so the price-history chart gets history (even when from cache).
+    let intraday_from_response: Vec<(String, f64)> = quotes.iter().map(|q| (q.symbol.clone(), q.price)).collect();
+    if !intraday_from_response.is_empty() {
+        let pool = state.pool.clone();
+        let observed_at_secs = current_time_secs();
+        let for_db = intraday_from_response.clone();
+        tokio::spawn(async move {
+            if let Err(e) = persist_intraday_quotes(&pool, &for_db, observed_at_secs).await {
+                tracing::warn!("quotes response persist intraday: {}", e);
+            }
+        });
+        #[cfg(feature = "redis")]
+        if let Some(redis) = state.redis.clone() {
+            let items = intraday_from_response;
+            let observed = observed_at_secs;
+            tokio::spawn(async move {
+                if let Err(e) = redis_push_intraday(redis, &items, observed).await {
+                    tracing::warn!("quotes response redis push intraday: {}", e);
+                }
+            });
+        }
+    }
+
     let unresolved: Vec<String> = symbols
         .iter()
         .filter(|symbol| !quotes.iter().any(|q| &q.symbol == *symbol))
@@ -1207,17 +1231,22 @@ async fn price_history(
         })
         .collect();
 
+    let intraday_from_db = intraday_today.len();
     #[cfg(feature = "redis")]
     if let Some(redis) = state.redis.clone() {
         match redis_fetch_intraday_today(redis, &symbol).await {
             Ok(redis_points) => {
+                let n_redis = redis_points.len();
                 for (observed_at, price) in redis_points {
                     intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
                 }
+                tracing::info!("price_history: symbol={} intraday_from_db={} intraday_from_redis={}", symbol, intraday_from_db, n_redis);
             }
             Err(e) => tracing::warn!("redis fetch intraday (skipping): {}", e),
         }
     }
+    #[cfg(not(feature = "redis"))]
+    let _ = intraday_from_db;
 
     // Merge latest quote from in-memory cache so the chart shows current price without waiting for DB persist
     let cache = state.quote_service.cache.read().await;
@@ -1233,6 +1262,7 @@ async fn price_history(
     drop(cache);
 
     intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
+    tracing::info!("price_history: symbol={} daily={} intraday_today={} (chart will show all)", symbol, daily.len(), intraday_today.len());
 
     Ok(Json(PriceHistoryResponse {
         symbol: symbol.clone(),
@@ -1650,6 +1680,7 @@ async fn redis_push_intraday(
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "1970-01-01".to_string());
     let score = observed_at_secs as f64;
+    let n = items.len();
     for (symbol, price) in items {
         let key = redis_intraday_key(symbol, &date_str);
         let _: () = redis::cmd("ZADD")
@@ -1664,6 +1695,7 @@ async fn redis_push_intraday(
             .query_async(&mut conn)
             .await?;
     }
+    tracing::info!("redis push intraday: {} points at {}", n, date_str);
     Ok(())
 }
 
@@ -2276,13 +2308,16 @@ async fn ingest_quotes_internal(
     Json(body): Json<IngestQuotesRequest>,
 ) -> Result<Json<IngestQuotesResult>, (StatusCode, Json<serde_json::Value>)> {
     let now_ms = current_time_ms();
+    let observed_at_secs = current_time_secs();
     let mut ingested = 0usize;
+    let mut intraday_items: Vec<(String, f64)> = Vec::new();
     let mut cache = state.quote_service.cache.write().await;
     for item in body.quotes {
         let symbol = item.symbol.trim().to_uppercase();
         if symbol.is_empty() || !item.price.is_finite() || item.price <= 0.0 {
             continue;
         }
+        intraday_items.push((symbol.clone(), item.price));
         cache.insert(
             symbol.clone(),
             CachedQuote {
@@ -2294,6 +2329,28 @@ async fn ingest_quotes_internal(
         );
         ingested += 1;
     }
+    drop(cache);
+
+    if !intraday_items.is_empty() {
+        let pool = state.pool.clone();
+        let for_db = intraday_items.clone();
+        tokio::spawn(async move {
+            if let Err(e) = persist_intraday_quotes(&pool, &for_db, observed_at_secs).await {
+                tracing::warn!("ingest persist intraday: {}", e);
+            }
+        });
+        #[cfg(feature = "redis")]
+        if let Some(redis) = state.redis.clone() {
+            let items = intraday_items;
+            let observed = observed_at_secs;
+            tokio::spawn(async move {
+                if let Err(e) = redis_push_intraday(redis, &items, observed).await {
+                    tracing::warn!("ingest redis push intraday: {}", e);
+                }
+            });
+        }
+    }
+
     Ok(Json(IngestQuotesResult { ok: true, ingested }))
 }
 

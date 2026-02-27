@@ -40,11 +40,11 @@ async fn main() -> anyhow::Result<()> {
         match redis::Client::open(url.as_str()) {
             Ok(client) => match client.get_multiplexed_tokio_connection().await {
                 Ok(conn) => {
-                    tracing::info!("Redis connected for intraday cache");
+                    tracing::info!("Redis connected for intraday cache (price-history chart will show all points from Redis)");
                     Some(conn)
                 }
                 Err(e) => {
-                    tracing::warn!("Redis connection failed: {}; intraday cache disabled", e);
+                    tracing::warn!("Redis connection failed: {}; intraday cache disabled (chart uses Postgres + in-memory only)", e);
                     None
                 }
             }
@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     } else {
+        tracing::info!("REDIS_URL not set; intraday chart uses Postgres + in-memory only");
         None
     };
 
