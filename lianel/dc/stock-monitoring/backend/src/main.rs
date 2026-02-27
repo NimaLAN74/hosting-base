@@ -37,10 +37,10 @@ async fn main() -> anyhow::Result<()> {
 
     let redis = if let Some(ref url) = config.redis_url {
         match redis::Client::open(url.as_str()) {
-            Ok(client) => match redis::aio::ConnectionManager::new(client).await {
-                Ok(mgr) => {
+            Ok(client) => match client.get_multiplexed_tokio_connection().await {
+                Ok(conn) => {
                     tracing::info!("Redis connected for intraday cache");
-                    Some(mgr)
+                    Some(conn)
                 }
                 Err(e) => {
                     tracing::warn!("Redis connection failed: {}; intraday cache disabled", e);

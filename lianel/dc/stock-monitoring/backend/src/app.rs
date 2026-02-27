@@ -17,7 +17,6 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
-use redis::AsyncCommands;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 
@@ -53,7 +52,7 @@ pub struct AppState {
     /// Verified against X-Finnhub-Secret on incoming webhook POSTs when set.
     pub finnhub_webhook_secret: Option<String>,
     /// When set, intraday points are written to and read from Redis (shared across instances).
-    pub redis: Option<redis::aio::ConnectionManager>,
+    pub redis: Option<redis::aio::MultiplexedConnection>,
 }
 
 #[derive(Clone)]
@@ -1631,7 +1630,7 @@ fn redis_intraday_key(symbol: &str, date_yyyy_mm_dd: &str) -> String {
 
 /// Push intraday points to Redis (sorted set: score = observed_at_secs, member = price string). Key TTL 25h.
 async fn redis_push_intraday(
-    mut conn: redis::aio::ConnectionManager,
+    mut conn: redis::aio::MultiplexedConnection,
     items: &[(String, f64)],
     observed_at_secs: i64,
 ) -> anyhow::Result<()> {
@@ -1643,17 +1642,27 @@ async fn redis_push_intraday(
         .single()
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "1970-01-01".to_string());
+    let score = observed_at_secs as f64;
     for (symbol, price) in items {
         let key = redis_intraday_key(symbol, &date_str);
-        let _: () = conn.zadd(&key, observed_at_secs as f64, price.to_string()).await?;
-        let _: () = conn.expire(&key, REDIS_INTRADAY_TTL_SECS).await?;
+        let _: () = redis::cmd("ZADD")
+            .arg(&key)
+            .arg(score)
+            .arg(price.to_string())
+            .query_async(&mut conn)
+            .await?;
+        let _: () = redis::cmd("EXPIRE")
+            .arg(&key)
+            .arg(REDIS_INTRADAY_TTL_SECS)
+            .query_async(&mut conn)
+            .await?;
     }
     Ok(())
 }
 
 /// Fetch today's intraday points for a symbol from Redis. Returns (observed_at_iso, price) sorted by time.
 async fn redis_fetch_intraday_today(
-    mut conn: redis::aio::ConnectionManager,
+    mut conn: redis::aio::MultiplexedConnection,
     symbol: &str,
 ) -> anyhow::Result<Vec<(String, f64)>> {
     let now_secs = current_time_secs();
