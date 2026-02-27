@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub finnhub_api_key: Option<String>,
     /// Optional Finnhub webhook secret. Sent as X-Finnhub-Secret on outbound requests; verified on webhook POST.
     pub finnhub_webhook_secret: Option<String>,
+    /// Optional Redis URL for intraday price cache (e.g. redis://:password@redis:6379/1). When set, intraday points are written/read from Redis.
+    pub redis_url: Option<String>,
 }
 
 impl AppConfig {
@@ -59,7 +61,7 @@ impl AppConfig {
             quote_provider: env::var("STOCK_MONITORING_QUOTE_PROVIDER")
                 .unwrap_or_else(|_| "yahoo".to_string()),
             quote_cache_ttl_seconds: env::var("STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")
-                .unwrap_or_else(|_| "30".to_string())
+                .unwrap_or_else(|_| "60".to_string())
                 .parse()
                 .context("Invalid STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")?,
             data_provider_api_key: env::var("STOCK_MONITORING_DATA_PROVIDER_API_KEY")
@@ -73,6 +75,10 @@ impl AppConfig {
                 .filter(|v| !v.is_empty()),
             finnhub_webhook_secret: env::var("STOCK_MONITORING_FINNHUB_WEBHOOK_SECRET")
                 .or_else(|_| env::var("FINNHUB_WEBHOOK_SECRET"))
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            redis_url: env::var("REDIS_URL")
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),

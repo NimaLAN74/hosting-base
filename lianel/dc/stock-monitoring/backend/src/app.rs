@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
+use redis::AsyncCommands;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 
@@ -40,6 +41,10 @@ pub struct CachedQuote {
     pub fetched_at_ms: u64,
 }
 
+/// Redis key for intraday points: stock:intraday:{symbol}:{yyyy-mm-dd}. Sorted set: score = observed_at_secs, member = price string.
+const REDIS_INTRADAY_KEY_PREFIX: &str = "stock:intraday";
+const REDIS_INTRADAY_TTL_SECS: usize = 25 * 3600; // 25 hours so key expires after EOD roll
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: sqlx::PgPool,
@@ -47,6 +52,8 @@ pub struct AppState {
     pub quote_service: QuoteService,
     /// Verified against X-Finnhub-Secret on incoming webhook POSTs when set.
     pub finnhub_webhook_secret: Option<String>,
+    /// When set, intraday points are written to and read from Redis (shared across instances).
+    pub redis: Option<redis::aio::ConnectionManager>,
 }
 
 #[derive(Clone)]
@@ -800,11 +807,23 @@ async fn quotes(
                 let pool = state.pool.clone();
                 let intraday_items: Vec<(String, f64)> = items.iter().map(|i| (i.symbol.clone(), i.price)).collect();
                 let observed_at_secs = current_time_secs();
-                tokio::spawn(async move {
-                    if let Err(e) = persist_intraday_quotes(&pool, &intraday_items, observed_at_secs).await {
-                        tracing::warn!("persist intraday: {}", e);
+                tokio::spawn({
+                    let items = intraday_items.clone();
+                    async move {
+                        if let Err(e) = persist_intraday_quotes(&pool, &items, observed_at_secs).await {
+                            tracing::warn!("persist intraday: {}", e);
+                        }
                     }
                 });
+                if let Some(redis) = state.redis.clone() {
+                    let items = intraday_items;
+                    let observed = observed_at_secs;
+                    tokio::spawn(async move {
+                        if let Err(e) = redis_push_intraday(redis, &items, observed).await {
+                            tracing::warn!("redis push intraday: {}", e);
+                        }
+                    });
+                }
             }
             Err(err) => {
                 warnings.push(err.to_string());
@@ -1175,13 +1194,40 @@ async fn price_history(
             close_price: c,
         })
         .collect();
-    let intraday_today = intraday_rows
+
+    let mut intraday_today: Vec<PriceHistoryIntradayPoint> = intraday_rows
         .into_iter()
         .map(|(t, p)| PriceHistoryIntradayPoint {
             observed_at: t,
             price: p,
         })
         .collect();
+
+    if let Some(redis) = state.redis.clone() {
+        match redis_fetch_intraday_today(redis, &symbol).await {
+            Ok(redis_points) => {
+                for (observed_at, price) in redis_points {
+                    intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
+                }
+            }
+            Err(e) => tracing::warn!("redis fetch intraday (skipping): {}", e),
+        }
+    }
+
+    // Merge latest quote from in-memory cache so the chart shows current price without waiting for DB persist
+    let cache = state.quote_service.cache.read().await;
+    if let Some(entry) = cache.get(&symbol) {
+        if let Some(dt) = chrono::Utc.timestamp_millis_opt(entry.fetched_at_ms as i64).single() {
+            let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
+            intraday_today.push(PriceHistoryIntradayPoint {
+                observed_at,
+                price: entry.price,
+            });
+        }
+    }
+    drop(cache);
+
+    intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
 
     Ok(Json(PriceHistoryResponse {
         symbol: symbol.clone(),
@@ -1577,6 +1623,61 @@ fn current_time_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_secs() as i64
+}
+
+fn redis_intraday_key(symbol: &str, date_yyyy_mm_dd: &str) -> String {
+    format!("{}:{}:{}", REDIS_INTRADAY_KEY_PREFIX, symbol, date_yyyy_mm_dd)
+}
+
+/// Push intraday points to Redis (sorted set: score = observed_at_secs, member = price string). Key TTL 25h.
+async fn redis_push_intraday(
+    mut conn: redis::aio::ConnectionManager,
+    items: &[(String, f64)],
+    observed_at_secs: i64,
+) -> anyhow::Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let date_str = chrono::Utc
+        .timestamp_opt(observed_at_secs, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "1970-01-01".to_string());
+    for (symbol, price) in items {
+        let key = redis_intraday_key(symbol, &date_str);
+        let _: () = conn.zadd(&key, observed_at_secs as f64, price.to_string()).await?;
+        let _: () = conn.expire(&key, REDIS_INTRADAY_TTL_SECS).await?;
+    }
+    Ok(())
+}
+
+/// Fetch today's intraday points for a symbol from Redis. Returns (observed_at_iso, price) sorted by time.
+async fn redis_fetch_intraday_today(
+    mut conn: redis::aio::ConnectionManager,
+    symbol: &str,
+) -> anyhow::Result<Vec<(String, f64)>> {
+    let now_secs = current_time_secs();
+    let date_str = chrono::Utc
+        .timestamp_opt(now_secs, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "1970-01-01".to_string());
+    let key = redis_intraday_key(symbol, &date_str);
+    let pairs: Vec<(String, f64)> = conn.zrange_withscores(&key, 0, -1).await?;
+    let out: Vec<(String, f64)> = pairs
+        .into_iter()
+        .filter_map(|(price_str, score)| {
+            price_str.parse::<f64>().ok().map(|price| {
+                let observed_at = chrono::Utc
+                    .timestamp_opt(score as i64, 0)
+                    .single()
+                    .map(|dt| format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ")))
+                    .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
+                (observed_at, price)
+            })
+        })
+        .collect();
+    Ok(out)
 }
 
 async fn persist_intraday_quotes(

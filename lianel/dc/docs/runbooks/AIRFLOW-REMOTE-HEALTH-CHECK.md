@@ -9,6 +9,14 @@
 
 **Symptom**: `GET https://airflow.lianel.se/auth/login/?next=...` returns **500 Internal Server Error**.
 
+**Try first (on server):** Restart the apiserver — often fixes stale DB connection or config load:
+```bash
+cd /root/lianel/dc   # or /root/hosting-base/lianel/dc
+docker compose -f docker-compose.airflow.yaml restart airflow-apiserver
+```
+Wait ~30s, then open https://airflow.lianel.se/auth/login/ again.  
+To diagnose and optionally restart in one go: `lianel/dc/scripts/maintenance/fix-airflow-login-500.sh` (run on the host; use `RESTART=1` to restart without prompt).
+
 **Steps (on server):**
 
 1. **Check apiserver logs** for the traceback:

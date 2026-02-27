@@ -75,6 +75,8 @@ If you only need “price at end of day”:
 3. **On quote fetch**: Backend appends to `price_history_intraday` (fire-and-forget) so every fetched price is recorded for the current day.
 4. **EOD roll** (DAG `stock_monitoring_price_history_roll`, 00:05 UTC): Aggregates intraday rows for past days into OHLC, inserts/updates `price_history_daily`, then deletes those rows from `price_history_intraday`. So only “today” remains in the cache.
 5. **Dashboard**: Clicking a symbol opens a gradient area chart over daily close + today’s intraday points (API `GET /api/v1/price-history?symbol=...&days=90`). If the API returns no data, the UI shows the current dashboard price as a single “Now” point when available.
+6. **In-memory cache merge**: The price-history API merges the **latest quote from the backend’s in-memory quote cache** into `intraday_today` (when present for that symbol).
+7. **Redis intraday cache** (optional): When `REDIS_URL` is set, each quote fetch also **writes** today’s (symbol, price, observed_at) to Redis sorted sets (`stock:intraday:{symbol}:{yyyy-mm-dd}`). The price-history API **reads** today’s points from Redis and merges them with Postgres + in-memory so the chart shows all recent changes across instances. Key TTL 25h. Use DB index 1 if sharing Redis with Airflow (Celery uses 0).
 
 ### Troubleshooting: “No history yet” or empty chart
 

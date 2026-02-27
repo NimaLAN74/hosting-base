@@ -91,6 +91,7 @@ async fn test_state() -> AppState {
         validator,
         quote_service,
         finnhub_webhook_secret: None,
+        redis: None,
     }
 }
 

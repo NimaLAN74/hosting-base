@@ -35,11 +35,33 @@ async fn main() -> anyhow::Result<()> {
         cache: Arc::new(RwLock::new(HashMap::new())),
     };
 
+    let redis = if let Some(ref url) = config.redis_url {
+        match redis::Client::open(url.as_str()) {
+            Ok(client) => match redis::aio::ConnectionManager::new(client).await {
+                Ok(mgr) => {
+                    tracing::info!("Redis connected for intraday cache");
+                    Some(mgr)
+                }
+                Err(e) => {
+                    tracing::warn!("Redis connection failed: {}; intraday cache disabled", e);
+                    None
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Redis URL invalid: {}; intraday cache disabled", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let state = AppState {
         pool: pool.clone(),
         validator: validator.clone(),
         quote_service,
         finnhub_webhook_secret: config.finnhub_webhook_secret.clone(),
+        redis,
     };
 
     let app = create_router(state);

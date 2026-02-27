@@ -526,7 +526,7 @@ function App() {
       fetchQuotes();
       loadAlerts().catch(() => {});
       loadNotifications().catch(() => {});
-    }, 30000);
+    }, 60000);
 
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
