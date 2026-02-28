@@ -1,5 +1,5 @@
 # Stock Monitoring UI – build and serve (no local run; pipeline only).
-FROM node:18-alpine AS build
+FROM node:20-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -10,7 +10,7 @@ COPY src ./src
 RUN npm run build
 
 # Production: serve static build with Node.
-FROM node:18-alpine
+FROM node:20-alpine
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --only=production --legacy-peer-deps || npm install --only=production --legacy-peer-deps
