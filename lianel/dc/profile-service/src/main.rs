@@ -424,6 +424,13 @@ async fn get_admin_token(config: &AppConfig) -> Result<String, anyhow::Error> {
         .ok_or_else(|| anyhow::anyhow!("No access token in response"))
 }
 
+/// Validates that the string is a safe Keycloak user ID (UUID format) to prevent request forgery when building admin API URLs.
+fn is_safe_keycloak_user_id(s: &str) -> bool {
+    s.len() == 36
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        && s.as_bytes().iter().filter(|&&b| b == b'-').count() == 4
+}
+
 // Get user ID from username or email
 async fn get_user_id(
     config: &AppConfig,
@@ -1209,6 +1216,12 @@ async fn get_user_by_id(
     Path(user_id): Path<String>,
     axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
+    if !is_safe_keycloak_user_id(&user_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Invalid user ID format".to_string(), details: None }),
+        ));
+    }
     let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
@@ -1542,6 +1555,12 @@ async fn update_user(
     axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<ErrorResponse>)> {
+    if !is_safe_keycloak_user_id(&user_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Invalid user ID format".to_string(), details: None }),
+        ));
+    }
     let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
@@ -1705,6 +1724,12 @@ async fn delete_user(
     Path(user_id): Path<String>,
     axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if !is_safe_keycloak_user_id(&user_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Invalid user ID format".to_string(), details: None }),
+        ));
+    }
     let (_username, _email, current_user_id) = extract_user_from_token_or_headers(&headers, Some(&*validator)).await
         .map_err(|e| (e, Json(ErrorResponse { error: "Unauthorized".to_string(), details: None })))?;
 
@@ -1818,6 +1843,12 @@ async fn admin_change_password(
     axum::extract::State((config, validator)): axum::extract::State<(AppConfig, Arc<KeycloakValidator>)>,
     Json(payload): Json<AdminChangePasswordRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if !is_safe_keycloak_user_id(&user_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Invalid user ID format".to_string(), details: None }),
+        ));
+    }
     if payload.new_password.len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1947,6 +1978,18 @@ async fn main() {
         backend_client_secret: env::var("BACKEND_CLIENT_SECRET")
             .expect("BACKEND_CLIENT_SECRET environment variable is required"),
     };
+
+    // Ensure Keycloak admin API is used over HTTPS in production (avoids cleartext transmission of user IDs/tokens)
+    if !config.keycloak_url.starts_with("https://")
+        && !config.keycloak_url.contains("127.0.0.1")
+        && !config.keycloak_url.contains("localhost")
+        && !config.keycloak_url.starts_with("http://keycloak")
+    {
+        tracing::warn!(
+            "KEYCLOAK_URL should use HTTPS in production to protect sensitive data: {}",
+            config.keycloak_url
+        );
+    }
 
     let port = env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())

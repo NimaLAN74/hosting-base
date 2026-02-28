@@ -30,4 +30,4 @@ aws-config = "1.4"
 aws-sdk-iam = "1.4"
 urlencoding = "2.1"
 # C3: Google Drive – JWT for service account
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
