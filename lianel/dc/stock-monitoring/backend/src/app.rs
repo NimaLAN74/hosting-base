@@ -1212,7 +1212,7 @@ async fn price_history(
         }
     };
 
-    let daily = daily_rows
+    let daily: Vec<PriceHistoryDailyPoint> = daily_rows
         .into_iter()
         .map(|(d, o, h, l, c)| PriceHistoryDailyPoint {
             trade_date: d,
