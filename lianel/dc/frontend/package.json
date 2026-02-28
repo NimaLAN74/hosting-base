@@ -40,6 +40,8 @@
     "lodash": ">=4.17.23",
     "@remix-run/router": ">=1.23.2",
     "webpack-dev-server": ">=5.2.1",
-    "postcss": ">=8.4.31"
+    "postcss": ">=8.4.31",
+    "jsonpath": ">=1.2.0",
+    "nth-check": ">=2.0.1"
   }
 }
