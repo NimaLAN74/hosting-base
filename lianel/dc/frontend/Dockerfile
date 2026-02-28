@@ -1,5 +1,5 @@
 # Build stage
-FROM node:18-alpine as build
+FROM node:20-alpine as build
 
 WORKDIR /app
 
@@ -44,7 +44,7 @@ ENV REACT_APP_OAUTH2_PROXY_CLIENT_ID=$REACT_APP_OAUTH2_PROXY_CLIENT_ID
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
