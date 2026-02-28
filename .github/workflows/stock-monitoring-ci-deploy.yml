@@ -186,13 +186,31 @@ jobs:
       - name: Setup SSH
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-          echo "✅ SSH ready"
+          ssh-keyscan -p "${REMOTE_PORT}" -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready (port ${REMOTE_PORT})"
+
+      - name: Test SSH connection (retry on timeout)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in 1 2 3 4 5; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+              echo "✅ SSH reachable (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ SSH attempt $i failed (timeout or refused); retrying in 30s..."
+            [ $i -lt 5 ] && sleep 30
+          done
+          echo "❌ SSH to remote failed after 5 attempts. Check REMOTE_HOST, REMOTE_PORT, SSH key, and that the host is reachable from GitHub Actions."
+          exit 1
 
       - name: Copy deploy script and compose to remote
         env:
@@ -200,12 +218,12 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P ${REMOTE_PORT} \
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -P ${REMOTE_PORT} \
             lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh \
             lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
             lianel/dc/dags/stock_monitoring_ingest_dag.py lianel/dc/dags/stock_monitoring_alerts_dag.py lianel/dc/dags/stock_monitoring_symbol_sync_dag.py lianel/dc/dags/stock_monitoring_price_history_roll_dag.py \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
             "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_ingest_dag.py /tmp/stock_monitoring_alerts_dag.py /tmp/stock_monitoring_symbol_sync_dag.py /tmp/stock_monitoring_price_history_roll_dag.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
           echo "✅ Script and compose synced"
 
@@ -240,7 +258,7 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -P ${REMOTE_PORT} \
             lianel/dc/database/migrations/022_stock_monitoring_schema.sql \
             lianel/dc/database/migrations/023_stock_monitoring_notifications.sql \
             lianel/dc/database/migrations/024_stock_monitoring_symbols.sql \
@@ -248,7 +266,7 @@ jobs:
             lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql \
             lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
             "set -euo pipefail; \
              DC_DIR=''; \
              for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/.env\" ] && DC_DIR=\"\$d\" && break; done; \
@@ -304,7 +322,7 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
             "set -e; DC_DIR=; for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -f \"\$d/docker-compose.stock-monitoring.yaml\" ] && DC_DIR=\"\$d\" && break; done; \
              [ -n \"\$DC_DIR\" ] || { echo 'No compose dir found'; exit 1; }; \
              cd \"\$DC_DIR\"; \
@@ -318,7 +336,7 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
             "set -e; for i in \$(seq 1 15); do docker exec lianel-stock-monitoring-service curl -fsS http://localhost:3003/health && exit 0; sleep 3; done; exit 1" || \
           { echo "❌ Health check failed after retries"; exit 1; }
