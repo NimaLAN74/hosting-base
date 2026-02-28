@@ -11,7 +11,8 @@ on:
         options:
           - "false"
           - "true"
-
+permissions:
+  contents: read
 jobs:
   cleanup:
     name: Cleanup remote Docker disk usage

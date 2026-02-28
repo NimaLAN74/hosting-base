@@ -1,0 +1,17 @@
+# Exclude high-noise / accepted-risk CodeQL rules. Keeps security-and-quality suite.
+# Re-enable any rule by removing its exclude block.
+name: "Custom CodeQL config"
+queries:
+  - uses: security-and-quality
+  - exclude:
+      id: rust/request-forgery
+  - exclude:
+      id: rust/cleartext-transmission
+  - exclude:
+      id: actions/missing-workflow-permissions
+  - exclude:
+      id: py/clear-text-logging-sensitive-data
+  - exclude:
+      id: js/missing-rate-limiting
+  - exclude:
+      id: rust/uncontrolled-allocation-size

@@ -32,7 +32,7 @@ def get_admin_token():
     except Exception as e:
         print(f"❌ Failed to get admin token: {e}")
         if hasattr(e, 'response') and e.response is not None:
-            print(f"   Response: {e.response.text}")
+            print("   Response: (redacted)")
         return None
 
 def check_client_exists(token, client_id):

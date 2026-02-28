@@ -7,7 +7,8 @@ on:
         description: 'User ID to verify'
         required: true
         default: '03aa0110-1f64-44dd-96f7-875713c1d15b'
-
+permissions:
+  contents: read
 jobs:
   verify-user:
     runs-on: ubuntu-latest

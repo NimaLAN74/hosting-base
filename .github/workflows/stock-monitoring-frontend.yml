@@ -13,7 +13,9 @@ on:
       - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/stock-monitoring-frontend.yml'
   workflow_dispatch:
-
+permissions:
+  contents: read
+  packages: write
 env:
   REGISTRY: ghcr.io
 

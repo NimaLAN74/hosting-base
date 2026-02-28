@@ -7,7 +7,8 @@ name: Run Comp-AI Demo and Report
 
 on:
   workflow_dispatch:
-
+permissions:
+  contents: read
 jobs:
   demo:
     name: Run demo and upload report

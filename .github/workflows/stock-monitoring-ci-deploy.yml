@@ -37,7 +37,9 @@ on:
       - 'lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
   workflow_dispatch:
-
+permissions:
+  contents: read
+  packages: write
 env:
   REGISTRY: ghcr.io
 

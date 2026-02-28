@@ -141,14 +141,7 @@ class ENTSOEClient:
                             error_code = code.text if code is not None else 'Unknown'
                             logger.error(f"ENTSO-E API error (code {error_code}): {error_msg}")
                             print(f"❌ ENTSO-E API error (code {error_code}): {error_msg}")
-                            # Log full response for debugging
-                            try:
-                                import xml.etree.ElementTree as ET
-                                response_str = ET.tostring(root, encoding='unicode')
-                                logger.debug(f"Full API error response: {response_str[:500]}")
-                                print(f"API error response preview: {response_str[:200]}...")
-                            except:
-                                pass
+                            logger.debug("API error response received (content not logged)")
                             return None
                 
                 # Check if response has TimeSeries data

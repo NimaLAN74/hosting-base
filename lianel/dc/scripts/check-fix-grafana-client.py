@@ -49,7 +49,7 @@ secret_resp = requests.get(secret_url, headers=headers, timeout=10, verify=False
 secret_data = secret_resp.json()
 secret_value = secret_data.get('value')
 
-print(f'\nClient Secret: {secret_value}')
+print('\nClient Secret: (redacted)')
 
 # Check attributes
 attrs = client_config.get('attributes', {})
