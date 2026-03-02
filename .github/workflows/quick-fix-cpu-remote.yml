@@ -1,0 +1,58 @@
+# Quick fix for 100% CPU: restart Keycloak and Airflow containers without running docker stats.
+# Use when "Analyze CPU on Remote" hangs or SSH drops. Same secrets as Fix Keycloak 502.
+name: Quick Fix CPU on Remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  quick-fix:
+    name: Restart keycloak and airflow containers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Restart keycloak and airflow containers
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Restarting keycloak and airflow containers on ${REMOTE_USER}@${REMOTE_HOST}..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            'set -e
+             echo "=== Load before ==="
+             uptime
+             echo "=== Restarting keycloak and containers matching airflow ==="
+             for c in keycloak $(docker ps --filter "name=airflow" --format "{{.Names}}" 2>/dev/null); do
+               [ -n "$c" ] && echo "Restarting $c..." && docker restart "$c" 2>/dev/null && echo "  OK" || echo "  skip"
+             done
+             echo "=== Waiting 20s ==="
+             sleep 20
+             echo "=== Load after ==="
+             uptime
+             echo "✅ Done"'
+          echo "✅ Quick fix completed"
