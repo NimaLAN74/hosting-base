@@ -224,6 +224,7 @@ function App() {
   const [priceHistoryData, setPriceHistoryData] = useState(null);
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
   const [priceHistoryViewMode, setPriceHistoryViewMode] = useState('7days'); // '7days' | 'today'
+  const [sessionChartPoints, setSessionChartPoints] = useState({}); // symbol -> [{ label, ts, price }], max 60 points per symbol (builds history from table updates)
   const [authState, setAuthState] = useState({
     checking: true,
     isAuthenticated: true,
@@ -508,7 +509,18 @@ function App() {
   const openHistoryForSymbol = useCallback((symbol) => {
     setSelectedSymbolForHistory(symbol);
     loadPriceHistory(symbol);
-  }, [loadPriceHistory]);
+    // Seed one session point from current price so chart shows something immediately
+    const price = symbol && prices[symbol];
+    if (symbol && typeof price === 'number' && Number.isFinite(price)) {
+      const now = Date.now();
+      const label = new Date(now).toISOString().slice(11, 16);
+      setSessionChartPoints((prev) => {
+        const list = prev[symbol] || [];
+        const next = [...list, { label, ts: now, price }].slice(-60);
+        return { ...prev, [symbol]: next };
+      });
+    }
+  }, [loadPriceHistory, prices]);
 
   useEffect(() => {
     loadData();
@@ -533,7 +545,7 @@ function App() {
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
-  // Chart refresh: poll price-history every 60s while modal is open (matches dashboard quote refresh; no need to refresh chart every few seconds).
+  // Chart refresh: poll price-history every 60s while modal is open (matches dashboard quote refresh).
   useEffect(() => {
     if (!selectedSymbolForHistory) return undefined;
     const intervalId = setInterval(() => {
@@ -541,6 +553,23 @@ function App() {
     }, 60000);
     return () => clearInterval(intervalId);
   }, [selectedSymbolForHistory, loadPriceHistory]);
+
+  // Build session history from table updates so the chart shows a series even when backend returns little/no history.
+  useEffect(() => {
+    const symbol = selectedSymbolForHistory;
+    const price = symbol && prices[symbol];
+    if (!symbol || typeof price !== 'number' || !Number.isFinite(price)) return;
+    const now = Date.now();
+    const label = new Date(now).toISOString().slice(11, 16);
+    setSessionChartPoints((prev) => {
+      const list = prev[symbol] || [];
+      const last = list[list.length - 1];
+      const minIntervalMs = 45000;
+      if (list.length > 0 && last.price === price && now - last.ts < minIntervalMs) return prev;
+      const next = [...list, { label, ts: now, price }].slice(-60);
+      return { ...prev, [symbol]: next };
+    });
+  }, [selectedSymbolForHistory, prices]);
   useEffect(() => {
     const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
     if (!symbols.includes(alertSymbol)) {
@@ -1511,10 +1540,14 @@ function App() {
                       ts: new Date(i.observed_at).getTime(),
                       price: i.price,
                     }));
+                    const sessionPoints = (sessionChartPoints[selectedSymbolForHistory] || []).map((p) => ({
+                      ...p,
+                      ts: p.ts,
+                    }));
                     const isTodayView = priceHistoryViewMode === 'today';
                     let combined;
                     if (isTodayView) {
-                      combined = intraday.length > 0 ? [...intraday].sort((a, b) => a.ts - b.ts) : [];
+                      combined = [...intraday, ...sessionPoints].sort((a, b) => a.ts - b.ts);
                       if (combined.length === 0) {
                         const currentPrice = prices[selectedSymbolForHistory];
                         if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
@@ -1523,7 +1556,7 @@ function App() {
                         }
                       }
                     } else {
-                      combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
+                      combined = [...daily, ...intraday, ...sessionPoints].sort((a, b) => a.ts - b.ts);
                       if (combined.length === 0) {
                         const currentPrice = prices[selectedSymbolForHistory];
                         if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
@@ -1532,12 +1565,12 @@ function App() {
                         }
                       }
                     }
-                    // Merge live price from table so chart updates when dashboard prices refresh (same as table).
+                    // Append live "Now" from table so chart shows latest price.
                     const currentPrice = prices[selectedSymbolForHistory];
-                    if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
+                    if (combined.length > 0 && typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
                       const now = Date.now();
                       const livePoint = { label: 'Now', ts: now, price: currentPrice };
-                      if (combined.length > 0 && combined[combined.length - 1].label === 'Now') {
+                      if (combined[combined.length - 1].label === 'Now') {
                         combined = [...combined.slice(0, -1), livePoint];
                       } else {
                         combined = [...combined, livePoint];
