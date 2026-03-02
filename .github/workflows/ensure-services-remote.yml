@@ -1,0 +1,54 @@
+# Ensure all services (stock, comp-ai, monitoring, airflow, infra) are up on the remote server.
+# Use when containers fail to start or after server/restart issues. Same secrets as Fix Keycloak 502.
+name: Ensure All Services on Remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ensure-services:
+    name: Ensure stock, comp-ai, monitoring, airflow up
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set in repository secrets"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key ready"
+
+      - name: Ensure all services on remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          echo "Running ensure-all-services on ${REMOTE_USER}@${REMOTE_HOST}..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=60 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=6 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "bash -s" < lianel/dc/scripts/maintenance/ensure-all-services-up-on-server.sh
+          echo "✅ Ensure services completed"

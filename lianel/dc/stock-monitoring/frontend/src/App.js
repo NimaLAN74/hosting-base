@@ -223,6 +223,7 @@ function App() {
   const [selectedSymbolForHistory, setSelectedSymbolForHistory] = useState(null);
   const [priceHistoryData, setPriceHistoryData] = useState(null);
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
+  const [priceHistoryViewMode, setPriceHistoryViewMode] = useState('7days'); // '7days' | 'today'
   const [authState, setAuthState] = useState({
     checking: true,
     isAuthenticated: true,
@@ -492,7 +493,8 @@ function App() {
     setPriceHistoryLoading(true);
     setPriceHistoryData(null);
     try {
-      const params = new URLSearchParams({ symbol, days: '90' });
+      // Request last 7 days of daily + today's intraday (backend returns both)
+      const params = new URLSearchParams({ symbol, days: '7' });
       const data = await apiJson(`/price-history?${params.toString()}`);
       setPriceHistoryData(data);
     } catch (err) {
@@ -1490,7 +1492,7 @@ function App() {
                   <button
                     type="button"
                     className="history-modal-close"
-                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryData(null); }}
+                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryData(null); setPriceHistoryViewMode('7days'); }}
                     aria-label="Close"
                   >
                     ×
@@ -1509,33 +1511,76 @@ function App() {
                       ts: new Date(i.observed_at).getTime(),
                       price: i.price,
                     }));
-                    let combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
-                    if (combined.length === 0) {
-                      const currentPrice = prices[selectedSymbolForHistory];
-                      if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
-                        const now = new Date();
-                        combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                    const isTodayView = priceHistoryViewMode === 'today';
+                    let combined;
+                    if (isTodayView) {
+                      combined = intraday.length > 0 ? [...intraday].sort((a, b) => a.ts - b.ts) : [];
+                      if (combined.length === 0) {
+                        const currentPrice = prices[selectedSymbolForHistory];
+                        if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
+                          const now = new Date();
+                          combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                        }
+                      }
+                    } else {
+                      combined = [...daily, ...intraday].sort((a, b) => a.ts - b.ts);
+                      if (combined.length === 0) {
+                        const currentPrice = prices[selectedSymbolForHistory];
+                        if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
+                          const now = new Date();
+                          combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                        }
                       }
                     }
-                    if (combined.length === 0) {
-                      return <p className="history-empty">No history yet for this symbol.</p>;
-                    }
+                    const formatXTick = (v) => {
+                      if (!v) return v;
+                      if (v === 'Now') return v;
+                      if (isTodayView && v.length >= 16) return v.slice(11, 16);
+                      if (v.length > 10) return v.slice(0, 10);
+                      return v;
+                    };
                     return (
-                      <ResponsiveContainer width="100%" height={320}>
-                        <AreaChart data={combined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="var(--primary-blue)" stopOpacity={0.4} />
-                              <stop offset="100%" stopColor="var(--primary-blue)" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(v) => v.length > 10 ? v.slice(0, 10) : v} />
-                          <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} domain={['auto', 'auto']} tickFormatter={(v) => Number(v).toFixed(2)} />
-                          <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} labelStyle={{ color: '#e2e8f0' }} formatter={(value) => [formatMoney(value), 'Price']} />
-                          <Area type="monotone" dataKey="price" stroke="var(--secondary-blue)" strokeWidth={2} fill="url(#priceGradient)" />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                      <>
+                        <div className="history-view-toggle" role="tablist" aria-label="Chart range">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={priceHistoryViewMode === '7days'}
+                            className={priceHistoryViewMode === '7days' ? 'history-view-btn active' : 'history-view-btn'}
+                            onClick={() => setPriceHistoryViewMode('7days')}
+                          >
+                            Last 7 days
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={priceHistoryViewMode === 'today'}
+                            className={priceHistoryViewMode === 'today' ? 'history-view-btn active' : 'history-view-btn'}
+                            onClick={() => setPriceHistoryViewMode('today')}
+                          >
+                            Current day
+                          </button>
+                        </div>
+                        {combined.length === 0 ? (
+                          <p className="history-empty">No history yet for this symbol.</p>
+                        ) : (
+                          <ResponsiveContainer width="100%" height={320}>
+                            <AreaChart data={combined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                              <defs>
+                                <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="var(--primary-blue)" stopOpacity={0.4} />
+                                  <stop offset="100%" stopColor="var(--primary-blue)" stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatXTick} />
+                              <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} domain={['auto', 'auto']} tickFormatter={(v) => Number(v).toFixed(2)} />
+                              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} labelStyle={{ color: '#e2e8f0' }} formatter={(value) => [formatMoney(value), 'Price']} />
+                              <Area type="monotone" dataKey="price" stroke="var(--secondary-blue)" strokeWidth={2} fill="url(#priceGradient)" />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        )}
+                      </>
                     );
                   })()}
                 </div>
