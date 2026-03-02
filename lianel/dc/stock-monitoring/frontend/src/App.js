@@ -1532,6 +1532,17 @@ function App() {
                         }
                       }
                     }
+                    // Merge live price from table so chart updates when dashboard prices refresh (same as table).
+                    const currentPrice = prices[selectedSymbolForHistory];
+                    if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
+                      const now = Date.now();
+                      const livePoint = { label: 'Now', ts: now, price: currentPrice };
+                      if (combined.length > 0 && combined[combined.length - 1].label === 'Now') {
+                        combined = [...combined.slice(0, -1), livePoint];
+                      } else {
+                        combined = [...combined, livePoint];
+                      }
+                    }
                     const formatXTick = (v) => {
                       if (!v) return v;
                       if (v === 'Now') return v;
