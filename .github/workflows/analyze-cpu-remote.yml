@@ -1,0 +1,59 @@
+# Analyze and optionally fix 100% CPU on the remote server.
+# Run from Actions when the server is constantly at 100% CPU.
+# Uses same secrets as Fix Keycloak 502: REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY.
+name: Analyze CPU on Remote
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_fix:
+        description: 'After analysis, restart top CPU containers (FIX=1)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  analyze-cpu:
+    name: Analyze and optionally fix CPU on remote
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set in repository secrets"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key ready"
+
+      - name: Run CPU analysis on remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          FIX: ${{ inputs.apply_fix && '1' || '0' }}
+        run: |
+          echo "Running CPU analysis (FIX=$FIX) on ${REMOTE_USER}@${REMOTE_HOST}..."
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=30 \
+            -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "FIX=$FIX bash -s" < lianel/dc/scripts/maintenance/analyze-cpu-on-server.sh
+          echo "✅ Analysis completed"
