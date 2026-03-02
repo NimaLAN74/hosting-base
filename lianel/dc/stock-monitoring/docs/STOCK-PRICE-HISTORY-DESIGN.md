@@ -85,6 +85,24 @@ If you only need “price at end of day”:
 - **Migrations 025, 026, 027** use `CREATE TABLE IF NOT EXISTS` and only add GRANTs. They **never** `DROP`, `TRUNCATE`, or `DELETE` from `price_history_daily` or `price_history_intraday`. Re-running them on each deploy is safe and does not remove existing rows.
 - **If daily data disappears after each deployment**, the Postgres instance likely has **no persistent volume** (data dir is lost when the Postgres container is recreated). Fix: use a **named volume** or **host-mounted path** for the Postgres data directory. The stock-monitoring deploy only restarts the backend container; it does not touch Postgres.
 
+### Test price-history API (run on remote server or from pipeline)
+
+One endpoint returns both **daily** (last N days) and **intraday_today**. Use `days=7` for the 7-day chart; the same response feeds “Current day” via `intraday_today`.
+
+**On the remote host** (e.g. after SSH):
+
+```bash
+curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history?symbol=SHL.L&days=7" | jq .
+```
+
+**Response shape** (for comparison with the chart):
+
+- `symbol`: string
+- `daily`: array of `{ trade_date, open_price, high_price, low_price, close_price }` — chart uses `trade_date` and `close_price`
+- `intraday_today`: array of `{ observed_at, price }` — chart uses `observed_at` and `price`
+
+Chart: **Last 7 days** = daily + intraday_today + session points + “Now”. **Current day** = intraday_today + session points + “Now”. The integration test `price_history_returns_daily_and_intraday_arrays` runs in the Stock Monitoring Backend CI pipeline (no local run).
+
 ### Troubleshooting: “No history yet” or empty chart
 
 - **Backend** returns empty when the DB queries fail (missing table or permission). The handler logs a warning and returns 200 with empty arrays so the UI does not 500.

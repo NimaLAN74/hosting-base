@@ -37,6 +37,16 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Parse API date string to timestamp (ms). Handles trade_date "YYYY-MM-DD" and observed_at ISO. */
+function parsePriceHistoryTs(str) {
+  if (str == null || typeof str !== 'string') return null;
+  const s = str.trim();
+  if (!s) return null;
+  const d = new Date(s);
+  const ts = d.getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
 function formatDateTimeSwedish(value) {
   const date = toDate(value);
   if (!date) {
@@ -1530,16 +1540,27 @@ function App() {
                 <div className="history-modal-body">
                   {priceHistoryLoading && <p className="history-loading">Loading…</p>}
                   {!priceHistoryLoading && priceHistoryData && (() => {
-                    const daily = (priceHistoryData.daily || []).map((d) => ({
-                      label: d.trade_date,
-                      ts: new Date(d.trade_date).getTime(),
-                      price: d.close_price,
-                    }));
-                    const intraday = (priceHistoryData.intraday_today || []).map((i) => ({
-                      label: i.observed_at.slice(0, 19).replace('T', ' '),
-                      ts: new Date(i.observed_at).getTime(),
-                      price: i.price,
-                    }));
+                    const rawDaily = priceHistoryData.daily || [];
+                    const daily = rawDaily
+                      .map((d) => {
+                        const tradeDate = d.trade_date ?? d.tradeDate;
+                        const closePrice = typeof (d.close_price ?? d.closePrice) === 'number' ? (d.close_price ?? d.closePrice) : null;
+                        const ts = parsePriceHistoryTs(tradeDate);
+                        if (ts == null || closePrice == null) return null;
+                        return { label: String(tradeDate).slice(0, 10), ts, price: closePrice };
+                      })
+                      .filter(Boolean);
+                    const rawIntraday = priceHistoryData.intraday_today || priceHistoryData.intradayToday || [];
+                    const intraday = rawIntraday
+                      .map((i) => {
+                        const observedAt = i.observed_at ?? i.observedAt;
+                        const priceVal = typeof (i.price) === 'number' ? i.price : null;
+                        const ts = parsePriceHistoryTs(observedAt);
+                        if (ts == null || priceVal == null) return null;
+                        const label = String(observedAt).slice(0, 19).replace('T', ' ');
+                        return { label, ts, price: priceVal };
+                      })
+                      .filter(Boolean);
                     const sessionPoints = (sessionChartPoints[selectedSymbolForHistory] || []).map((p) => ({
                       ...p,
                       ts: p.ts,

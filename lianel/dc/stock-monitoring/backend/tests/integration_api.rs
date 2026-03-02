@@ -348,3 +348,30 @@ async fn symbols_list_returns_200_from_db() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json.is_array(), "response must be array of symbols");
 }
+
+/// Price-history API: one endpoint returns both daily (last N days) and intraday_today.
+/// GET /api/v1/price-history?symbol=SYMBOL&days=7
+#[tokio::test]
+async fn price_history_returns_daily_and_intraday_arrays() {
+    let state = test_state().await;
+    let app = create_router(state);
+
+    let req = request_with_test_user("GET", "/api/v1/price-history?symbol=SHL.L&days=7", None);
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "price-history must return 200");
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json.get("symbol").and_then(|v| v.as_str()), Some("SHL.L"));
+    let daily = json.get("daily").and_then(|v| v.as_array()).expect("response must have 'daily' array");
+    let intraday = json.get("intraday_today").and_then(|v| v.as_array()).expect("response must have 'intraday_today' array");
+
+    for (i, point) in daily.iter().enumerate() {
+        assert!(point.get("trade_date").and_then(|v| v.as_str()).is_some(), "daily[{}] must have trade_date string", i);
+        assert!(point.get("close_price").and_then(|v| v.as_f64()).is_some(), "daily[{}] must have close_price number", i);
+    }
+    for (i, point) in intraday.iter().enumerate() {
+        assert!(point.get("observed_at").and_then(|v| v.as_str()).is_some(), "intraday_today[{}] must have observed_at string", i);
+        assert!(point.get("price").and_then(|v| v.as_f64()).is_some(), "intraday_today[{}] must have price number", i);
+    }
+}
