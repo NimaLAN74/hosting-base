@@ -254,6 +254,7 @@ jobs:
             "${REMOTE_ENV} /tmp/deploy-stock-monitoring-backend.sh '${IMAGE_LC}'"
           echo "✅ Deployed"
 
+      # Migrations 022–027 are idempotent (CREATE TABLE IF NOT EXISTS, GRANTs). They never DROP/TRUNCATE price_history_* so existing daily/intraday data is preserved.
       - name: Run migrations 022/023 on production DB
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}

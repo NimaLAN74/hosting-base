@@ -77,7 +77,13 @@ If you only need “price at end of day”:
 5. **Dashboard**: Clicking a symbol opens a gradient area chart over daily close + today’s intraday points (API `GET /api/v1/price-history?symbol=...&days=90`). If the API returns no data, the UI shows the current dashboard price as a single “Now” point when available.
 6. **In-memory cache merge**: The price-history API merges the **latest quote from the backend’s in-memory quote cache** into `intraday_today` (when present for that symbol).
 7. **Redis intraday cache** (optional): When `REDIS_URL` is set, **each price change** (from `/api/v1/quotes`, `/internal/quotes/ingest`, or provider fetch) is **written** to Redis sorted sets (`stock:intraday:{symbol}:{yyyy-mm-dd}`). The price-history API **reads** today’s points from Redis and merges them with Postgres + in-memory so the chart has the full real-time series. Key TTL 25h. Use DB index 1 if sharing Redis with Airflow (Celery uses 0).
-8. **Real-time chart**: With the history modal open, the frontend polls `GET /api/v1/price-history?symbol=...` every 5 seconds so new points (from Redis/Postgres) appear in the chart without closing the modal.
+8. **Real-time chart**: With the history modal open, the frontend polls `GET /api/v1/price-history?symbol=...` every 60s so new points (from Redis/Postgres) appear without refreshing too often.
+
+### Deployment and data persistence
+
+- **We do not reset or clear price history on deploy.** The in-memory quote cache is empty after a container restart; that only affects live quotes, not daily/intraday data in Postgres.
+- **Migrations 025, 026, 027** use `CREATE TABLE IF NOT EXISTS` and only add GRANTs. They **never** `DROP`, `TRUNCATE`, or `DELETE` from `price_history_daily` or `price_history_intraday`. Re-running them on each deploy is safe and does not remove existing rows.
+- **If daily data disappears after each deployment**, the Postgres instance likely has **no persistent volume** (data dir is lost when the Postgres container is recreated). Fix: use a **named volume** or **host-mounted path** for the Postgres data directory. The stock-monitoring deploy only restarts the backend container; it does not touch Postgres.
 
 ### Troubleshooting: “No history yet” or empty chart
 
