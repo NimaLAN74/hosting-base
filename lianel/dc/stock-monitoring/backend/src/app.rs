@@ -759,6 +759,7 @@ async fn quotes(
     let symbols = parse_symbols(query.symbols.as_deref())?;
     let now_ms = current_time_ms();
 
+    // Cache TTL should be shorter than frontend refresh (e.g. 30s) so each dashboard poll refetches all symbols.
     let mut cached = Vec::new();
     let mut missing = Vec::new();
     {

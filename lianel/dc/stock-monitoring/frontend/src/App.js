@@ -528,17 +528,17 @@ function App() {
       fetchQuotes();
       loadAlerts().catch(() => {});
       loadNotifications().catch(() => {});
-    }, 60000);
+    }, 60000); // Every 60s; backend cache TTL is 30s so all symbols are refetched each time
 
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
-  // Real-time chart: poll price-history every 5s while the history modal is open so Redis/DB intraday updates show immediately.
+  // Chart refresh: poll price-history every 60s while modal is open (matches dashboard quote refresh; no need to refresh chart every few seconds).
   useEffect(() => {
     if (!selectedSymbolForHistory) return undefined;
     const intervalId = setInterval(() => {
       loadPriceHistory(selectedSymbolForHistory);
-    }, 5000);
+    }, 60000);
     return () => clearInterval(intervalId);
   }, [selectedSymbolForHistory, loadPriceHistory]);
   useEffect(() => {
@@ -1116,7 +1116,7 @@ function App() {
                 checked={autoRefresh}
                 onChange={(event) => setAutoRefresh(event.target.checked)}
               />
-              Auto-refresh (30s)
+              Auto-refresh (60s)
             </label>
             {isOpsPage && lastUpdated && (
               <span className="last-updated">Last updated: {lastUpdated}</span>
