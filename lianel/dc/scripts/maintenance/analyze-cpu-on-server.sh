@@ -13,9 +13,9 @@ echo ""
 echo "=== Top 15 processes by CPU (%) ==="
 ps aux --sort=-%cpu 2>/dev/null | head -16 || ps -eo pid,pcpu,pmem,comm --sort=-pcpu 2>/dev/null | head -16
 echo ""
-echo "=== Docker container CPU/memory (--no-stream) ==="
+echo "=== Docker container CPU/memory (--no-stream, timeout 25s) ==="
 if command -v docker >/dev/null 2>&1; then
-  docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null || true
+  timeout 25 docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null || echo "(docker stats timed out or failed)"
 else
   echo "Docker not available"
 fi
@@ -73,7 +73,7 @@ fi
 if [ "$FIX" = "1" ] && command -v docker >/dev/null 2>&1; then
   echo ""
   echo "=== Restarting top 3 containers by CPU usage ==="
-  docker stats --no-stream --format "{{.Name}}\t{{.CPUPerc}}" 2>/dev/null | while read -r name cpu; do
+  timeout 20 docker stats --no-stream --format "{{.Name}}\t{{.CPUPerc}}" 2>/dev/null | while read -r name cpu; do
     cpu_num=$(echo "$cpu" | tr -d '%' | cut -d. -f1)
     if [ -n "$cpu_num" ] && [ "$cpu_num" -gt 30 ] 2>/dev/null; then
       echo "Restarting $name (was $cpu)..."
@@ -85,7 +85,7 @@ if [ "$FIX" = "1" ] && command -v docker >/dev/null 2>&1; then
   sleep 15
   echo "=== Load after fix ==="
   uptime
-  docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || true
+  timeout 20 docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || true
 fi
 
 echo ""
