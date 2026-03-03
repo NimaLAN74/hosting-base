@@ -1619,7 +1619,12 @@ async fn fetch_alpaca_quotes(
     if symbols.is_empty() {
         return Vec::new();
     }
-    let symbols_param = symbols.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(",");
+    let symbols_param: String = symbols
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
     if symbols_param.is_empty() {
         return Vec::new();
     }
