@@ -1537,9 +1537,15 @@ async fn fetch_provider_quotes(
         .cloned()
         .collect();
     if !unresolved_after_alpaca.is_empty() {
-        match fetch_yahoo_quotes(http, &unresolved_after_alpaca).await {
+        let yahoo_result = fetch_yahoo_quotes(http, &unresolved_after_alpaca).await;
+        match yahoo_result {
             Ok(mut quotes) => all.append(&mut quotes),
-            Err(err) => tracing::warn!("Yahoo quote fetch failed: {}", err),
+            Err(err) => {
+                tracing::warn!("Yahoo quote fetch failed (retrying once): {}", err);
+                if let Ok(mut quotes) = fetch_yahoo_quotes(http, &unresolved_after_alpaca).await {
+                    all.append(&mut quotes);
+                }
+            }
         }
     }
 

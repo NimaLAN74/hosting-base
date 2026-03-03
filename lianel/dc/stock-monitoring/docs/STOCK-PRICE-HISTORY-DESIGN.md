@@ -98,14 +98,14 @@ Example: call `GET /api/v1/quotes?symbols=SHL.L,ASML.AS,AAPL` and inspect each o
 
 ### Using all quote providers (not just Yahoo)
 
-The backend tries **Finnhub first** (when key is set), then **Yahoo** for unresolved symbols, then **Stooq**, then **Alpha Vantage**. If you see only `"source": "yahoo"`, Finnhub (and optionally Alpha Vantage) are not configured.
+The backend tries **Finnhub first** (when key is set), then **Alpaca** for unresolved (US stocks), then **Yahoo**, then **Stooq**, then **Alpha Vantage**. If you see `"source": "unavailable"` for US symbols (AAPL, MSFT, etc.) or only Stooq for European symbols, the provider chain failed for those symbols. Common causes: (1) **Deploy never ran** (e.g. CD failed with SSH timeout)—Finnhub/Alpaca env vars never reached the server; (2) **Yahoo fetch failed**—check logs for `Yahoo quote fetch failed`.
 
 1. **GitHub secrets**: In the repo → Settings → Secrets and variables → Actions, add:
-   - `FINNHUB_API_KEY` (or `STOCK_MONITORING_FINNHUB_API_KEY`) — from [finnhub.io](https://finnhub.io)
-   - Optionally `STOCK_MONITORING_DATA_PROVIDER_API_KEY` (Alpha Vantage)
-   - Optionally `FINNHUB_WEBHOOK_SECRET` if using webhooks
+   - `STOCK_MONITORING_FINNHUB_API_KEY` (or `FINNHUB_API_KEY`) — from [finnhub.io](https://finnhub.io)
+   - `STOCK_MONITORING_ALPACA_API_KEY` and `STOCK_MONITORING_ALPACA_API_SECRET` — from [Alpaca](https://alpaca.markets)
+   - Optionally `STOCK_MONITORING_DATA_PROVIDER_API_KEY` (Alpha Vantage), `FINNHUB_WEBHOOK_SECRET`
 2. **Redeploy**: Run the “Stock Monitoring Backend – CI and Deploy” workflow; it passes these into the container.
-3. **Verify**: Backend logs at startup show `Quote providers: Finnhub=yes, Yahoo=yes, Stooq=yes, Alpha Vantage=yes/no`. If Finnhub=no, the key did not reach the container (check deploy script and `.env` on the server).
+3. **Verify**: Backend logs at startup show `Quote providers: Finnhub=yes/no, Alpaca=yes/no, Yahoo=yes, …`. If Finnhub=no or Alpaca=no, keys did not reach the container.
 
 ## Two endpoints: 7-day history vs minute-by-minute today
 
@@ -137,6 +137,7 @@ Integration tests: `price_history_returns_daily_and_intraday_arrays` (combined),
 
 ### Troubleshooting: “No history yet” or empty chart
 
+- **Empty after refresh or new login**: Session chart points are cleared on refresh/login. Backend history is only from DB and Redis. If daily/intraday are empty, ensure the quotes API is called (dashboard or ingest DAG) so intraday is persisted, and the roll-daily DAG has run; if Redis/DB was restarted, history refills as new data is written.
 - **Backend** returns empty when the DB queries fail (missing table or permission). The handler logs a warning and returns 200 with empty arrays so the UI does not 500.
 - **Chart shows only one point**: The API merges Postgres intraday + Redis intraday + in-memory latest. Check backend logs: at startup look for `Redis connected for intraday cache` (if you see `REDIS_URL not set` or `Redis connection failed`, Redis is off). On each price-history request you'll see `price_history: symbol=X daily=N intraday_today=M` and when Redis is used `intraday_from_db=N intraday_from_redis=R`. If `intraday_from_redis=0`, no points have been written to Redis yet—trigger a quotes load (open dashboard or run ingest DAG) then open the chart again. Writes log `redis push intraday: K points at <date>`.
 - **Check**: Migrations 025 and 026 must be applied on the same DB the app uses. The deploy workflow runs them; if the app user is not `airflow`, grant `SELECT` (and for intraday, `INSERT`) on `stock_monitoring.price_history_daily` and `stock_monitoring.price_history_intraday` to that user.
