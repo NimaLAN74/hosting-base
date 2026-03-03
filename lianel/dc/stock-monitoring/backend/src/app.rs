@@ -593,7 +593,7 @@ struct QuoteDto {
     currency: Option<String>,
     fetched_at_ms: u64,
     stale: bool,
-    /// Provider that returned this quote: "finnhub", "yahoo", "stooq", "alpha_vantage".
+    /// Provider that returned this quote: "finnhub", "alpaca", "yahoo", "stooq", "alpha_vantage", or "unavailable" (placeholder when no provider had data).
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<String>,
 }
@@ -922,11 +922,23 @@ async fn quotes(
 
     let unresolved: Vec<String> = symbols
         .iter()
-        .filter(|symbol| !quotes.iter().any(|q| &q.symbol == *symbol))
+        .filter(|symbol| !quotes.iter().any(|q| q.symbol.eq_ignore_ascii_case(*symbol)))
         .cloned()
         .collect();
     if !unresolved.is_empty() {
         warnings.push(format!("No provider quote for: {}", unresolved.join(",")));
+        // Return a placeholder for each missing symbol so the frontend has an entry (shows as N/A / —).
+        for symbol in &unresolved {
+            quotes.push(QuoteDto {
+                symbol: symbol.clone(),
+                price: 0.0,
+                currency: None,
+                fetched_at_ms: now_ms,
+                stale: true,
+                source: Some("unavailable".to_string()),
+            });
+        }
+        quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
     }
 
     Ok(Json(QuotesResponse {
@@ -1812,17 +1824,22 @@ async fn fetch_yahoo_quotes(
 
     let mut out = Vec::new();
     for item in resp.quote_response.result {
-        if let Some(price) = item.regular_market_price {
-            out.push(CachedQuote {
-                symbol: item.symbol.to_uppercase(),
-                price,
-                currency: item
-                    .currency
-                    .or_else(|| infer_currency_from_symbol(&item.symbol)),
-                fetched_at_ms: current_time_ms(),
-                source: Some("yahoo".to_string()),
-            });
-        }
+        let Some(price) = item.regular_market_price else { continue };
+        // Use requested symbol when it matches (so watchlist symbol and response align); otherwise use Yahoo's symbol.
+        let symbol = symbols
+            .iter()
+            .find(|s| s.eq_ignore_ascii_case(&item.symbol))
+            .cloned()
+            .unwrap_or_else(|| item.symbol.to_uppercase());
+        out.push(CachedQuote {
+            symbol: symbol.clone(),
+            price,
+            currency: item
+                .currency
+                .or_else(|| infer_currency_from_symbol(&symbol)),
+            fetched_at_ms: current_time_ms(),
+            source: Some("yahoo".to_string()),
+        });
     }
     Ok(out)
 }

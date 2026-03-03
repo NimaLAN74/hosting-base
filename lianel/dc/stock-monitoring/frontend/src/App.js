@@ -411,7 +411,7 @@ function App() {
       const map = {};
       const currencyMap = {};
       for (const item of payload.quotes || []) {
-        if (item?.symbol && typeof item?.price === 'number') {
+        if (item?.symbol && typeof item?.price === 'number' && item?.source !== 'unavailable') {
           const symbol = String(item.symbol).toUpperCase();
           map[symbol] = item.price;
           const apiCurrency = String(item?.currency || '').toUpperCase();
