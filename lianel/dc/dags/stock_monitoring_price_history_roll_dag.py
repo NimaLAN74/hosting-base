@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from urllib import request
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 
 def roll_daily_price_history(**context):

@@ -10,7 +10,7 @@ import os
 from urllib import request
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
 

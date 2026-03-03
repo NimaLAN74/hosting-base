@@ -16,7 +16,7 @@ from urllib import parse, request
 
 from airflow import DAG
 from airflow.models import Variable
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 # Default EU symbols when Variable is not set
 DEFAULT_INGEST_SYMBOLS = "ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L"
@@ -25,7 +25,7 @@ DEFAULT_INGEST_SYMBOLS = "ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L"
 def ingest_eu_quotes(**context):
     """Warm backend quote cache by calling GET /api/v1/quotes?symbols=..."""
     base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-monitoring-service:3003")
-    symbols_str = Variable.get("stock_monitoring_ingest_symbols", default=DEFAULT_INGEST_SYMBOLS)
+    symbols_str = Variable.get("stock_monitoring_ingest_symbols", default_var=DEFAULT_INGEST_SYMBOLS)
     symbols_str = (symbols_str or "").strip() or DEFAULT_INGEST_SYMBOLS
     symbols_param = parse.quote(symbols_str)
     url = f"{base_url.rstrip('/')}/api/v1/quotes?symbols={symbols_param}"

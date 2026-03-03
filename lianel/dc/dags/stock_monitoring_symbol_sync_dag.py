@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from urllib import parse, request
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 
 def sync_symbols(**context):
