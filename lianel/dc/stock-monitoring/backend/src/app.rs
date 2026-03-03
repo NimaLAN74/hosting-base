@@ -1759,10 +1759,10 @@ async fn fetch_quotes_by_provider(
             }
             _ => None,
         };
-        let quote = match quote_opt {
+        let quote: Option<CachedQuote> = match quote_opt {
             Some(mut q) => {
                 q.source = Some(provider.clone());
-                q
+                Some(q)
             }
             None => {
                 // Fallback: try any provider (waterfall) so user gets data from Finnhub/Alpaca/Yahoo/Stooq/Alpha Vantage
