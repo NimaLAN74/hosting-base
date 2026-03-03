@@ -29,6 +29,8 @@ async fn main() -> anyhow::Result<()> {
         data_provider_api_key: config.data_provider_api_key.clone(),
         finnhub_api_key: config.finnhub_api_key.clone(),
         finnhub_webhook_secret: config.finnhub_webhook_secret.clone(),
+        alpaca_api_key_id: config.alpaca_api_key_id.clone(),
+        alpaca_api_secret_key: config.alpaca_api_secret_key.clone(),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()?,
@@ -70,6 +72,10 @@ async fn main() -> anyhow::Result<()> {
     let app = create_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    tracing::info!("Quote providers: Finnhub={}, Alpaca={}, Yahoo=yes, Stooq=yes, Alpha Vantage={}",
+        if config.finnhub_api_key.is_some() { "yes" } else { "no (set FINNHUB_API_KEY for multi-provider)" },
+        if config.alpaca_api_key_id.is_some() && config.alpaca_api_secret_key.is_some() { "yes" } else { "no (set ALPACA_API_KEY_ID + ALPACA_API_SECRET_KEY)" },
+        if config.data_provider_api_key.is_some() { "yes" } else { "no" });
     tracing::info!("listening on {}", addr);
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
     Ok(())

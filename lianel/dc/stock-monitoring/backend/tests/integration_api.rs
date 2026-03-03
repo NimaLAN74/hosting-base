@@ -80,6 +80,8 @@ async fn test_state() -> AppState {
         data_provider_api_key: None,
         finnhub_api_key: None,
         finnhub_webhook_secret: None,
+        alpaca_api_key_id: None,
+        alpaca_api_secret_key: None,
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()

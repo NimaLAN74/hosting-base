@@ -96,6 +96,17 @@ The `/api/v1/quotes` response includes a **per-quote `source`** field (when pres
 
 Example: call `GET /api/v1/quotes?symbols=SHL.L,ASML.AS,AAPL` and inspect each object in `quotes` for `"source"` to see whether prices come from both Finnhub and Yahoo or only Yahoo.
 
+### Using all quote providers (not just Yahoo)
+
+The backend tries **Finnhub first** (when key is set), then **Yahoo** for unresolved symbols, then **Stooq**, then **Alpha Vantage**. If you see only `"source": "yahoo"`, Finnhub (and optionally Alpha Vantage) are not configured.
+
+1. **GitHub secrets**: In the repo → Settings → Secrets and variables → Actions, add:
+   - `FINNHUB_API_KEY` (or `STOCK_MONITORING_FINNHUB_API_KEY`) — from [finnhub.io](https://finnhub.io)
+   - Optionally `STOCK_MONITORING_DATA_PROVIDER_API_KEY` (Alpha Vantage)
+   - Optionally `FINNHUB_WEBHOOK_SECRET` if using webhooks
+2. **Redeploy**: Run the “Stock Monitoring Backend – CI and Deploy” workflow; it passes these into the container.
+3. **Verify**: Backend logs at startup show `Quote providers: Finnhub=yes, Yahoo=yes, Stooq=yes, Alpha Vantage=yes/no`. If Finnhub=no, the key did not reach the container (check deploy script and `.env` on the server).
+
 ## Two endpoints: 7-day history vs minute-by-minute today
 
 The UI has two chart modes, each backed by a **separate endpoint**:

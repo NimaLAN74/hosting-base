@@ -25,6 +25,10 @@ pub struct AppConfig {
     pub finnhub_api_key: Option<String>,
     /// Optional Finnhub webhook secret. Sent as X-Finnhub-Secret on outbound requests; verified on webhook POST.
     pub finnhub_webhook_secret: Option<String>,
+    /// Optional Alpaca Markets API key ID (data.alpaca.markets). When set, Alpaca is used as a quote source for US stocks.
+    pub alpaca_api_key_id: Option<String>,
+    /// Optional Alpaca Markets API secret key.
+    pub alpaca_api_secret_key: Option<String>,
     /// Optional Redis URL for intraday price cache (e.g. redis://:password@redis:6379/1). When set, intraday points are written/read from Redis.
     pub redis_url: Option<String>,
 }
@@ -76,6 +80,20 @@ impl AppConfig {
                 .filter(|v| !v.is_empty()),
             finnhub_webhook_secret: env::var("STOCK_MONITORING_FINNHUB_WEBHOOK_SECRET")
                 .or_else(|_| env::var("FINNHUB_WEBHOOK_SECRET"))
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            alpaca_api_key_id: env::var("STOCK_MONITORING_ALPACA_API_KEY")
+                .or_else(|_| env::var("STOCK_MONITORING_ALPACA_API_KEY_ID"))
+                .or_else(|_| env::var("ALPACA_API_KEY_ID"))
+                .or_else(|_| env::var("ALPACA_API_KEY"))
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            alpaca_api_secret_key: env::var("STOCK_MONITORING_ALPACA_API_SECRET")
+                .or_else(|_| env::var("STOCK_MONITORING_ALPACA_API_SECRET_KEY"))
+                .or_else(|_| env::var("ALPACA_API_SECRET_KEY"))
+                .or_else(|_| env::var("ALPACA_API_SECRET"))
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),

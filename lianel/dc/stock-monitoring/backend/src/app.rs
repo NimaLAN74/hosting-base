@@ -29,6 +29,8 @@ pub struct QuoteService {
     pub finnhub_api_key: Option<String>,
     /// Sent as X-Finnhub-Secret on outbound Finnhub API requests when set.
     pub finnhub_webhook_secret: Option<String>,
+    pub alpaca_api_key_id: Option<String>,
+    pub alpaca_api_secret_key: Option<String>,
     pub http: reqwest::Client,
     pub cache: Arc<RwLock<HashMap<String, CachedQuote>>>,
 }
@@ -39,7 +41,7 @@ pub struct CachedQuote {
     pub price: f64,
     pub currency: Option<String>,
     pub fetched_at_ms: u64,
-    /// Which provider returned this quote: "finnhub", "yahoo", "stooq", "alpha_vantage".
+    /// Which provider returned this quote: "finnhub", "alpaca", "yahoo", "stooq", "alpha_vantage".
     pub source: Option<String>,
 }
 
@@ -739,6 +741,20 @@ struct AlphaVantageGlobalQuoteEnvelope {
 struct AlphaVantageGlobalQuote {
     #[serde(rename = "05. price")]
     price: Option<String>,
+}
+
+/// Alpaca Markets Data API v2: GET /v2/stocks/quotes/latest?symbols=AAPL,MSFT
+#[derive(Debug, Deserialize)]
+struct AlpacaQuotesResponse {
+    quotes: Option<std::collections::HashMap<String, AlpacaQuoteItem>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AlpacaQuoteItem {
+    #[serde(default)]
+    ap: f64,
+    #[serde(default)]
+    bp: f64,
 }
 
 /// Finnhub.io quote API: https://finnhub.io/docs/api/quote
@@ -1486,14 +1502,30 @@ async fn fetch_provider_quotes(
         all.append(&mut finnhub_quotes);
     }
 
-    // Yahoo bulk endpoint (when Finnhub did not resolve all).
+    // Alpaca (data.alpaca.markets): when key+secret set, try for symbols not resolved by Finnhub (US stocks).
     let unresolved_after_finnhub: Vec<String> = symbols
         .iter()
         .filter(|symbol| !all.iter().any(|q| q.symbol.eq_ignore_ascii_case(symbol)))
         .cloned()
         .collect();
-    if !unresolved_after_finnhub.is_empty() {
-        match fetch_yahoo_quotes(http, &unresolved_after_finnhub).await {
+    if let (Some(key_id), Some(secret)) = (
+        quote_service.alpaca_api_key_id.as_deref(),
+        quote_service.alpaca_api_secret_key.as_deref(),
+    ) {
+        if !unresolved_after_finnhub.is_empty() {
+            let mut alpaca_quotes = fetch_alpaca_quotes(http, &unresolved_after_finnhub, key_id, secret).await;
+            all.append(&mut alpaca_quotes);
+        }
+    }
+
+    // Yahoo bulk endpoint (when Finnhub/Alpaca did not resolve all).
+    let unresolved_after_alpaca: Vec<String> = symbols
+        .iter()
+        .filter(|symbol| !all.iter().any(|q| q.symbol.eq_ignore_ascii_case(symbol)))
+        .cloned()
+        .collect();
+    if !unresolved_after_alpaca.is_empty() {
+        match fetch_yahoo_quotes(http, &unresolved_after_alpaca).await {
             Ok(mut quotes) => all.append(&mut quotes),
             Err(err) => tracing::warn!("Yahoo quote fetch failed: {}", err),
         }
@@ -1526,7 +1558,7 @@ async fn fetch_provider_quotes(
     }
 
     if all.is_empty() {
-        anyhow::bail!("Provider fetch returned no data (Finnhub/Yahoo/Stooq)");
+        anyhow::bail!("Provider fetch returned no data (Finnhub/Alpaca/Yahoo/Stooq)");
     }
     Ok(all)
 }
@@ -1570,6 +1602,73 @@ async fn fetch_finnhub_quotes(
             currency: infer_currency_from_symbol(original_symbol),
             fetched_at_ms: current_time_ms(),
             source: Some("finnhub".to_string()),
+        });
+    }
+    out
+}
+
+/// Alpaca Markets Data API v2: GET /v2/stocks/quotes/latest?symbols=SYMBOLS
+/// Headers: APCA-API-KEY-ID, APCA-API-SECRET-KEY. Uses mid (ap+bp)/2 as price.
+async fn fetch_alpaca_quotes(
+    http: &reqwest::Client,
+    symbols: &[String],
+    key_id: &str,
+    secret: &str,
+) -> Vec<CachedQuote> {
+    const BASE: &str = "https://data.alpaca.markets/v2/stocks/quotes/latest";
+    if symbols.is_empty() {
+        return Vec::new();
+    }
+    let symbols_param = symbols.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(",");
+    if symbols_param.is_empty() {
+        return Vec::new();
+    }
+    let resp = match http
+        .get(BASE)
+        .query(&[("symbols", symbols_param.as_str())])
+        .header("APCA-API-KEY-ID", key_id)
+        .header("APCA-API-SECRET-KEY", secret)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Alpaca quote request failed: {}", e);
+            return Vec::new();
+        }
+    };
+    let payload: AlpacaQuotesResponse = match resp.json().await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("Alpaca quote parse failed: {}", e);
+            return Vec::new();
+        }
+    };
+    let Some(quotes) = payload.quotes else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (resp_symbol, item) in quotes {
+        let price = if item.ap > 0.0 && item.bp > 0.0 {
+            (item.ap + item.bp) / 2.0
+        } else if item.ap > 0.0 {
+            item.ap
+        } else if item.bp > 0.0 {
+            item.bp
+        } else {
+            continue;
+        };
+        let original = symbols
+            .iter()
+            .find(|s| s.eq_ignore_ascii_case(&resp_symbol))
+            .map(|s| s.as_str())
+            .unwrap_or(&resp_symbol);
+        out.push(CachedQuote {
+            symbol: original.to_uppercase(),
+            price,
+            currency: Some("USD".to_string()),
+            fetched_at_ms: current_time_ms(),
+            source: Some("alpaca".to_string()),
         });
     }
     out

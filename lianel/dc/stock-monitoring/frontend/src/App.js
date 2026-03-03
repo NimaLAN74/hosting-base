@@ -1566,7 +1566,7 @@ function App() {
                   <button
                     type="button"
                     className="history-modal-close"
-                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryData(null); setPriceHistoryViewMode('7days'); }}
+                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryDailyData(null); setPriceHistoryIntradayData(null); setPriceHistoryViewMode('7days'); }}
                     aria-label="Close"
                   >
                     ×
