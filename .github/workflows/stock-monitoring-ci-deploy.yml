@@ -15,6 +15,7 @@ on:
       - 'lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql'
       - 'lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql'
       - 'lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql'
+      - 'lianel/dc/database/migrations/028_stock_monitoring_provider_per_symbol.sql'
       - 'lianel/dc/docker-compose.stock-monitoring.yaml'
       - 'lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh'
       - 'lianel/dc/dags/stock_monitoring_ingest_dag.py'
@@ -35,6 +36,7 @@ on:
       - 'lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql'
       - 'lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql'
       - 'lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql'
+      - 'lianel/dc/database/migrations/028_stock_monitoring_provider_per_symbol.sql'
       - '.github/workflows/stock-monitoring-ci-deploy.yml'
   workflow_dispatch:
 permissions:
@@ -80,7 +82,7 @@ jobs:
             sleep 1
           done
 
-      - name: Run migrations 022–027 (stock_monitoring schema + notifications + symbols + price history + grants)
+      - name: Run migrations 022–028 (stock_monitoring schema + notifications + symbols + price history + grants + provider per symbol)
         env:
           PGPASSWORD: postgres
         run: |
@@ -97,7 +99,9 @@ jobs:
             -f lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
             -f lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql
-          echo "✅ Migrations 022–027 applied"
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f lianel/dc/database/migrations/028_stock_monitoring_provider_per_symbol.sql
+          echo "✅ Migrations 022–028 applied"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -286,6 +290,7 @@ jobs:
             lianel/dc/database/migrations/025_stock_monitoring_price_history_daily.sql \
             lianel/dc/database/migrations/026_stock_monitoring_price_history_intraday.sql \
             lianel/dc/database/migrations/027_stock_monitoring_price_history_grants.sql \
+            lianel/dc/database/migrations/028_stock_monitoring_provider_per_symbol.sql \
             ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
             "set -euo pipefail; \
@@ -299,7 +304,7 @@ jobs:
              DB_MIG_PASS=\${POSTGRES_MIGRATION_PASSWORD:-\$DB_APP_PASS}; \
              DB_NAME=\${POSTGRES_DB_STOCK_MONITORING:-lianel_stock_monitoring}; \
              DB_ADMIN_DB=\${POSTGRES_ADMIN_DB:-postgres}; \
-             echo \"Applying migrations 022–027 to \$DB_MIG_USER@\$DB_HOST/\$DB_NAME (app user: \$DB_APP_USER)\"; \
+             echo \"Applying migrations 022–028 to \$DB_MIG_USER@\$DB_HOST/\$DB_NAME (app user: \$DB_APP_USER)\"; \
              if ! docker run --rm --network host -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_ADMIN_DB\" -tAc \"SELECT 1 FROM pg_database WHERE datname = '\$DB_NAME'\" | grep -q 1; then \
                docker run --rm --network host -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
@@ -316,7 +321,9 @@ jobs:
                docker run --rm --network host -v /tmp/026_stock_monitoring_price_history_intraday.sql:/tmp/026_stock_monitoring_price_history_intraday.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/026_stock_monitoring_price_history_intraday.sql && \
                docker run --rm --network host -v /tmp/027_stock_monitoring_price_history_grants.sql:/tmp/027_stock_monitoring_price_history_grants.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
-               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/027_stock_monitoring_price_history_grants.sql); then \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/027_stock_monitoring_price_history_grants.sql && \
+               docker run --rm --network host -v /tmp/028_stock_monitoring_provider_per_symbol.sql:/tmp/028_stock_monitoring_provider_per_symbol.sql:ro -e PGPASSWORD=\"\$DB_MIG_PASS\" postgres:15-alpine \
+               psql -h \"\$DB_HOST\" -U \"\$DB_MIG_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/028_stock_monitoring_provider_per_symbol.sql); then \
                echo \"⚠️ Migration with \$DB_MIG_USER failed, retrying with app user \$DB_APP_USER\"; \
                docker run --rm --network host -v /tmp/022_stock_monitoring_schema.sql:/tmp/022_stock_monitoring_schema.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/022_stock_monitoring_schema.sql; \
@@ -330,12 +337,14 @@ jobs:
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/026_stock_monitoring_price_history_intraday.sql; \
                docker run --rm --network host -v /tmp/027_stock_monitoring_price_history_grants.sql:/tmp/027_stock_monitoring_price_history_grants.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                  psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/027_stock_monitoring_price_history_grants.sql; \
+               docker run --rm --network host -v /tmp/028_stock_monitoring_provider_per_symbol.sql:/tmp/028_stock_monitoring_provider_per_symbol.sql:ro -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
+                 psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -f /tmp/028_stock_monitoring_provider_per_symbol.sql; \
              fi; \
              docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -tAc \"SELECT to_regclass('stock_monitoring.watchlists')\" | grep -q 'stock_monitoring.watchlists'; \
              docker run --rm --network host -e PGPASSWORD=\"\$DB_APP_PASS\" postgres:15-alpine \
                psql -h \"\$DB_HOST\" -U \"\$DB_APP_USER\" -d \"\$DB_NAME\" -v ON_ERROR_STOP=1 -c \"SELECT 1 FROM stock_monitoring.price_history_daily LIMIT 1\" >/dev/null"
-          echo "✅ Migrations 022–027 on production"
+          echo "✅ Migrations 022–028 on production"
 
       - name: Restart stock backend after DB migration
         env:
@@ -366,7 +375,7 @@ jobs:
       - name: Summary
         run: |
           echo "## Stock Monitoring Backend – CI and CD" >> $GITHUB_STEP_SUMMARY
-          echo "- **CI**: migrations 022/023/024 + cargo test (unit + integration: quotes, openapi, auth, watchlist, alerts)" >> $GITHUB_STEP_SUMMARY
-          echo "- **CD**: image push, deploy, migrations 022/023/024 on prod, health verify" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI**: migrations 022–028 + cargo test (unit + integration: quotes, openapi, auth, watchlist, alerts)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CD**: image push, deploy, migrations 022–028 on prod, health verify" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ env.REGISTRY }}/${{ github.repository }}/lianel-stock-monitoring-service:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Deploy**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY

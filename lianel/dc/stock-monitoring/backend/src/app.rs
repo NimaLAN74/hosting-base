@@ -583,7 +583,10 @@ async fn status(State(state): State<AppState>) -> String {
 
 #[derive(Debug, Deserialize)]
 struct QuotesQuery {
+    /// Comma-separated symbols (default provider yahoo): AAPL,MSFT
     symbols: Option<String>,
+    /// Comma-separated symbol:provider pairs: AAPL:yahoo,MSFT:finnhub
+    pairs: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -644,6 +647,8 @@ struct SymbolsRefreshResult {
 struct PriceHistoryQuery {
     symbol: Option<String>,
     days: Option<u32>,
+    /// Quote provider for this symbol (default yahoo). Required for correct history when using provider-per-symbol.
+    provider: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -664,6 +669,8 @@ struct PriceHistoryIntradayPoint {
 #[derive(Debug, Serialize)]
 struct PriceHistoryResponse {
     symbol: String,
+    /// Provider for this history series (e.g. yahoo, finnhub, alpaca).
+    provider: String,
     daily: Vec<PriceHistoryDailyPoint>,
     intraday_today: Vec<PriceHistoryIntradayPoint>,
 }
@@ -672,6 +679,7 @@ struct PriceHistoryResponse {
 #[derive(Debug, Serialize)]
 struct PriceHistoryDailyResponse {
     symbol: String,
+    provider: String,
     daily: Vec<PriceHistoryDailyPoint>,
 }
 
@@ -679,6 +687,7 @@ struct PriceHistoryDailyResponse {
 #[derive(Debug, Serialize)]
 struct PriceHistoryIntradayResponse {
     symbol: String,
+    provider: String,
     intraday_today: Vec<PriceHistoryIntradayPoint>,
 }
 
@@ -695,6 +704,8 @@ struct IngestQuoteItem {
     price: f64,
     #[serde(default)]
     currency: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -789,44 +800,95 @@ struct FinnhubSearchEnvelope {
     result: Option<Vec<FinnhubSearchResultItem>>,
 }
 
+fn cache_key(symbol: &str, provider: &str) -> String {
+    format!("{}|{}", symbol.to_uppercase(), provider.to_lowercase())
+}
+
+/// True if both timestamps (ms) fall on the same UTC calendar day (cache valid until end of day).
+fn is_same_calendar_day(ms1: u64, ms2: u64) -> bool {
+    const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
+    (ms1 / MS_PER_DAY) == (ms2 / MS_PER_DAY)
+}
+
+/// Parse query into (symbol, provider) pairs. Uses pairs= if set, else symbols= with default provider yahoo.
+fn parse_quotes_query(query: &QuotesQuery) -> Result<Vec<(String, String)>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(ref raw) = query.pairs {
+        let mut out = Vec::new();
+        for item in raw.split(',') {
+            let part = item.trim();
+            if let Some((s, p)) = part.split_once(':') {
+                let symbol = s.trim().to_uppercase();
+                let provider = p.trim().to_lowercase();
+                if symbol.is_empty() || provider.is_empty() {
+                    continue;
+                }
+                if !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": "Invalid provider in pairs",
+                            "detail": format!("Use one of: {}", ALLOWED_PROVIDERS.join(", "))
+                        })),
+                    ));
+                }
+                out.push((symbol, provider));
+            }
+        }
+        if out.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "No valid pairs",
+                    "detail": "Use pairs=SYMBOL:provider e.g. AAPL:yahoo,MSFT:finnhub"
+                })),
+            ));
+        }
+        return Ok(out);
+    }
+    let symbols = parse_symbols(query.symbols.as_deref())?;
+    Ok(symbols.into_iter().map(|s| (s, "yahoo".to_string())).collect())
+}
+
 async fn quotes(
     State(state): State<AppState>,
     Query(query): Query<QuotesQuery>,
 ) -> Result<Json<QuotesResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let symbols = parse_symbols(query.symbols.as_deref())?;
+    let pairs = parse_quotes_query(&query)?;
     let now_ms = current_time_ms();
 
-    // Cache TTL should be shorter than frontend refresh (e.g. 30s) so each dashboard poll refetches all symbols.
+    // Cache key = symbol|provider; valid until end of day only.
     let mut cached = Vec::new();
     let mut missing = Vec::new();
     {
         let cache = state.quote_service.cache.read().await;
-        for symbol in &symbols {
-            if let Some(entry) = cache.get(symbol) {
-                let age_ms = now_ms.saturating_sub(entry.fetched_at_ms);
-                if age_ms <= state.quote_service.cache_ttl.as_millis() as u64 {
+        for (symbol, provider) in &pairs {
+            let key = cache_key(symbol, provider);
+            if let Some(entry) = cache.get(&key) {
+                if is_same_calendar_day(entry.fetched_at_ms, now_ms) {
                     cached.push(QuoteDto {
                         symbol: entry.symbol.clone(),
                         price: entry.price,
                         currency: entry.currency.clone(),
                         fetched_at_ms: entry.fetched_at_ms,
                         stale: false,
-                        source: entry.source.clone(),
+                        source: Some(provider.clone()),
                     });
                     continue;
                 }
             }
-            missing.push(symbol.clone());
+            missing.push((symbol.clone(), provider.clone()));
         }
     }
 
     let mut fetched_quotes = Vec::new();
     let mut warnings = Vec::new();
     if !missing.is_empty() {
-        match fetch_provider_quotes(&state.quote_service, &missing).await {
+        match fetch_quotes_by_provider(&state.quote_service, &missing).await {
             Ok(items) => {
                 let mut write_cache = state.quote_service.cache.write().await;
                 for item in &items {
+                    let provider = item.source.as_deref().unwrap_or("yahoo");
+                    let key = cache_key(&item.symbol, provider);
                     let resolved_currency = item
                         .currency
                         .clone()
@@ -838,7 +900,7 @@ async fn quotes(
                         fetched_at_ms: now_ms,
                         source: item.source.clone(),
                     };
-                    write_cache.insert(item.symbol.clone(), quote.clone());
+                    write_cache.insert(key, quote.clone());
                     fetched_quotes.push(QuoteDto {
                         symbol: quote.symbol,
                         price: quote.price,
@@ -849,7 +911,16 @@ async fn quotes(
                     });
                 }
                 let pool = state.pool.clone();
-                let intraday_items: Vec<(String, f64)> = items.iter().map(|i| (i.symbol.clone(), i.price)).collect();
+                let intraday_items: Vec<(String, String, f64)> = items
+                    .iter()
+                    .map(|i| {
+                        (
+                            i.symbol.clone(),
+                            i.source.clone().unwrap_or_else(|| "yahoo".to_string()),
+                            i.price,
+                        )
+                    })
+                    .collect();
                 let observed_at_secs = current_time_secs();
                 tokio::spawn({
                     let items = intraday_items.clone();
@@ -861,7 +932,7 @@ async fn quotes(
                 });
                 #[cfg(feature = "redis")]
                 if let Some(redis) = state.redis.clone() {
-                    let items = intraday_items;
+                    let items = intraday_items.clone();
                     let observed = observed_at_secs;
                     tokio::spawn(async move {
                         if let Err(e) = redis_push_intraday(redis, &items, observed).await {
@@ -878,8 +949,9 @@ async fn quotes(
 
     if !warnings.is_empty() && fetched_quotes.is_empty() {
         let cache = state.quote_service.cache.read().await;
-        for symbol in &missing {
-            if let Some(entry) = cache.get(symbol) {
+        for (symbol, provider) in &missing {
+            let key = cache_key(symbol, provider);
+            if let Some(entry) = cache.get(&key) {
                 cached.push(QuoteDto {
                     symbol: entry.symbol.clone(),
                     price: entry.price,
@@ -898,7 +970,11 @@ async fn quotes(
     quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
 
     // Persist all returned quotes as intraday points so the price-history chart gets history (even when from cache).
-    let intraday_from_response: Vec<(String, f64)> = quotes.iter().map(|q| (q.symbol.clone(), q.price)).collect();
+    let intraday_from_response: Vec<(String, String, f64)> = quotes
+        .iter()
+        .filter(|q| q.source.as_deref() != Some("unavailable"))
+        .map(|q| (q.symbol.clone(), q.source.clone().unwrap_or_else(|| "yahoo".to_string()), q.price))
+        .collect();
     if !intraday_from_response.is_empty() {
         let pool = state.pool.clone();
         let observed_at_secs = current_time_secs();
@@ -910,7 +986,7 @@ async fn quotes(
         });
         #[cfg(feature = "redis")]
         if let Some(redis) = state.redis.clone() {
-            let items = intraday_from_response;
+            let items = intraday_from_response.clone();
             let observed = observed_at_secs;
             tokio::spawn(async move {
                 if let Err(e) = redis_push_intraday(redis, &items, observed).await {
@@ -920,15 +996,23 @@ async fn quotes(
         }
     }
 
-    let unresolved: Vec<String> = symbols
+    let unresolved: Vec<(String, String)> = pairs
         .iter()
-        .filter(|symbol| !quotes.iter().any(|q| q.symbol.eq_ignore_ascii_case(*symbol)))
+        .filter(|(symbol, provider)| {
+            !quotes.iter().any(|q| {
+                q.symbol.eq_ignore_ascii_case(symbol) && q.source.as_deref() == Some(provider.as_str())
+            })
+        })
         .cloned()
         .collect();
     if !unresolved.is_empty() {
-        warnings.push(format!("No provider quote for: {}", unresolved.join(",")));
-        // Return a placeholder for each missing symbol so the frontend has an entry (shows as N/A / —).
-        for symbol in &unresolved {
+        let desc = unresolved
+            .iter()
+            .map(|(s, p)| format!("{}:{}", s, p))
+            .collect::<Vec<_>>()
+            .join(",");
+        warnings.push(format!("No quote for: {}", desc));
+        for (symbol, _) in &unresolved {
             quotes.push(QuoteDto {
                 symbol: symbol.clone(),
                 price: 0.0,
@@ -1156,9 +1240,10 @@ async fn price_history_roll_daily(
     let pool = &state.pool;
     let daily_rows = sqlx::query(
         r#"
-        INSERT INTO stock_monitoring.price_history_daily (symbol, trade_date, open_price, high_price, low_price, close_price)
+        INSERT INTO stock_monitoring.price_history_daily (symbol, provider, trade_date, open_price, high_price, low_price, close_price)
         SELECT
             symbol,
+            provider,
             (observed_at AT TIME ZONE 'UTC')::date AS trade_date,
             (array_agg(price ORDER BY observed_at))[1] AS open_price,
             max(price) AS high_price,
@@ -1166,8 +1251,8 @@ async fn price_history_roll_daily(
             (array_agg(price ORDER BY observed_at DESC))[1] AS close_price
         FROM stock_monitoring.price_history_intraday
         WHERE (observed_at AT TIME ZONE 'UTC')::date < (now() AT TIME ZONE 'UTC')::date
-        GROUP BY symbol, (observed_at AT TIME ZONE 'UTC')::date
-        ON CONFLICT (symbol, trade_date) DO UPDATE SET
+        GROUP BY symbol, provider, (observed_at AT TIME ZONE 'UTC')::date
+        ON CONFLICT (symbol, provider, trade_date) DO UPDATE SET
             open_price = EXCLUDED.open_price,
             high_price = EXCLUDED.high_price,
             low_price = EXCLUDED.low_price,
@@ -1223,18 +1308,25 @@ async fn price_history(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL"})),
         ))?;
+    let provider = query
+        .provider
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| ALLOWED_PROVIDERS.contains(&s.as_str()))
+        .unwrap_or_else(|| "yahoo".to_string());
     let days = query.days.unwrap_or(90).min(365);
 
     let daily_rows = match sqlx::query_as::<_, (String, f64, f64, f64, f64)>(
         r#"
         SELECT trade_date::text, open_price, high_price, low_price, close_price
         FROM stock_monitoring.price_history_daily
-        WHERE symbol = $1
+        WHERE symbol = $1 AND provider = $2
         ORDER BY trade_date DESC
-        LIMIT $2
+        LIMIT $3
         "#,
     )
     .bind(symbol.as_str())
+    .bind(provider.as_str())
     .bind(days as i64)
     .fetch_all(&state.pool)
     .await
@@ -1250,12 +1342,13 @@ async fn price_history(
         r#"
         SELECT observed_at::text, price
         FROM stock_monitoring.price_history_intraday
-        WHERE symbol = $1
+        WHERE symbol = $1 AND provider = $2
           AND (observed_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
         ORDER BY observed_at
         "#,
     )
     .bind(symbol.as_str())
+    .bind(provider.as_str())
     .fetch_all(&state.pool)
     .await
     {
@@ -1288,7 +1381,7 @@ async fn price_history(
     let intraday_from_db = intraday_today.len();
     #[cfg(feature = "redis")]
     if let Some(redis) = state.redis.clone() {
-        match redis_fetch_intraday_today(redis, &symbol).await {
+        match redis_fetch_intraday_today(redis, &symbol, &provider).await {
             Ok(redis_points) => {
                 let n_redis = redis_points.len();
                 for (observed_at, price) in redis_points {
@@ -1304,7 +1397,8 @@ async fn price_history(
 
     // Merge latest quote from in-memory cache so the chart shows current price without waiting for DB persist
     let cache = state.quote_service.cache.read().await;
-    if let Some(entry) = cache.get(&symbol) {
+    let cache_key_sym_prov = cache_key(&symbol, &provider);
+    if let Some(entry) = cache.get(&cache_key_sym_prov) {
         if let Some(dt) = chrono::Utc.timestamp_millis_opt(entry.fetched_at_ms as i64).single() {
             let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
             intraday_today.push(PriceHistoryIntradayPoint {
@@ -1320,12 +1414,13 @@ async fn price_history(
 
     Ok(Json(PriceHistoryResponse {
         symbol: symbol.clone(),
+        provider: provider.clone(),
         daily,
         intraday_today,
     }))
 }
 
-/// GET /api/v1/price-history/daily?symbol=X&days=7 — 7-day history only (from price_history_daily table).
+/// GET /api/v1/price-history/daily?symbol=X&provider=yahoo&days=7 — 7-day history only (from price_history_daily table).
 async fn price_history_daily(
     State(state): State<AppState>,
     Query(query): Query<PriceHistoryQuery>,
@@ -1339,18 +1434,25 @@ async fn price_history_daily(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL&days=7"})),
         ))?;
+    let provider = query
+        .provider
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| ALLOWED_PROVIDERS.contains(&s.as_str()))
+        .unwrap_or_else(|| "yahoo".to_string());
     let days = query.days.unwrap_or(7).min(365);
 
     let daily_rows = match sqlx::query_as::<_, (String, f64, f64, f64, f64)>(
         r#"
         SELECT trade_date::text, open_price, high_price, low_price, close_price
         FROM stock_monitoring.price_history_daily
-        WHERE symbol = $1
+        WHERE symbol = $1 AND provider = $2
         ORDER BY trade_date DESC
-        LIMIT $2
+        LIMIT $3
         "#,
     )
     .bind(symbol.as_str())
+    .bind(provider.as_str())
     .bind(days as i64)
     .fetch_all(&state.pool)
     .await
@@ -1373,14 +1475,15 @@ async fn price_history_daily(
         })
         .collect();
 
-    tracing::info!("price_history_daily: symbol={} daily={}", symbol, daily.len());
+    tracing::info!("price_history_daily: symbol={} provider={} daily={}", symbol, provider, daily.len());
     Ok(Json(PriceHistoryDailyResponse {
         symbol: symbol.to_string(),
+        provider: provider.to_string(),
         daily,
     }))
 }
 
-/// GET /api/v1/price-history/intraday?symbol=X — minute-by-minute today (DB + Redis + in-memory cache).
+/// GET /api/v1/price-history/intraday?symbol=X&provider=yahoo — minute-by-minute today (DB + Redis + in-memory cache).
 async fn price_history_intraday(
     State(state): State<AppState>,
     Query(query): Query<PriceHistoryQuery>,
@@ -1394,17 +1497,24 @@ async fn price_history_intraday(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL"})),
         ))?;
+    let provider = query
+        .provider
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| ALLOWED_PROVIDERS.contains(&s.as_str()))
+        .unwrap_or_else(|| "yahoo".to_string());
 
     let intraday_rows = match sqlx::query_as::<_, (String, f64)>(
         r#"
         SELECT observed_at::text, price
         FROM stock_monitoring.price_history_intraday
-        WHERE symbol = $1
+        WHERE symbol = $1 AND provider = $2
           AND (observed_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
         ORDER BY observed_at
         "#,
     )
     .bind(symbol.as_str())
+    .bind(provider.as_str())
     .fetch_all(&state.pool)
     .await
     {
@@ -1425,7 +1535,7 @@ async fn price_history_intraday(
 
     #[cfg(feature = "redis")]
     if let Some(redis) = state.redis.clone() {
-        match redis_fetch_intraday_today(redis, &symbol).await {
+        match redis_fetch_intraday_today(redis, &symbol, &provider).await {
             Ok(redis_points) => {
                 for (observed_at, price) in redis_points {
                     intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
@@ -1436,7 +1546,8 @@ async fn price_history_intraday(
     }
 
     let cache = state.quote_service.cache.read().await;
-    if let Some(entry) = cache.get(&symbol) {
+    let cache_key_sym_prov = cache_key(&symbol, &provider);
+    if let Some(entry) = cache.get(&cache_key_sym_prov) {
         if let Some(dt) = chrono::Utc.timestamp_millis_opt(entry.fetched_at_ms as i64).single() {
             let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
             intraday_today.push(PriceHistoryIntradayPoint {
@@ -1448,10 +1559,11 @@ async fn price_history_intraday(
     drop(cache);
 
     intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
-    tracing::info!("price_history_intraday: symbol={} points={}", symbol, intraday_today.len());
+    tracing::info!("price_history_intraday: symbol={} provider={} points={}", symbol, provider, intraday_today.len());
 
     Ok(Json(PriceHistoryIntradayResponse {
         symbol: symbol.to_string(),
+        provider: provider.to_string(),
         intraday_today,
     }))
 }
@@ -1577,6 +1689,68 @@ async fn fetch_provider_quotes(
 
     if all.is_empty() {
         anyhow::bail!("Provider fetch returned no data (Finnhub/Alpaca/Yahoo/Stooq)");
+    }
+    Ok(all)
+}
+
+/// Fetch quotes for requested (symbol, provider) pairs; each symbol is fetched only from its chosen provider.
+async fn fetch_quotes_by_provider(
+    quote_service: &QuoteService,
+    pairs: &[(String, String)],
+) -> anyhow::Result<Vec<CachedQuote>> {
+    let http = &quote_service.http;
+    let mut all = Vec::new();
+    for (symbol, provider) in pairs {
+        let symbol = symbol.trim().to_uppercase();
+        let provider = provider.trim().to_lowercase();
+        if symbol.is_empty() || !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
+            continue;
+        }
+        let one = std::slice::from_ref(&symbol);
+        let quote_opt: Option<CachedQuote> = match provider.as_str() {
+            "finnhub" if quote_service.finnhub_api_key.is_some() => {
+                let mut v = fetch_finnhub_quotes(
+                    http,
+                    one,
+                    quote_service.finnhub_api_key.as_deref().unwrap(),
+                    quote_service.finnhub_webhook_secret.as_deref(),
+                )
+                .await;
+                v.pop()
+            }
+            "alpaca" if quote_service.alpaca_api_key_id.is_some() && quote_service.alpaca_api_secret_key.is_some() => {
+                let mut v = fetch_alpaca_quotes(
+                    http,
+                    one,
+                    quote_service.alpaca_api_key_id.as_deref().unwrap(),
+                    quote_service.alpaca_api_secret_key.as_deref().unwrap(),
+                )
+                .await;
+                v.pop()
+            }
+            "yahoo" => match fetch_yahoo_quotes(http, one).await {
+                Ok(mut v) => v.pop(),
+                Err(_) => None,
+            },
+            "stooq" => fetch_stooq_quote(http, &symbol).await,
+            "alpha_vantage" if quote_service.data_provider_api_key.is_some() => {
+                let mut v = fetch_alpha_vantage_quotes(
+                    http,
+                    one,
+                    quote_service.data_provider_api_key.as_deref().unwrap(),
+                )
+                .await;
+                v.pop()
+            }
+            _ => None,
+        };
+        if let Some(mut q) = quote_opt {
+            q.source = Some(provider.clone());
+            all.push(q);
+        }
+    }
+    if all.is_empty() {
+        anyhow::bail!("No quotes returned for requested symbol:provider pairs");
     }
     Ok(all)
 }
@@ -1949,14 +2123,14 @@ fn current_time_secs() -> i64 {
 }
 
 #[cfg(feature = "redis")]
-fn redis_intraday_key(symbol: &str, date_yyyy_mm_dd: &str) -> String {
-    format!("{}:{}:{}", REDIS_INTRADAY_KEY_PREFIX, symbol, date_yyyy_mm_dd)
+fn redis_intraday_key(symbol: &str, provider: &str, date_yyyy_mm_dd: &str) -> String {
+    format!("{}:{}:{}:{}", REDIS_INTRADAY_KEY_PREFIX, symbol, provider, date_yyyy_mm_dd)
 }
 
 #[cfg(feature = "redis")]
 async fn redis_push_intraday(
     mut conn: redis::aio::MultiplexedConnection,
-    items: &[(String, f64)],
+    items: &[(String, String, f64)],
     observed_at_secs: i64,
 ) -> anyhow::Result<()> {
     if items.is_empty() {
@@ -1969,8 +2143,8 @@ async fn redis_push_intraday(
         .unwrap_or_else(|| "1970-01-01".to_string());
     let score = observed_at_secs as f64;
     let n = items.len();
-    for (symbol, price) in items {
-        let key = redis_intraday_key(symbol, &date_str);
+    for (symbol, provider, price) in items {
+        let key = redis_intraday_key(symbol, provider, &date_str);
         let _: () = redis::cmd("ZADD")
             .arg(&key)
             .arg(score)
@@ -1991,6 +2165,7 @@ async fn redis_push_intraday(
 async fn redis_fetch_intraday_today(
     mut conn: redis::aio::MultiplexedConnection,
     symbol: &str,
+    provider: &str,
 ) -> anyhow::Result<Vec<(String, f64)>> {
     let now_secs = current_time_secs();
     let date_str = chrono::Utc
@@ -1998,7 +2173,7 @@ async fn redis_fetch_intraday_today(
         .single()
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "1970-01-01".to_string());
-    let key = redis_intraday_key(symbol, &date_str);
+    let key = redis_intraday_key(symbol, provider, &date_str);
     let raw: Vec<String> = redis::cmd("ZRANGE")
         .arg(&key)
         .arg(0)
@@ -2026,21 +2201,22 @@ async fn redis_fetch_intraday_today(
 
 async fn persist_intraday_quotes(
     pool: &sqlx::PgPool,
-    items: &[(String, f64)],
+    items: &[(String, String, f64)],
     observed_at_secs: i64,
 ) -> anyhow::Result<()> {
     if items.is_empty() {
         return Ok(());
     }
     let observed_at = observed_at_secs as f64;
-    for (symbol, price) in items {
+    for (symbol, provider, price) in items {
         sqlx::query(
             r#"
-            INSERT INTO stock_monitoring.price_history_intraday (symbol, observed_at, price)
-            VALUES ($1, to_timestamp($2), $3)
+            INSERT INTO stock_monitoring.price_history_intraday (symbol, provider, observed_at, price)
+            VALUES ($1, $2, to_timestamp($3), $4)
             "#,
         )
         .bind(symbol)
+        .bind(provider)
         .bind(observed_at)
         .bind(price)
         .execute(pool)
@@ -2071,13 +2247,24 @@ struct WatchlistItemDto {
     id: i64,
     symbol: String,
     mic: Option<String>,
+    /// Quote provider for this symbol: yahoo, finnhub, alpaca, stooq, alpha_vantage
+    provider: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct AddWatchlistItemRequest {
     symbol: String,
     mic: Option<String>,
+    /// Quote provider for this symbol (default yahoo)
+    #[serde(default = "default_watchlist_provider")]
+    provider: String,
 }
+
+fn default_watchlist_provider() -> String {
+    "yahoo".to_string()
+}
+
+const ALLOWED_PROVIDERS: &[&str] = &["yahoo", "finnhub", "alpaca", "stooq", "alpha_vantage"];
 
 #[derive(Debug, Serialize)]
 struct AlertDto {
@@ -2324,9 +2511,9 @@ async fn list_watchlist_items(
 ) -> Result<Json<Vec<WatchlistItemDto>>, (StatusCode, Json<serde_json::Value>)> {
     ensure_watchlist_owned(&state.pool, watchlist_id, &user_id.0).await?;
 
-    let rows = sqlx::query_as::<_, (i64, String, Option<String>)>(
+    let rows = sqlx::query_as::<_, (i64, String, Option<String>, String)>(
         r#"
-        SELECT i.id, i.symbol, i.mic
+        SELECT i.id, i.symbol, i.mic, COALESCE(i.provider, 'yahoo')
         FROM stock_monitoring.watchlist_items i
         WHERE i.watchlist_id = $1
         ORDER BY i.id DESC
@@ -2339,7 +2526,7 @@ async fn list_watchlist_items(
 
     let items = rows
         .into_iter()
-        .map(|(id, symbol, mic)| WatchlistItemDto { id, symbol, mic })
+        .map(|(id, symbol, mic, provider)| WatchlistItemDto { id, symbol, mic, provider })
         .collect::<Vec<_>>();
     Ok(Json(items))
 }
@@ -2354,17 +2541,29 @@ async fn add_watchlist_item(
 
     let symbol = normalize_symbol(&body.symbol)?;
     let mic = normalize_mic(body.mic.as_deref())?;
+    let provider = body.provider.trim().to_lowercase();
+    let provider = if provider.is_empty() { "yahoo".to_string() } else { provider };
+    if !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Invalid provider",
+                "detail": format!("Use one of: {}", ALLOWED_PROVIDERS.join(", "))
+            })),
+        ));
+    }
 
-    let inserted = sqlx::query_as::<_, (i64, String, Option<String>)>(
+    let inserted = sqlx::query_as::<_, (i64, String, Option<String>, String)>(
         r#"
-        INSERT INTO stock_monitoring.watchlist_items (watchlist_id, symbol, mic)
-        VALUES ($1, $2, $3)
-        RETURNING id, symbol, mic
+        INSERT INTO stock_monitoring.watchlist_items (watchlist_id, symbol, mic, provider)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, symbol, mic, provider
         "#,
     )
     .bind(watchlist_id)
     .bind(&symbol)
     .bind(&mic)
+    .bind(&provider)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
@@ -2373,7 +2572,7 @@ async fn add_watchlist_item(
             (
                 StatusCode::CONFLICT,
                 Json(serde_json::json!({
-                    "error": "Symbol already exists in this watchlist"
+                    "error": "Symbol with this provider already exists in this watchlist"
                 })),
             )
         } else {
@@ -2390,7 +2589,8 @@ async fn add_watchlist_item(
         Some(serde_json::json!({
             "watchlist_id": watchlist_id,
             "symbol": inserted.1,
-            "mic": inserted.2
+            "mic": inserted.2,
+            "provider": inserted.3
         })),
     )
     .await;
@@ -2401,6 +2601,7 @@ async fn add_watchlist_item(
             id: inserted.0,
             symbol: inserted.1,
             mic: inserted.2,
+            provider: inserted.3,
         }),
     ))
 }
@@ -2598,22 +2799,29 @@ async fn ingest_quotes_internal(
     let now_ms = current_time_ms();
     let observed_at_secs = current_time_secs();
     let mut ingested = 0usize;
-    let mut intraday_items: Vec<(String, f64)> = Vec::new();
+    let mut intraday_items: Vec<(String, String, f64)> = Vec::new();
     let mut cache = state.quote_service.cache.write().await;
     for item in body.quotes {
         let symbol = item.symbol.trim().to_uppercase();
         if symbol.is_empty() || !item.price.is_finite() || item.price <= 0.0 {
             continue;
         }
-        intraday_items.push((symbol.clone(), item.price));
+        let provider = item
+            .provider
+            .as_deref()
+            .map(|p| p.trim().to_lowercase())
+            .filter(|p| ALLOWED_PROVIDERS.contains(&p.as_str()))
+            .unwrap_or_else(|| "yahoo".to_string());
+        intraday_items.push((symbol.clone(), provider.clone(), item.price));
+        let key = cache_key(&symbol, &provider);
         cache.insert(
-            symbol.clone(),
+            key,
             CachedQuote {
-                symbol,
+                symbol: symbol.clone(),
                 price: item.price,
                 currency: item.currency.filter(|s| !s.trim().is_empty()),
                 fetched_at_ms: now_ms,
-                source: Some("finnhub".to_string()),
+                source: Some(provider),
             },
         );
         ingested += 1;
@@ -2630,7 +2838,7 @@ async fn ingest_quotes_internal(
         });
         #[cfg(feature = "redis")]
         if let Some(redis) = state.redis.clone() {
-            let items = intraday_items;
+            let items = intraday_items.clone();
             let observed = observed_at_secs;
             tokio::spawn(async move {
                 if let Err(e) = redis_push_intraday(redis, &items, observed).await {

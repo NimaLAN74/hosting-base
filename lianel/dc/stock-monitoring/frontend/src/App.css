@@ -607,6 +607,24 @@ body {
   color: #b91c1c;
 }
 
+.watchlist-chip-provider {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #64748b;
+  text-transform: lowercase;
+}
+
+.provider-cell {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  text-transform: lowercase;
+}
+
+.history-modal-provider {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
 /* Symbol browser: card-style panel with high contrast */
 .symbol-browser {
   margin-top: 24px;

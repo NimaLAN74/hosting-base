@@ -231,6 +231,8 @@ function App() {
   const [selectedAlertIds, setSelectedAlertIds] = useState(new Set());
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [selectedSymbolForHistory, setSelectedSymbolForHistory] = useState(null);
+  const [selectedProviderForHistory, setSelectedProviderForHistory] = useState('yahoo');
+  const [addSymbolProvider, setAddSymbolProvider] = useState('yahoo');
   const [priceHistoryDailyData, setPriceHistoryDailyData] = useState(null);   // from /price-history/daily (7-day bars)
   const [priceHistoryIntradayData, setPriceHistoryIntradayData] = useState(null); // from /price-history/intraday (minute cache)
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
@@ -394,15 +396,21 @@ function App() {
   }, []);
 
   const fetchQuotes = useCallback(async () => {
-    const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase()).filter(Boolean);
-    if (symbols.length === 0) {
+    const pairs = watchlistItems
+      .map((item) => {
+        const sym = String(item.symbol).toUpperCase().trim();
+        const prov = String(item.provider || 'yahoo').toLowerCase().trim() || 'yahoo';
+        return sym ? `${sym}:${prov}` : null;
+      })
+      .filter(Boolean);
+    if (pairs.length === 0) {
       setPrices({});
       setQuoteCurrencies({});
       setQuotesError('');
       return;
     }
     try {
-      const params = new URLSearchParams({ symbols: symbols.join(',') });
+      const params = new URLSearchParams({ pairs: pairs.join(',') });
       const response = await apiFetch(`/quotes?${params.toString()}`);
       if (!response.ok) {
         throw new ApiError(`Quotes request failed (${response.status})`, response.status);
@@ -466,7 +474,7 @@ function App() {
       await apiJson(`/watchlists/${created.id}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify({ symbol, provider: 'yahoo' }),
       });
     }
     await loadWatchlistItems(created.id);
@@ -500,11 +508,12 @@ function App() {
     }
   }, [applyAuthError, selectedSymbolProvider]);
 
-  const loadPriceHistoryDaily = useCallback(async (symbol) => {
+  const loadPriceHistoryDaily = useCallback(async (symbol, provider) => {
     if (!symbol) return;
+    const prov = provider || 'yahoo';
     setPriceHistoryLoading(true);
     try {
-      const params = new URLSearchParams({ symbol, days: '7' });
+      const params = new URLSearchParams({ symbol, provider: prov, days: '7' });
       const data = await apiJson(`/price-history/daily?${params.toString()}`);
       setPriceHistoryDailyData(data);
     } catch (err) {
@@ -515,11 +524,12 @@ function App() {
     }
   }, [applyAuthError]);
 
-  const loadPriceHistoryIntraday = useCallback(async (symbol) => {
+  const loadPriceHistoryIntraday = useCallback(async (symbol, provider) => {
     if (!symbol) return;
+    const prov = provider || 'yahoo';
     setPriceHistoryLoading(true);
     try {
-      const params = new URLSearchParams({ symbol });
+      const params = new URLSearchParams({ symbol, provider: prov });
       const data = await apiJson(`/price-history/intraday?${params.toString()}`);
       setPriceHistoryIntradayData(data);
     } catch (err) {
@@ -530,22 +540,25 @@ function App() {
     }
   }, [applyAuthError]);
 
-  const loadPriceHistoryForView = useCallback((symbol, viewMode) => {
-    if (viewMode === '7days') loadPriceHistoryDaily(symbol);
-    else loadPriceHistoryIntraday(symbol);
+  const loadPriceHistoryForView = useCallback((symbol, provider, viewMode) => {
+    const prov = provider || 'yahoo';
+    if (viewMode === '7days') loadPriceHistoryDaily(symbol, prov);
+    else loadPriceHistoryIntraday(symbol, prov);
   }, [loadPriceHistoryDaily, loadPriceHistoryIntraday]);
 
-  const openHistoryForSymbol = useCallback((symbol) => {
+  const openHistoryForSymbol = useCallback((symbol, provider) => {
     if (!symbol) return;
+    const prov = provider || 'yahoo';
     setSelectedSymbolForHistory(symbol);
+    setSelectedProviderForHistory(prov);
     setPriceHistoryDailyData(null);
     setPriceHistoryIntradayData(null);
     setPriceHistoryLoading(true);
     (async () => {
       try {
         const [dailyRes, intradayRes] = await Promise.all([
-          apiJson(`/price-history/daily?symbol=${encodeURIComponent(symbol)}&days=7`),
-          apiJson(`/price-history/intraday?symbol=${encodeURIComponent(symbol)}`),
+          apiJson(`/price-history/daily?symbol=${encodeURIComponent(symbol)}&provider=${encodeURIComponent(prov)}&days=7`),
+          apiJson(`/price-history/intraday?symbol=${encodeURIComponent(symbol)}&provider=${encodeURIComponent(prov)}`),
         ]);
         setPriceHistoryDailyData(dailyRes);
         setPriceHistoryIntradayData(intradayRes);
@@ -594,10 +607,10 @@ function App() {
   useEffect(() => {
     if (!selectedSymbolForHistory) return undefined;
     const intervalId = setInterval(() => {
-      loadPriceHistoryForView(selectedSymbolForHistory, priceHistoryViewMode);
+      loadPriceHistoryForView(selectedSymbolForHistory, selectedProviderForHistory, priceHistoryViewMode);
     }, 60000);
     return () => clearInterval(intervalId);
-  }, [selectedSymbolForHistory, priceHistoryViewMode, loadPriceHistoryForView]);
+  }, [selectedSymbolForHistory, selectedProviderForHistory, priceHistoryViewMode, loadPriceHistoryForView]);
 
   // Build session history from table updates so the chart shows a series even when backend returns little/no history.
   useEffect(() => {
@@ -721,9 +734,12 @@ function App() {
       setWatchlistError('Use letters/numbers and . _ - only (max 20 chars).');
       return;
     }
-    const symbols = watchlistItems.map((item) => String(item.symbol).toUpperCase());
-    if (symbols.includes(normalized)) {
-      setWatchlistError('Symbol already exists in your watchlist.');
+    const provider = addSymbolProvider || 'yahoo';
+    const exists = watchlistItems.some(
+      (item) => String(item.symbol).toUpperCase() === normalized && String(item.provider || 'yahoo').toLowerCase() === provider.toLowerCase()
+    );
+    if (exists) {
+      setWatchlistError('Symbol with this provider already exists in your watchlist.');
       return;
     }
     if (!activeWatchlistId) {
@@ -734,7 +750,7 @@ function App() {
       const created = await apiJson(`/watchlists/${activeWatchlistId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: normalized }),
+        body: JSON.stringify({ symbol: normalized, provider }),
       });
       setWatchlistItems((prev) => [created, ...prev]);
       setSymbolInput('');
@@ -742,24 +758,20 @@ function App() {
       applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to add symbol.');
     }
-  }, [activeWatchlistId, applyAuthError, symbolInput, watchlistItems]);
+  }, [activeWatchlistId, addSymbolProvider, applyAuthError, symbolInput, watchlistItems]);
 
-  const removeSymbol = useCallback(async (symbolToRemove) => {
-    if (!activeWatchlistId) {
-      return;
-    }
-    const item = watchlistItems.find((candidate) => candidate.symbol === symbolToRemove);
-    if (!item?.id) {
+  const removeSymbol = useCallback(async (itemToRemove) => {
+    if (!activeWatchlistId || !itemToRemove?.id) {
       return;
     }
     try {
-      await apiJson(`/watchlists/${activeWatchlistId}/items/${item.id}`, { method: 'DELETE' });
-      setWatchlistItems((prev) => prev.filter((candidate) => candidate.id !== item.id));
+      await apiJson(`/watchlists/${activeWatchlistId}/items/${itemToRemove.id}`, { method: 'DELETE' });
+      setWatchlistItems((prev) => prev.filter((candidate) => candidate.id !== itemToRemove.id));
     } catch (err) {
       applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to remove symbol.');
     }
-  }, [activeWatchlistId, applyAuthError, watchlistItems]);
+  }, [activeWatchlistId, applyAuthError]);
   const createWatchlist = useCallback(async () => {
     const name = newWatchlistName.trim();
     setWatchlistError('');
@@ -925,10 +937,13 @@ function App() {
       setWatchlistError('Select at least one symbol from the list.');
       return;
     }
-    const existing = new Set(watchlistItems.map((item) => String(item.symbol).toUpperCase()));
-    const newSymbols = toAdd.filter((s) => !existing.has(s));
+    const provider = addSymbolProvider || 'yahoo';
+    const existingPairs = new Set(
+      watchlistItems.map((item) => `${String(item.symbol).toUpperCase()}:${String(item.provider || 'yahoo').toLowerCase()}`)
+    );
+    const newSymbols = toAdd.filter((s) => !existingPairs.has(`${s}:${provider}`));
     if (newSymbols.length === 0) {
-      setWatchlistError('Selected symbols are already in the watchlist.');
+      setWatchlistError('Selected symbols with this provider are already in the watchlist.');
       return;
     }
     setWatchlistError('');
@@ -938,7 +953,7 @@ function App() {
         await apiJson(`/watchlists/${activeWatchlistId}/items`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol }),
+          body: JSON.stringify({ symbol, provider }),
         });
       }
       await loadWatchlistItems(activeWatchlistId);
@@ -950,7 +965,7 @@ function App() {
     } finally {
       setWatchlistBusy(false);
     }
-  }, [activeWatchlistId, applyAuthError, loadWatchlistItems, selectedSymbolIds, watchlistItems]);
+  }, [activeWatchlistId, addSymbolProvider, applyAuthError, loadWatchlistItems, selectedSymbolIds, watchlistItems]);
 
   const addAlert = useCallback(async () => {
     setAlertError('');
@@ -1118,22 +1133,29 @@ function App() {
   const isAlertsPage = routePath.startsWith('/stock/alerts');
   const isDashboardPage = !isOpsPage && !isWatchlistsPage && !isAlertsPage;
   const isAuthReady = !authState.checking;
-  const dashboardRows = useMemo(() => watchlistSymbols.map((symbol) => {
-    const current = prices[symbol];
-    const previous = previousPrices[symbol];
-    let trend = 'flat';
-    if (typeof current === 'number' && typeof previous === 'number') {
-      if (current > previous) trend = 'up';
-      else if (current < previous) trend = 'down';
-    }
-    return {
-      symbol,
-      current,
-      previous,
-      trend,
-      currency: quoteCurrencies[symbol],
-    };
-  }), [previousPrices, prices, quoteCurrencies, watchlistSymbols]);
+  const dashboardRows = useMemo(
+    () =>
+      watchlistItems.map((item) => {
+        const symbol = String(item.symbol).toUpperCase().trim();
+        const provider = String(item.provider || 'yahoo').toLowerCase().trim() || 'yahoo';
+        const current = prices[symbol];
+        const previous = previousPrices[symbol];
+        let trend = 'flat';
+        if (typeof current === 'number' && typeof previous === 'number') {
+          if (current > previous) trend = 'up';
+          else if (current < previous) trend = 'down';
+        }
+        return {
+          symbol,
+          provider,
+          current,
+          previous,
+          trend,
+          currency: quoteCurrencies[symbol],
+        };
+      }),
+    [previousPrices, prices, quoteCurrencies, watchlistItems]
+  );
   const selectedAlertCurrency = alertSymbol
     ? (quoteCurrencies[alertSymbol] || inferCurrencyFromSymbol(alertSymbol) || 'n/a')
     : 'n/a';
@@ -1366,6 +1388,18 @@ function App() {
                 placeholder="e.g. AAPL, SAN.MC"
                 aria-label="Add symbol to watchlist"
               />
+              <select
+                value={addSymbolProvider}
+                onChange={(e) => setAddSymbolProvider(e.target.value)}
+                aria-label="Quote provider for this symbol"
+                className="provider-select"
+              >
+                <option value="yahoo">Yahoo</option>
+                <option value="finnhub">Finnhub</option>
+                <option value="alpaca">Alpaca</option>
+                <option value="stooq">Stooq</option>
+                <option value="alpha_vantage">Alpha Vantage</option>
+              </select>
               <button type="button" className="raw-toggle-btn" onClick={addSymbol} disabled={watchlistBusy}>
                 Add symbol
               </button>
@@ -1495,19 +1529,25 @@ function App() {
             {watchlistError && <p className="watchlist-error">{watchlistError}</p>}
             <span className="watchlist-section-label">Symbols in this watchlist</span>
             <div className="watchlist-chips">
-              {watchlistSymbols.map((symbol) => (
-                <div className="watchlist-chip" key={symbol}>
-                  <span>{symbol}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeSymbol(symbol)}
-                    aria-label={`Remove ${symbol}`}
-                    disabled={watchlistBusy}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              {watchlistItems.map((item) => {
+                const sym = String(item.symbol).toUpperCase();
+                const prov = String(item.provider || 'yahoo').toLowerCase();
+                const chipKey = `${sym}:${prov}`;
+                return (
+                  <div className="watchlist-chip" key={chipKey}>
+                    <span title={`Provider: ${prov}`}>{sym}</span>
+                    <span className="watchlist-chip-provider">{prov}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeSymbol(item)}
+                      aria-label={`Remove ${sym} (${prov})`}
+                      disabled={watchlistBusy}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </section>
           )}
@@ -1517,7 +1557,7 @@ function App() {
             <div className="raw-header">
               <p className="status-label">Dashboard: current prices (provider feed)</p>
               <span className="history-count">
-                {watchlistSymbols.length} symbols · {alerts.length} alerts
+                {watchlistItems.length} symbol{watchlistItems.length !== 1 ? 's' : ''} · {alerts.length} alerts
               </span>
             </div>
             <div className="history-table-wrapper">
@@ -1525,6 +1565,7 @@ function App() {
                 <thead>
                   <tr>
                     <th scope="col">Symbol</th>
+                    <th scope="col">Provider</th>
                     <th scope="col">Latest</th>
                     <th scope="col">Previous</th>
                     <th scope="col">Trend</th>
@@ -1533,17 +1574,18 @@ function App() {
                 </thead>
                 <tbody>
                   {dashboardRows.map((row) => (
-                    <tr key={`price-${row.symbol}`}>
+                    <tr key={`price-${row.symbol}-${row.provider}`}>
                       <td>
                         <button
                           type="button"
                           className="symbol-history-btn"
-                          onClick={() => openHistoryForSymbol(row.symbol)}
+                          onClick={() => openHistoryForSymbol(row.symbol, row.provider)}
                           title="View price history"
                         >
                           {row.symbol}
                         </button>
                       </td>
+                      <td className="provider-cell">{row.provider}</td>
                       <td><strong>{formatMoney(row.current, row.currency)}</strong></td>
                       <td>{formatMoney(row.previous, row.currency)}</td>
                       <td className={`trend-cell trend-${row.trend}`}>
@@ -1562,11 +1604,11 @@ function App() {
             <div className="history-modal-overlay" role="dialog" aria-modal="true" aria-label="Price history">
               <div className="history-modal">
                 <div className="history-modal-header">
-                  <h3>Price history – {selectedSymbolForHistory}</h3>
+                  <h3>Price history – {selectedSymbolForHistory} <span className="history-modal-provider">({selectedProviderForHistory})</span></h3>
                   <button
                     type="button"
                     className="history-modal-close"
-                    onClick={() => { setSelectedSymbolForHistory(null); setPriceHistoryDailyData(null); setPriceHistoryIntradayData(null); setPriceHistoryViewMode('7days'); }}
+                    onClick={() => { setSelectedSymbolForHistory(null); setSelectedProviderForHistory('yahoo'); setPriceHistoryDailyData(null); setPriceHistoryIntradayData(null); setPriceHistoryViewMode('7days'); }}
                     aria-label="Close"
                   >
                     ×
@@ -1636,7 +1678,7 @@ function App() {
                             className={priceHistoryViewMode === '7days' ? 'history-view-btn active' : 'history-view-btn'}
                             onClick={() => {
                               setPriceHistoryViewMode('7days');
-                              loadPriceHistoryDaily(selectedSymbolForHistory);
+                              loadPriceHistoryDaily(selectedSymbolForHistory, selectedProviderForHistory);
                             }}
                           >
                             Last 7 days
@@ -1648,7 +1690,7 @@ function App() {
                             className={priceHistoryViewMode === 'today' ? 'history-view-btn active' : 'history-view-btn'}
                             onClick={() => {
                               setPriceHistoryViewMode('today');
-                              loadPriceHistoryIntraday(selectedSymbolForHistory);
+                              loadPriceHistoryIntraday(selectedSymbolForHistory, selectedProviderForHistory);
                             }}
                           >
                             Current day
