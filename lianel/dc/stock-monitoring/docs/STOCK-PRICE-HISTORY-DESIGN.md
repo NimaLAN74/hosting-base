@@ -85,7 +85,18 @@ If you only need “price at end of day”:
 - **Migrations 025, 026, 027** use `CREATE TABLE IF NOT EXISTS` and only add GRANTs. They **never** `DROP`, `TRUNCATE`, or `DELETE` from `price_history_daily` or `price_history_intraday`. Re-running them on each deploy is safe and does not remove existing rows.
 - **If daily data disappears after each deployment**, the Postgres instance likely has **no persistent volume** (data dir is lost when the Postgres container is recreated). Fix: use a **named volume** or **host-mounted path** for the Postgres data directory. The stock-monitoring deploy only restarts the backend container; it does not touch Postgres.
 
-### Test price-history API (run on remote server or from pipeline)
+### Verifying which provider returned each price
+
+The `/api/v1/quotes` response includes a **per-quote `source`** field (when present) indicating which provider returned that price:
+
+- `"finnhub"` – Finnhub (tried first when `STOCK_MONITORING_FINNHUB_API_KEY` or `FINNHUB_API_KEY` is set)
+- `"yahoo"` – Yahoo Finance (fallback for symbols Finnhub didn’t resolve)
+- `"stooq"` – Stooq (fallback for still-unresolved symbols)
+- `"alpha_vantage"` – Alpha Vantage (fallback when `STOCK_MONITORING_DATA_PROVIDER_API_KEY` is set)
+
+Example: call `GET /api/v1/quotes?symbols=SHL.L,ASML.AS,AAPL` and inspect each object in `quotes` for `"source"` to see whether prices come from both Finnhub and Yahoo or only Yahoo.
+
+## Test price-history API (run on remote server or from pipeline)
 
 One endpoint returns both **daily** (last N days) and **intraday_today**. Use `days=7` for the 7-day chart; the same response feeds “Current day” via `intraday_today`.
 

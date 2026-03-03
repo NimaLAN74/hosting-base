@@ -39,6 +39,8 @@ pub struct CachedQuote {
     pub price: f64,
     pub currency: Option<String>,
     pub fetched_at_ms: u64,
+    /// Which provider returned this quote: "finnhub", "yahoo", "stooq", "alpha_vantage".
+    pub source: Option<String>,
 }
 
 /// Redis key prefix for intraday points (when feature "redis" enabled): stock:intraday:{symbol}:{yyyy-mm-dd}.
@@ -587,6 +589,9 @@ struct QuoteDto {
     currency: Option<String>,
     fetched_at_ms: u64,
     stale: bool,
+    /// Provider that returned this quote: "finnhub", "yahoo", "stooq", "alpha_vantage".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -774,6 +779,7 @@ async fn quotes(
                         currency: entry.currency.clone(),
                         fetched_at_ms: entry.fetched_at_ms,
                         stale: false,
+                        source: entry.source.clone(),
                     });
                     continue;
                 }
@@ -798,6 +804,7 @@ async fn quotes(
                         price: item.price,
                         currency: resolved_currency,
                         fetched_at_ms: now_ms,
+                        source: item.source.clone(),
                     };
                     write_cache.insert(item.symbol.clone(), quote.clone());
                     fetched_quotes.push(QuoteDto {
@@ -806,6 +813,7 @@ async fn quotes(
                         currency: quote.currency,
                         fetched_at_ms: quote.fetched_at_ms,
                         stale: false,
+                        source: quote.source.clone(),
                     });
                 }
                 let pool = state.pool.clone();
@@ -846,6 +854,7 @@ async fn quotes(
                     currency: entry.currency.clone(),
                     fetched_at_ms: entry.fetched_at_ms,
                     stale: true,
+                    source: entry.source.clone(),
                 });
             }
         }
@@ -1413,6 +1422,7 @@ async fn fetch_finnhub_quotes(
             price: payload.c,
             currency: infer_currency_from_symbol(original_symbol),
             fetched_at_ms: current_time_ms(),
+            source: Some("finnhub".to_string()),
         });
     }
     out
@@ -1518,6 +1528,7 @@ async fn fetch_alpha_vantage_quotes(
             price,
             currency: infer_currency_from_symbol(original_symbol),
             fetched_at_ms: current_time_ms(),
+            source: Some("alpha_vantage".to_string()),
         });
     }
     out
@@ -1558,6 +1569,7 @@ async fn fetch_yahoo_quotes(
                     .currency
                     .or_else(|| infer_currency_from_symbol(&item.symbol)),
                 fetched_at_ms: current_time_ms(),
+                source: Some("yahoo".to_string()),
             });
         }
     }
@@ -1598,6 +1610,7 @@ fn parse_stooq_line(original_symbol: &str, line: &str) -> Option<CachedQuote> {
         price,
         currency: infer_currency_from_symbol(original_symbol),
         fetched_at_ms: current_time_ms(),
+        source: Some("stooq".to_string()),
     })
 }
 
@@ -2326,6 +2339,7 @@ async fn ingest_quotes_internal(
                 price: item.price,
                 currency: item.currency.filter(|s| !s.trim().is_empty()),
                 fetched_at_ms: now_ms,
+                source: Some("finnhub".to_string()),
             },
         );
         ingested += 1;
