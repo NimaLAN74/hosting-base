@@ -419,15 +419,15 @@ function App() {
       const map = {};
       const currencyMap = {};
       for (const item of payload.quotes || []) {
-        if (item?.symbol && typeof item?.price === 'number' && item?.source !== 'unavailable') {
+        if (item?.symbol && item?.source !== 'unavailable') {
           const symbol = String(item.symbol).toUpperCase();
-          map[symbol] = item.price;
-          const apiCurrency = String(item?.currency || '').toUpperCase();
-          const inferredCurrency = inferCurrencyFromSymbol(symbol);
-          const resolvedCurrency = apiCurrency || inferredCurrency;
-          if (resolvedCurrency) {
-            currencyMap[symbol] = resolvedCurrency;
+          const price = typeof item?.price === 'number' && !Number.isNaN(item.price) ? item.price : null;
+          if (price !== null) {
+            map[symbol] = price;
           }
+          const apiCurrency = item?.currency ? String(item.currency).toUpperCase().trim() : '';
+          const inferredCurrency = inferCurrencyFromSymbol(symbol);
+          currencyMap[symbol] = apiCurrency || inferredCurrency || null;
         }
       }
       setPrices((prevPrices) => {
@@ -1500,7 +1500,10 @@ function App() {
                         {symbolSearchResults.map((item) => {
                           const sym = String(item.symbol || item.display_symbol || '').toUpperCase();
                           const label = item.description ? `${sym} — ${item.description}` : sym;
-                          const inWatchlist = watchlistSymbols.includes(sym);
+                          const prov = (addSymbolProvider || 'yahoo').toLowerCase();
+                          const inWatchlist = watchlistItems.some(
+                            (item) => String(item.symbol).toUpperCase() === sym && String(item.provider || 'yahoo').toLowerCase() === prov
+                          );
                           return (
                             <li key={sym} className="symbol-browser-item">
                               <label>
