@@ -333,10 +333,10 @@ async fn symbols_providers_returns_200_and_list() {
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let arr = json.as_array().expect("response is array");
-    assert!(!arr.is_empty(), "at least one provider");
-    let first = &arr[0];
-    assert_eq!(first.get("id").and_then(|v| v.as_str()), Some("finnhub"));
-    assert_eq!(first.get("name").and_then(|v| v.as_str()), Some("Finnhub"));
+    assert!(arr.len() >= 5, "at least 5 providers (yahoo, finnhub, alpaca, stooq, alpha_vantage)");
+    let ids: Vec<&str> = arr.iter().filter_map(|o| o.get("id").and_then(|v| v.as_str())).collect();
+    assert!(ids.contains(&"yahoo"), "list includes yahoo");
+    assert!(ids.contains(&"finnhub"), "list includes finnhub");
 }
 
 #[tokio::test]
