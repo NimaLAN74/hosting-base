@@ -96,23 +96,33 @@ The `/api/v1/quotes` response includes a **per-quote `source`** field (when pres
 
 Example: call `GET /api/v1/quotes?symbols=SHL.L,ASML.AS,AAPL` and inspect each object in `quotes` for `"source"` to see whether prices come from both Finnhub and Yahoo or only Yahoo.
 
-## Test price-history API (run on remote server or from pipeline)
+## Two endpoints: 7-day history vs minute-by-minute today
 
-One endpoint returns both **daily** (last N days) and **intraday_today**. Use `days=7` for the 7-day chart; the same response feeds “Current day” via `intraday_today`.
+The UI has two chart modes, each backed by a **separate endpoint**:
+
+| Button        | Endpoint                          | Data source                                      |
+|---------------|-----------------------------------|--------------------------------------------------|
+| **Last 7 days**  | `GET /api/v1/price-history/daily?symbol=X&days=7`  | `price_history_daily` table (daily bars only)   |
+| **Current day**  | `GET /api/v1/price-history/intraday?symbol=X`     | DB + Redis intraday + in-memory cache (minute-by-minute) |
+
+- **Daily** returns only `{ symbol, daily: [...] }` (close_price per calendar day). No intraday data.
+- **Intraday** returns only `{ symbol, intraday_today: [...] }` (observed_at, price). No daily data.
+
+The combined `GET /api/v1/price-history?symbol=X&days=7` still exists and returns both; the frontend uses the two separate endpoints and connects each UI button to its endpoint.
 
 **On the remote host** (e.g. after SSH):
 
 ```bash
-curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history?symbol=SHL.L&days=7" | jq .
+curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history/daily?symbol=SHL.L&days=7" | jq .
+curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history/intraday?symbol=SHL.L" | jq .
 ```
 
-**Response shape** (for comparison with the chart):
+**Response shapes**:
 
-- `symbol`: string
-- `daily`: array of `{ trade_date, open_price, high_price, low_price, close_price }` — chart uses `trade_date` and `close_price`
-- `intraday_today`: array of `{ observed_at, price }` — chart uses `observed_at` and `price`
+- **daily**: `symbol`, `daily`: array of `{ trade_date, open_price, high_price, low_price, close_price }` — chart uses `trade_date` and `close_price`.
+- **intraday**: `symbol`, `intraday_today`: array of `{ observed_at, price }` — chart uses `observed_at` and `price` (+ session points + “Now” from live quotes).
 
-Chart: **Last 7 days** = daily + intraday_today + session points + “Now”. **Current day** = intraday_today + session points + “Now”. The integration test `price_history_returns_daily_and_intraday_arrays` runs in the Stock Monitoring Backend CI pipeline (no local run).
+Integration tests: `price_history_returns_daily_and_intraday_arrays` (combined), `price_history_daily_returns_daily_array`, `price_history_intraday_returns_intraday_array`.
 
 ### Troubleshooting: “No history yet” or empty chart
 
@@ -128,4 +138,4 @@ Chart: **Last 7 days** = daily + intraday_today + session points + “Now”. **
 2. **REDIS_URL**: Set in `.env` (or as GitHub secret `REDIS_URL`). Use DB 1 if sharing Redis with Airflow (Celery uses 0). If Redis runs in the Airflow stack, attach its container to `lianel-network` and use the container name: `redis://:${REDIS_PASSWORD}@dc-redis-1:6379/1` (so the stock-monitoring container can resolve the host).
 3. **DAGs**: `stock_monitoring_ingest_dag` (hourly 08–17 UTC weekdays) and `stock_monitoring_price_history_roll` (00:05 UTC daily) deployed and enabled.
 4. **Backend**: Built with `--features redis` (Dockerfile does this). Container reads REDIS_URL and writes/reads intraday in Redis.
-5. **Frontend**: Chart modal polls price-history every 5s when open; no extra config.
+5. **Frontend**: Chart modal polls the active view’s endpoint (daily or intraday) every 60s when open.

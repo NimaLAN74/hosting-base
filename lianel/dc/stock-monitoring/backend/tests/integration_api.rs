@@ -375,3 +375,39 @@ async fn price_history_returns_daily_and_intraday_arrays() {
         assert!(point.get("price").and_then(|v| v.as_f64()).is_some(), "intraday_today[{}] must have price number", i);
     }
 }
+
+/// GET /api/v1/price-history/daily — 7-day history only (from DB).
+#[tokio::test]
+async fn price_history_daily_returns_daily_array() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let req = request_with_test_user("GET", "/api/v1/price-history/daily?symbol=AAPL&days=7", None);
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.get("symbol").and_then(|v| v.as_str()), Some("AAPL"));
+    let daily = json.get("daily").and_then(|v| v.as_array()).expect("must have daily array");
+    for (i, point) in daily.iter().enumerate() {
+        assert!(point.get("trade_date").and_then(|v| v.as_str()).is_some(), "daily[{}] trade_date", i);
+        assert!(point.get("close_price").and_then(|v| v.as_f64()).is_some(), "daily[{}] close_price", i);
+    }
+}
+
+/// GET /api/v1/price-history/intraday — minute-by-minute today (DB + Redis + cache).
+#[tokio::test]
+async fn price_history_intraday_returns_intraday_array() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let req = request_with_test_user("GET", "/api/v1/price-history/intraday?symbol=AAPL", None);
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.get("symbol").and_then(|v| v.as_str()), Some("AAPL"));
+    let intraday = json.get("intraday_today").and_then(|v| v.as_array()).expect("must have intraday_today array");
+    for (i, point) in intraday.iter().enumerate() {
+        assert!(point.get("observed_at").and_then(|v| v.as_str()).is_some(), "intraday[{}] observed_at", i);
+        assert!(point.get("price").and_then(|v| v.as_f64()).is_some(), "intraday[{}] price", i);
+    }
+}

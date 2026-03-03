@@ -131,6 +131,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/notifications/read-all", post(mark_all_notifications_read))
         .route("/api/v1/symbols/providers", get(symbols_providers))
         .route("/api/v1/symbols", get(symbols_list))
+        .route("/api/v1/price-history/daily", get(price_history_daily))
+        .route("/api/v1/price-history/intraday", get(price_history_intraday))
         .route("/api/v1/price-history", get(price_history))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
@@ -661,6 +663,20 @@ struct PriceHistoryIntradayPoint {
 struct PriceHistoryResponse {
     symbol: String,
     daily: Vec<PriceHistoryDailyPoint>,
+    intraday_today: Vec<PriceHistoryIntradayPoint>,
+}
+
+/// Response for GET /api/v1/price-history/daily (7-day history from DB only).
+#[derive(Debug, Serialize)]
+struct PriceHistoryDailyResponse {
+    symbol: String,
+    daily: Vec<PriceHistoryDailyPoint>,
+}
+
+/// Response for GET /api/v1/price-history/intraday (minute-by-minute today: DB + Redis + cache).
+#[derive(Debug, Serialize)]
+struct PriceHistoryIntradayResponse {
+    symbol: String,
     intraday_today: Vec<PriceHistoryIntradayPoint>,
 }
 
@@ -1277,6 +1293,137 @@ async fn price_history(
     Ok(Json(PriceHistoryResponse {
         symbol: symbol.clone(),
         daily,
+        intraday_today,
+    }))
+}
+
+/// GET /api/v1/price-history/daily?symbol=X&days=7 — 7-day history only (from price_history_daily table).
+async fn price_history_daily(
+    State(state): State<AppState>,
+    Query(query): Query<PriceHistoryQuery>,
+) -> Result<Json<PriceHistoryDailyResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = query
+        .symbol
+        .as_deref()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL&days=7"})),
+        ))?;
+    let days = query.days.unwrap_or(7).min(365);
+
+    let daily_rows = match sqlx::query_as::<_, (String, f64, f64, f64, f64)>(
+        r#"
+        SELECT trade_date::text, open_price, high_price, low_price, close_price
+        FROM stock_monitoring.price_history_daily
+        WHERE symbol = $1
+        ORDER BY trade_date DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(symbol.as_str())
+    .bind(days as i64)
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("price_history_daily (returning empty): {}", e);
+            vec![]
+        }
+    };
+
+    let daily: Vec<PriceHistoryDailyPoint> = daily_rows
+        .into_iter()
+        .map(|(d, o, h, l, c)| PriceHistoryDailyPoint {
+            trade_date: d,
+            open_price: o,
+            high_price: h,
+            low_price: l,
+            close_price: c,
+        })
+        .collect();
+
+    tracing::info!("price_history_daily: symbol={} daily={}", symbol, daily.len());
+    Ok(Json(PriceHistoryDailyResponse {
+        symbol: symbol.to_string(),
+        daily,
+    }))
+}
+
+/// GET /api/v1/price-history/intraday?symbol=X — minute-by-minute today (DB + Redis + in-memory cache).
+async fn price_history_intraday(
+    State(state): State<AppState>,
+    Query(query): Query<PriceHistoryQuery>,
+) -> Result<Json<PriceHistoryIntradayResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = query
+        .symbol
+        .as_deref()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL"})),
+        ))?;
+
+    let intraday_rows = match sqlx::query_as::<_, (String, f64)>(
+        r#"
+        SELECT observed_at::text, price
+        FROM stock_monitoring.price_history_intraday
+        WHERE symbol = $1
+          AND (observed_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
+        ORDER BY observed_at
+        "#,
+    )
+    .bind(symbol.as_str())
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("price_history_intraday db (returning empty): {}", e);
+            vec![]
+        }
+    };
+
+    let mut intraday_today: Vec<PriceHistoryIntradayPoint> = intraday_rows
+        .into_iter()
+        .map(|(t, p)| PriceHistoryIntradayPoint {
+            observed_at: t,
+            price: p,
+        })
+        .collect();
+
+    #[cfg(feature = "redis")]
+    if let Some(redis) = state.redis.clone() {
+        match redis_fetch_intraday_today(redis, &symbol).await {
+            Ok(redis_points) => {
+                for (observed_at, price) in redis_points {
+                    intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
+                }
+            }
+            Err(e) => tracing::warn!("price_history_intraday redis (skipping): {}", e),
+        }
+    }
+
+    let cache = state.quote_service.cache.read().await;
+    if let Some(entry) = cache.get(&symbol) {
+        if let Some(dt) = chrono::Utc.timestamp_millis_opt(entry.fetched_at_ms as i64).single() {
+            let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
+            intraday_today.push(PriceHistoryIntradayPoint {
+                observed_at,
+                price: entry.price,
+            });
+        }
+    }
+    drop(cache);
+
+    intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
+    tracing::info!("price_history_intraday: symbol={} points={}", symbol, intraday_today.len());
+
+    Ok(Json(PriceHistoryIntradayResponse {
+        symbol: symbol.to_string(),
         intraday_today,
     }))
 }

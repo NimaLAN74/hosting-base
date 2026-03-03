@@ -231,7 +231,8 @@ function App() {
   const [selectedAlertIds, setSelectedAlertIds] = useState(new Set());
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [selectedSymbolForHistory, setSelectedSymbolForHistory] = useState(null);
-  const [priceHistoryData, setPriceHistoryData] = useState(null);
+  const [priceHistoryDailyData, setPriceHistoryDailyData] = useState(null);   // from /price-history/daily (7-day bars)
+  const [priceHistoryIntradayData, setPriceHistoryIntradayData] = useState(null); // from /price-history/intraday (minute cache)
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
   const [priceHistoryViewMode, setPriceHistoryViewMode] = useState('7days'); // '7days' | 'today'
   const [sessionChartPoints, setSessionChartPoints] = useState({}); // symbol -> [{ label, ts, price }], max 60 points per symbol (builds history from table updates)
@@ -499,29 +500,63 @@ function App() {
     }
   }, [applyAuthError, selectedSymbolProvider]);
 
-  const loadPriceHistory = useCallback(async (symbol) => {
+  const loadPriceHistoryDaily = useCallback(async (symbol) => {
     if (!symbol) return;
     setPriceHistoryLoading(true);
-    setPriceHistoryData(null);
     try {
-      // Request last 7 days of daily + today's intraday (backend returns both)
       const params = new URLSearchParams({ symbol, days: '7' });
-      const data = await apiJson(`/price-history?${params.toString()}`);
-      setPriceHistoryData(data);
+      const data = await apiJson(`/price-history/daily?${params.toString()}`);
+      setPriceHistoryDailyData(data);
     } catch (err) {
       applyAuthError(err);
-      setPriceHistoryData(null);
+      setPriceHistoryDailyData(null);
     } finally {
       setPriceHistoryLoading(false);
     }
   }, [applyAuthError]);
 
+  const loadPriceHistoryIntraday = useCallback(async (symbol) => {
+    if (!symbol) return;
+    setPriceHistoryLoading(true);
+    try {
+      const params = new URLSearchParams({ symbol });
+      const data = await apiJson(`/price-history/intraday?${params.toString()}`);
+      setPriceHistoryIntradayData(data);
+    } catch (err) {
+      applyAuthError(err);
+      setPriceHistoryIntradayData(null);
+    } finally {
+      setPriceHistoryLoading(false);
+    }
+  }, [applyAuthError]);
+
+  const loadPriceHistoryForView = useCallback((symbol, viewMode) => {
+    if (viewMode === '7days') loadPriceHistoryDaily(symbol);
+    else loadPriceHistoryIntraday(symbol);
+  }, [loadPriceHistoryDaily, loadPriceHistoryIntraday]);
+
   const openHistoryForSymbol = useCallback((symbol) => {
+    if (!symbol) return;
     setSelectedSymbolForHistory(symbol);
-    loadPriceHistory(symbol);
-    // Seed one session point from current price so chart shows something immediately
-    const price = symbol && prices[symbol];
-    if (symbol && typeof price === 'number' && Number.isFinite(price)) {
+    setPriceHistoryDailyData(null);
+    setPriceHistoryIntradayData(null);
+    setPriceHistoryLoading(true);
+    (async () => {
+      try {
+        const [dailyRes, intradayRes] = await Promise.all([
+          apiJson(`/price-history/daily?symbol=${encodeURIComponent(symbol)}&days=7`),
+          apiJson(`/price-history/intraday?symbol=${encodeURIComponent(symbol)}`),
+        ]);
+        setPriceHistoryDailyData(dailyRes);
+        setPriceHistoryIntradayData(intradayRes);
+      } catch (err) {
+        applyAuthError(err);
+      } finally {
+        setPriceHistoryLoading(false);
+      }
+    })();
+    const price = prices[symbol];
+    if (typeof price === 'number' && Number.isFinite(price)) {
       const now = Date.now();
       const label = new Date(now).toISOString().slice(11, 16);
       setSessionChartPoints((prev) => {
@@ -530,7 +565,7 @@ function App() {
         return { ...prev, [symbol]: next };
       });
     }
-  }, [loadPriceHistory, prices]);
+  }, [applyAuthError, prices]);
 
   useEffect(() => {
     loadData();
@@ -555,14 +590,14 @@ function App() {
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
-  // Chart refresh: poll price-history every 60s while modal is open (matches dashboard quote refresh).
+  // Chart refresh: poll the endpoint for the active view every 60s while modal is open.
   useEffect(() => {
     if (!selectedSymbolForHistory) return undefined;
     const intervalId = setInterval(() => {
-      loadPriceHistory(selectedSymbolForHistory);
+      loadPriceHistoryForView(selectedSymbolForHistory, priceHistoryViewMode);
     }, 60000);
     return () => clearInterval(intervalId);
-  }, [selectedSymbolForHistory, loadPriceHistory]);
+  }, [selectedSymbolForHistory, priceHistoryViewMode, loadPriceHistoryForView]);
 
   // Build session history from table updates so the chart shows a series even when backend returns little/no history.
   useEffect(() => {
@@ -1539,58 +1574,45 @@ function App() {
                 </div>
                 <div className="history-modal-body">
                   {priceHistoryLoading && <p className="history-loading">Loading…</p>}
-                  {!priceHistoryLoading && priceHistoryData && (() => {
-                    const rawDaily = priceHistoryData.daily || [];
-                    const daily = rawDaily
-                      .map((d) => {
-                        const tradeDate = d.trade_date ?? d.tradeDate;
-                        const closePrice = typeof (d.close_price ?? d.closePrice) === 'number' ? (d.close_price ?? d.closePrice) : null;
-                        const ts = parsePriceHistoryTs(tradeDate);
-                        if (ts == null || closePrice == null) return null;
-                        return { label: String(tradeDate).slice(0, 10), ts, price: closePrice };
-                      })
-                      .filter(Boolean);
-                    const rawIntraday = priceHistoryData.intraday_today || priceHistoryData.intradayToday || [];
-                    const intraday = rawIntraday
-                      .map((i) => {
-                        const observedAt = i.observed_at ?? i.observedAt;
-                        const priceVal = typeof (i.price) === 'number' ? i.price : null;
-                        const ts = parsePriceHistoryTs(observedAt);
-                        if (ts == null || priceVal == null) return null;
-                        const label = String(observedAt).slice(0, 19).replace('T', ' ');
-                        return { label, ts, price: priceVal };
-                      })
-                      .filter(Boolean);
-                    const sessionPoints = (sessionChartPoints[selectedSymbolForHistory] || []).map((p) => ({
-                      ...p,
-                      ts: p.ts,
-                    }));
+                  {!priceHistoryLoading && (priceHistoryDailyData || priceHistoryIntradayData) && (() => {
+                    const rawDaily = (priceHistoryDailyData?.daily || []).map((d) => {
+                      const tradeDate = d.trade_date ?? d.tradeDate;
+                      const closePrice = typeof (d.close_price ?? d.closePrice) === 'number' ? (d.close_price ?? d.closePrice) : null;
+                      const ts = parsePriceHistoryTs(tradeDate);
+                      if (ts == null || closePrice == null) return null;
+                      return { label: String(tradeDate).slice(0, 10), ts, price: closePrice };
+                    }).filter(Boolean);
+                    const rawIntraday = (priceHistoryIntradayData?.intraday_today || priceHistoryIntradayData?.intradayToday || []).map((i) => {
+                      const observedAt = i.observed_at ?? i.observedAt;
+                      const priceVal = typeof (i.price) === 'number' ? i.price : null;
+                      const ts = parsePriceHistoryTs(observedAt);
+                      if (ts == null || priceVal == null) return null;
+                      const label = String(observedAt).slice(0, 19).replace('T', ' ');
+                      return { label, ts, price: priceVal };
+                    }).filter(Boolean);
+                    const sessionPoints = (sessionChartPoints[selectedSymbolForHistory] || []).map((p) => ({ ...p, ts: p.ts }));
                     const isTodayView = priceHistoryViewMode === 'today';
                     let combined;
                     if (isTodayView) {
-                      combined = [...intraday, ...sessionPoints].sort((a, b) => a.ts - b.ts);
+                      combined = [...rawIntraday, ...sessionPoints].sort((a, b) => a.ts - b.ts);
                       if (combined.length === 0) {
                         const currentPrice = prices[selectedSymbolForHistory];
                         if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
-                          const now = new Date();
-                          combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                          combined = [{ label: 'Now', ts: Date.now(), price: currentPrice }];
                         }
                       }
                     } else {
-                      combined = [...daily, ...intraday, ...sessionPoints].sort((a, b) => a.ts - b.ts);
+                      combined = [...rawDaily].sort((a, b) => a.ts - b.ts);
                       if (combined.length === 0) {
                         const currentPrice = prices[selectedSymbolForHistory];
                         if (typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
-                          const now = new Date();
-                          combined = [{ label: 'Now', ts: now.getTime(), price: currentPrice }];
+                          combined = [{ label: 'Now', ts: Date.now(), price: currentPrice }];
                         }
                       }
                     }
-                    // Append live "Now" from table so chart shows latest price.
                     const currentPrice = prices[selectedSymbolForHistory];
                     if (combined.length > 0 && typeof currentPrice === 'number' && Number.isFinite(currentPrice)) {
-                      const now = Date.now();
-                      const livePoint = { label: 'Now', ts: now, price: currentPrice };
+                      const livePoint = { label: 'Now', ts: Date.now(), price: currentPrice };
                       if (combined[combined.length - 1].label === 'Now') {
                         combined = [...combined.slice(0, -1), livePoint];
                       } else {
@@ -1612,7 +1634,10 @@ function App() {
                             role="tab"
                             aria-selected={priceHistoryViewMode === '7days'}
                             className={priceHistoryViewMode === '7days' ? 'history-view-btn active' : 'history-view-btn'}
-                            onClick={() => setPriceHistoryViewMode('7days')}
+                            onClick={() => {
+                              setPriceHistoryViewMode('7days');
+                              loadPriceHistoryDaily(selectedSymbolForHistory);
+                            }}
                           >
                             Last 7 days
                           </button>
@@ -1621,7 +1646,10 @@ function App() {
                             role="tab"
                             aria-selected={priceHistoryViewMode === 'today'}
                             className={priceHistoryViewMode === 'today' ? 'history-view-btn active' : 'history-view-btn'}
-                            onClick={() => setPriceHistoryViewMode('today')}
+                            onClick={() => {
+                              setPriceHistoryViewMode('today');
+                              loadPriceHistoryIntraday(selectedSymbolForHistory);
+                            }}
                           >
                             Current day
                           </button>
