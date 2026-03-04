@@ -199,8 +199,9 @@ async fn refresh_quotes_cache(state: &AppState) -> anyhow::Result<()> {
                 source: Some(provider.clone()),
             };
             write_cache.insert(key.clone(), quote);
-            day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
-            prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
+            let list = day_hist.entry(key.clone()).or_default();
+            append_day_history_if_changed(list, now_ms, item.price);
+            prune_to_same_day(list, now_ms);
             intraday_items.push((item.symbol.clone(), provider.clone(), item.price));
         }
     }
@@ -956,6 +957,20 @@ fn prune_to_same_day(list: &mut Vec<(u64, f64)>, day_ms: u64) {
     list.retain(|(ms, _)| is_same_calendar_day(*ms, day_ms));
 }
 
+/// Append (now_ms, price) to day history only when price actually changed from the last point (or list is empty).
+/// Avoids repeating the same cached/provider price every minute when market is closed or provider returns same value.
+fn append_day_history_if_changed(list: &mut Vec<(u64, f64)>, now_ms: u64, price: f64) {
+    const EPS: f64 = 1e-9;
+    let last_price = list.last().map(|(_, p)| *p);
+    let changed = match last_price {
+        None => true,
+        Some(p) => (p - price).abs() > EPS || !price.is_finite(),
+    };
+    if changed {
+        list.push((now_ms, price));
+    }
+}
+
 /// Get day's history for a cache key, pruned to same day as now_ms, sorted by at_ms.
 fn get_day_history_sorted(
     day_history: &HashMap<String, Vec<(u64, f64)>>,
@@ -1312,8 +1327,9 @@ async fn quotes(
                         source: Some(provider.clone()),
                     };
                     write_cache.insert(key.clone(), quote);
-                    day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
-                    prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
+                    let list = day_hist.entry(key.clone()).or_default();
+                    append_day_history_if_changed(list, now_ms, item.price);
+                    prune_to_same_day(list, now_ms);
                     let history = get_day_history_sorted(&day_hist, &key, now_ms);
                     fetched_quotes.push(QuoteDto {
                         symbol: item.symbol.clone(),
@@ -3282,8 +3298,9 @@ async fn ingest_quotes_internal(
                 source: Some(provider),
             },
         );
-        day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
-        prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
+        let list = day_hist.entry(key.clone()).or_default();
+        append_day_history_if_changed(list, now_ms, item.price);
+        prune_to_same_day(list, now_ms);
         ingested += 1;
     }
     drop(day_hist);
