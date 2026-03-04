@@ -87,6 +87,7 @@ async fn test_state() -> AppState {
             .build()
             .expect("http client"),
         cache: Arc::new(RwLock::new(HashMap::new())),
+        day_history: Arc::new(RwLock::new(HashMap::new())),
     };
     AppState {
         pool,

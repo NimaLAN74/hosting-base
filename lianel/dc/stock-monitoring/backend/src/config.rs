@@ -64,9 +64,9 @@ impl AppConfig {
             keycloak_realm: env::var("KEYCLOAK_REALM").unwrap_or_else(|_| "lianel".to_string()),
             quote_provider: env::var("STOCK_MONITORING_QUOTE_PROVIDER")
                 .unwrap_or_else(|_| "yahoo".to_string()),
-            // Keep below frontend auto-refresh interval (60s) so each poll refetches all symbols and all watchlist prices update.
+            // Source called at most once per minute; cache TTL 60s so provider is not called more than every 1 min.
             quote_cache_ttl_seconds: env::var("STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")
-                .unwrap_or_else(|_| "30".to_string())
+                .unwrap_or_else(|_| "60".to_string())
                 .parse()
                 .context("Invalid STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS")?,
             data_provider_api_key: env::var("STOCK_MONITORING_DATA_PROVIDER_API_KEY")

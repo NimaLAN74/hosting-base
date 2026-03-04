@@ -21,6 +21,13 @@ use chrono::TimeZone;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 
+/// One point in the day's price history (for UI).
+#[derive(Debug, Clone, Serialize)]
+pub struct QuoteHistoryPoint {
+    pub at_ms: u64,
+    pub price: f64,
+}
+
 #[derive(Clone)]
 pub struct QuoteService {
     pub provider: String,
@@ -32,7 +39,10 @@ pub struct QuoteService {
     pub alpaca_api_key_id: Option<String>,
     pub alpaca_api_secret_key: Option<String>,
     pub http: reqwest::Client,
+    /// Latest quote per (symbol|provider) for current price.
     pub cache: Arc<RwLock<HashMap<String, CachedQuote>>>,
+    /// Day's history per (symbol|provider): new prices are appended, not replaced. Returned to UI every minute.
+    pub day_history: Arc<RwLock<HashMap<String, Vec<(u64, f64)>>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -598,6 +608,8 @@ struct QuoteDto {
     currency: Option<String>,
     fetched_at_ms: u64,
     stale: bool,
+    /// Day's history (at_ms, price); new prices appended every minute, not replaced. Sorted by at_ms.
+    history: Vec<QuoteHistoryPoint>,
 }
 
 #[derive(Debug, Serialize)]
@@ -805,10 +817,35 @@ fn cache_key(symbol: &str, provider: &str) -> String {
     format!("{}|{}", symbol.to_uppercase(), provider.to_lowercase())
 }
 
-/// Max quote cache age (60s) so prices always refresh from provider at least this often.
+/// Source is called at most every 60s; cache valid for 60s so we don't call provider more than once per minute.
 const QUOTE_CACHE_MAX_TTL_SECS: u64 = 60;
 
-/// True if a cache entry is still within TTL (so we serve it and don't refetch).
+/// True if both timestamps (ms) fall on the same UTC calendar day.
+fn is_same_calendar_day(ms1: u64, ms2: u64) -> bool {
+    const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
+    (ms1 / MS_PER_DAY) == (ms2 / MS_PER_DAY)
+}
+
+/// Prune list to only points on the same UTC calendar day as day_ms.
+fn prune_to_same_day(list: &mut Vec<(u64, f64)>, day_ms: u64) {
+    list.retain(|(ms, _)| is_same_calendar_day(*ms, day_ms));
+}
+
+/// Get day's history for a cache key, pruned to same day as now_ms, sorted by at_ms.
+fn get_day_history_sorted(
+    day_history: &HashMap<String, Vec<(u64, f64)>>,
+    key: &str,
+    now_ms: u64,
+) -> Vec<QuoteHistoryPoint> {
+    let mut list = day_history.get(key).cloned().unwrap_or_default();
+    prune_to_same_day(&mut list, now_ms);
+    list.sort_by_key(|(ms, _)| *ms);
+    list.into_iter()
+        .map(|(at_ms, price)| QuoteHistoryPoint { at_ms, price })
+        .collect()
+}
+
+/// True if a cache entry is still within TTL (so we serve it and don't refetch). TTL capped at 60s.
 fn is_cache_fresh(fetched_at_ms: u64, now_ms: u64, ttl: &std::time::Duration) -> bool {
     let ttl_ms = (ttl.as_millis() as u64).min(QUOTE_CACHE_MAX_TTL_SECS * 1000);
     let elapsed = now_ms.saturating_sub(fetched_at_ms);
@@ -861,17 +898,19 @@ async fn quotes(
     let pairs = parse_quotes_query(&query)?;
     let now_ms = current_time_ms();
 
-    // Cache key = symbol|provider; valid for cache_ttl (e.g. 60s) so prices update when providers change.
+    // Cache key = symbol|provider; valid for 60s so source is called at most once per minute.
     let ttl = &state.quote_service.cache_ttl;
     let mut cached = Vec::new();
     let mut missing = Vec::new();
     {
         let cache = state.quote_service.cache.read().await;
+        let day_hist = state.quote_service.day_history.read().await;
         for (symbol, provider) in &pairs {
             let key = cache_key(symbol, provider);
             if let Some(entry) = cache.get(&key) {
                 if is_cache_fresh(entry.fetched_at_ms, now_ms, ttl) {
                     let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
+                    let history = get_day_history_sorted(&day_hist, &key, now_ms);
                     cached.push(QuoteDto {
                         symbol: entry.symbol.clone(),
                         provider: provider.clone(),
@@ -879,6 +918,7 @@ async fn quotes(
                         currency: currency.clone(),
                         fetched_at_ms: entry.fetched_at_ms,
                         stale: false,
+                        history,
                     });
                     continue;
                 }
@@ -890,6 +930,7 @@ async fn quotes(
     let mut fetched_quotes = Vec::new();
     let mut warnings = Vec::new();
     if !missing.is_empty() {
+        tracing::info!("quotes: refetching {} pairs from provider (cache stale or missing)", missing.len());
         let (items, from_waterfall) = match fetch_quotes_by_provider(&state.quote_service, &missing).await {
             Ok(items) => (items, false),
             Err(err) => {
@@ -906,8 +947,9 @@ async fn quotes(
             }
         };
         if !items.is_empty() {
-            // Build by requested (symbol, provider); each entry has provider = target from request
+            // Append new prices to day history (don't replace); then build response with full day history.
             let mut write_cache = state.quote_service.cache.write().await;
+            let mut day_hist = state.quote_service.day_history.write().await;
             for (symbol, provider) in &missing {
                 let item = items.iter().find(|i| {
                     i.symbol.eq_ignore_ascii_case(symbol)
@@ -926,7 +968,10 @@ async fn quotes(
                         fetched_at_ms: now_ms,
                         source: Some(provider.clone()),
                     };
-                    write_cache.insert(key, quote);
+                    write_cache.insert(key.clone(), quote);
+                    day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
+                    prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
+                    let history = get_day_history_sorted(&day_hist, &key, now_ms);
                     fetched_quotes.push(QuoteDto {
                         symbol: item.symbol.clone(),
                         provider: provider.clone(),
@@ -934,9 +979,11 @@ async fn quotes(
                         currency: resolved_currency,
                         fetched_at_ms: now_ms,
                         stale: false,
+                        history,
                     });
                 }
             }
+            drop(day_hist);
             drop(write_cache);
             let pool = state.pool.clone();
             let intraday_items: Vec<(String, String, f64)> = fetched_quotes
@@ -966,11 +1013,14 @@ async fn quotes(
     }
 
     if !warnings.is_empty() && fetched_quotes.is_empty() {
+        tracing::warn!("quotes: refetch failed ({}), serving stale from cache for {} pairs", warnings.join("; "), missing.len());
         let cache = state.quote_service.cache.read().await;
+        let day_hist = state.quote_service.day_history.read().await;
         for (symbol, provider) in &missing {
             let key = cache_key(symbol, provider);
             if let Some(entry) = cache.get(&key) {
                 let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
+                let history = get_day_history_sorted(&day_hist, &key, now_ms);
                 cached.push(QuoteDto {
                     symbol: entry.symbol.clone(),
                     provider: provider.clone(),
@@ -978,6 +1028,7 @@ async fn quotes(
                     currency,
                     fetched_at_ms: entry.fetched_at_ms,
                     stale: true,
+                    history,
                 });
             }
         }
@@ -1043,6 +1094,7 @@ async fn quotes(
                 currency: currency.clone(),
                 fetched_at_ms: now_ms,
                 stale: true,
+                history: vec![],
             });
         }
         quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.provider.cmp(&b.provider)));
@@ -2855,6 +2907,7 @@ async fn ingest_quotes_internal(
     let mut ingested = 0usize;
     let mut intraday_items: Vec<(String, String, f64)> = Vec::new();
     let mut cache = state.quote_service.cache.write().await;
+    let mut day_hist = state.quote_service.day_history.write().await;
     for item in body.quotes {
         let symbol = item.symbol.trim().to_uppercase();
         if symbol.is_empty() || !item.price.is_finite() || item.price <= 0.0 {
@@ -2869,7 +2922,7 @@ async fn ingest_quotes_internal(
         intraday_items.push((symbol.clone(), provider.clone(), item.price));
         let key = cache_key(&symbol, &provider);
         cache.insert(
-            key,
+            key.clone(),
             CachedQuote {
                 symbol: symbol.clone(),
                 price: item.price,
@@ -2878,8 +2931,11 @@ async fn ingest_quotes_internal(
                 source: Some(provider),
             },
         );
+        day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
+        prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
         ingested += 1;
     }
+    drop(day_hist);
     drop(cache);
 
     if !intraday_items.is_empty() {

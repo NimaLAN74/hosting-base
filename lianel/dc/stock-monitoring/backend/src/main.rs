@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
             .timeout(Duration::from_secs(8))
             .build()?,
         cache: Arc::new(RwLock::new(HashMap::new())),
+        day_history: Arc::new(RwLock::new(HashMap::new())),
     };
 
     #[cfg(feature = "redis")]
