@@ -592,18 +592,16 @@ struct QuotesQuery {
 #[derive(Debug, Serialize)]
 struct QuoteDto {
     symbol: String,
+    /// Provider for this quote (target source): "finnhub", "alpaca", "yahoo", "stooq", "alpha_vantage", or "unavailable".
+    provider: String,
     price: f64,
     currency: Option<String>,
     fetched_at_ms: u64,
     stale: bool,
-    /// Provider that returned this quote: "finnhub", "alpaca", "yahoo", "stooq", "alpha_vantage", or "unavailable" (placeholder when no provider had data).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct QuotesResponse {
-    provider: String,
     as_of_ms: u64,
     quotes: Vec<QuoteDto>,
     warnings: Vec<String>,
@@ -868,11 +866,11 @@ async fn quotes(
                     let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
                     cached.push(QuoteDto {
                         symbol: entry.symbol.clone(),
+                        provider: provider.clone(),
                         price: entry.price,
                         currency: currency.clone(),
                         fetched_at_ms: entry.fetched_at_ms,
                         stale: false,
-                        source: Some(provider.clone()),
                     });
                     continue;
                 }
@@ -884,58 +882,58 @@ async fn quotes(
     let mut fetched_quotes = Vec::new();
     let mut warnings = Vec::new();
     if !missing.is_empty() {
-        let items = match fetch_quotes_by_provider(&state.quote_service, &missing).await {
-            Ok(items) => items,
+        let (items, from_waterfall) = match fetch_quotes_by_provider(&state.quote_service, &missing).await {
+            Ok(items) => (items, false),
             Err(err) => {
                 warnings.push(err.to_string());
-                // Last-resort: run full provider waterfall for all unique symbols (Yahoo/Finnhub/Alpaca/Stooq/Alpha Vantage)
                 let symbols: Vec<String> = missing.iter().map(|(s, _)| s.clone()).collect();
-                match fetch_provider_quotes(&state.quote_service, &symbols).await {
-                    Ok(waterfall) => waterfall,
+                let waterfall = match fetch_provider_quotes(&state.quote_service, &symbols).await {
+                    Ok(w) => w,
                     Err(e) => {
                         tracing::warn!("quotes waterfall fallback failed: {}", e);
                         Vec::new()
                     }
-                }
+                };
+                (waterfall, true)
             }
         };
         if !items.is_empty() {
+            // Build by requested (symbol, provider); each entry has provider = target from request
             let mut write_cache = state.quote_service.cache.write().await;
-            for item in &items {
-                let provider = item.source.as_deref().unwrap_or("yahoo");
-                let key = cache_key(&item.symbol, provider);
-                let resolved_currency = item
-                    .currency
-                    .clone()
-                    .or_else(|| infer_currency_from_symbol(&item.symbol));
-                let quote = CachedQuote {
-                    symbol: item.symbol.clone(),
-                    price: item.price,
-                    currency: resolved_currency.clone(),
-                    fetched_at_ms: now_ms,
-                    source: item.source.clone(),
-                };
-                write_cache.insert(key, quote.clone());
-                fetched_quotes.push(QuoteDto {
-                    symbol: quote.symbol,
-                    price: quote.price,
-                    currency: resolved_currency,
-                    fetched_at_ms: quote.fetched_at_ms,
-                    stale: false,
-                    source: quote.source.clone(),
+            for (symbol, provider) in &missing {
+                let item = items.iter().find(|i| {
+                    i.symbol.eq_ignore_ascii_case(symbol)
+                        && (from_waterfall || i.source.as_deref() == Some(provider.as_str()))
                 });
+                if let Some(item) = item {
+                    let key = cache_key(symbol, provider);
+                    let resolved_currency = item
+                        .currency
+                        .clone()
+                        .or_else(|| infer_currency_from_symbol(&item.symbol));
+                    let quote = CachedQuote {
+                        symbol: item.symbol.clone(),
+                        price: item.price,
+                        currency: resolved_currency.clone(),
+                        fetched_at_ms: now_ms,
+                        source: Some(provider.clone()),
+                    };
+                    write_cache.insert(key, quote);
+                    fetched_quotes.push(QuoteDto {
+                        symbol: item.symbol.clone(),
+                        provider: provider.clone(),
+                        price: item.price,
+                        currency: resolved_currency,
+                        fetched_at_ms: now_ms,
+                        stale: false,
+                    });
+                }
             }
             drop(write_cache);
             let pool = state.pool.clone();
-            let intraday_items: Vec<(String, String, f64)> = items
+            let intraday_items: Vec<(String, String, f64)> = fetched_quotes
                 .iter()
-                .map(|i| {
-                    (
-                        i.symbol.clone(),
-                        i.source.clone().unwrap_or_else(|| "yahoo".to_string()),
-                        i.price,
-                    )
-                })
+                .map(|q| (q.symbol.clone(), q.provider.clone(), q.price))
                 .collect();
             let observed_at_secs = current_time_secs();
             tokio::spawn({
@@ -967,11 +965,11 @@ async fn quotes(
                 let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
                 cached.push(QuoteDto {
                     symbol: entry.symbol.clone(),
+                    provider: provider.clone(),
                     price: entry.price,
                     currency,
                     fetched_at_ms: entry.fetched_at_ms,
                     stale: true,
-                    source: entry.source.clone(),
                 });
             }
         }
@@ -980,13 +978,13 @@ async fn quotes(
     let mut quotes = Vec::new();
     quotes.extend(cached);
     quotes.extend(fetched_quotes);
-    quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+    quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.provider.cmp(&b.provider)));
 
     // Persist all returned quotes as intraday points so the price-history chart gets history (even when from cache).
     let intraday_from_response: Vec<(String, String, f64)> = quotes
         .iter()
-        .filter(|q| q.source.as_deref() != Some("unavailable"))
-        .map(|q| (q.symbol.clone(), q.source.clone().unwrap_or_else(|| "yahoo".to_string()), q.price))
+        .filter(|q| q.provider != "unavailable" && q.price > 0.0)
+        .map(|q| (q.symbol.clone(), q.provider.clone(), q.price))
         .collect();
     if !intraday_from_response.is_empty() {
         let pool = state.pool.clone();
@@ -1009,36 +1007,40 @@ async fn quotes(
         }
     }
 
-    // Unresolved = symbols that have no quote at all (so frontend gets one placeholder per missing symbol, not per provider)
-    let symbols_with_quote: std::collections::HashSet<String> = quotes
+    // Unresolved = (symbol, provider) pairs that have no quote; one placeholder per pair with that pair's provider
+    let pairs_with_quote: std::collections::HashSet<(String, String)> = quotes
         .iter()
-        .map(|q| q.symbol.to_uppercase())
+        .map(|q| (q.symbol.to_uppercase(), q.provider.to_lowercase()))
         .collect();
-    let unresolved_symbols: Vec<String> = pairs
+    let unresolved_pairs: Vec<(String, String)> = pairs
         .iter()
-        .map(|(s, _)| s.to_uppercase())
-        .filter(|s| !symbols_with_quote.contains(s))
+        .map(|(s, p)| (s.to_uppercase(), p.to_lowercase()))
+        .filter(|pair| !pairs_with_quote.contains(pair))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    if !unresolved_symbols.is_empty() {
-        warnings.push(format!("No quote for: {}", unresolved_symbols.join(",")));
-        for symbol in &unresolved_symbols {
+    if !unresolved_pairs.is_empty() {
+        let msg = unresolved_pairs
+            .iter()
+            .map(|(s, p)| format!("{}:{}", s, p))
+            .collect::<Vec<_>>()
+            .join(",");
+        warnings.push(format!("No quote for: {}", msg));
+        for (symbol, provider) in &unresolved_pairs {
             let currency = infer_currency_from_symbol(symbol).or_else(|| Some("USD".to_string()));
             quotes.push(QuoteDto {
                 symbol: symbol.clone(),
+                provider: provider.clone(),
                 price: 0.0,
                 currency: currency.clone(),
                 fetched_at_ms: now_ms,
                 stale: true,
-                source: Some("unavailable".to_string()),
             });
         }
-        quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+        quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.provider.cmp(&b.provider)));
     }
 
     Ok(Json(QuotesResponse {
-        provider: state.quote_service.provider.clone(),
         as_of_ms: now_ms,
         quotes,
         warnings,
@@ -1765,13 +1767,11 @@ async fn fetch_quotes_by_provider(
                 Some(q)
             }
             None => {
-                // Fallback: try any provider (waterfall) so user gets data from Finnhub/Alpaca/Yahoo/Stooq/Alpha Vantage
+                // Fallback: try any provider (waterfall) so user gets data; response still tags entry with requested provider
                 let fallback = fetch_provider_quotes(quote_service, &[symbol.clone()]).await.ok();
                 let mut q = fallback.and_then(|mut v| v.pop());
                 if let Some(ref mut q) = q {
-                    if q.source.is_none() {
-                        q.source = Some("yahoo".to_string());
-                    }
+                    q.source = Some(provider.clone());
                 }
                 q
             }

@@ -138,10 +138,14 @@ async fn quotes_with_symbols_returns_200_and_shape() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.get("provider").is_some());
     assert!(json.get("as_of_ms").is_some());
     assert!(json.get("quotes").is_some());
     assert!(json.get("warnings").is_some());
+    assert!(json.get("provider").is_none(), "no top-level provider; provider is per-entry only");
+    let quotes = json.get("quotes").and_then(|v| v.as_array()).unwrap();
+    for q in quotes {
+        assert!(q.get("provider").is_some(), "each quote must have provider");
+    }
 }
 
 #[tokio::test]
@@ -158,11 +162,12 @@ async fn quotes_with_pairs_returns_200_and_shape() {
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json.get("quotes").is_some());
+    assert!(json.get("provider").is_none(), "no top-level provider; provider is per-entry only");
     let quotes = json.get("quotes").and_then(|v| v.as_array()).unwrap();
     assert!(!quotes.is_empty() || json.get("warnings").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false), "pairs= returns quotes or warnings");
     for q in quotes {
         assert!(q.get("symbol").and_then(|v| v.as_str()).is_some());
-        assert!(q.get("source").is_some() || q.get("price").is_some());
+        assert!(q.get("provider").is_some(), "each entry has provider (target source for price)");
     }
 }
 
@@ -193,7 +198,7 @@ async fn quotes_pairs_after_ingest_returns_cached_by_provider() {
     assert!(q.is_some(), "pairs=PAIRTEST:yahoo must return cached quote after ingest");
     let q = q.unwrap();
     assert_eq!(q.get("price").and_then(|v| v.as_f64()), Some(42.5));
-    assert_eq!(q.get("source").and_then(|v| v.as_str()), Some("yahoo"));
+    assert_eq!(q.get("provider").and_then(|v| v.as_str()), Some("yahoo"));
 }
 
 #[tokio::test]

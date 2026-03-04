@@ -416,19 +416,25 @@ function App() {
         throw new ApiError(`Quotes request failed (${response.status})`, response.status);
       }
       const payload = await response.json();
+      // No top-level provider: each entry has its own provider (target source for price)
       const map = {};
       const currencyMap = {};
       for (const item of payload.quotes || []) {
-        if (item?.symbol && item?.source !== 'unavailable') {
-          const symbol = String(item.symbol).toUpperCase();
-          const price = typeof item?.price === 'number' && !Number.isNaN(item.price) ? item.price : null;
-          if (price !== null) {
-            map[symbol] = price;
-          }
-          const apiCurrency = item?.currency ? String(item.currency).toUpperCase().trim() : '';
-          const inferredCurrency = inferCurrencyFromSymbol(symbol);
-          currencyMap[symbol] = apiCurrency || inferredCurrency || null;
+        if (!item?.symbol) continue;
+        const symbol = String(item.symbol).toUpperCase();
+        const provider = String(item.provider || item.source || 'yahoo').toLowerCase().trim();
+        const isUnavailable = provider === 'unavailable' || item?.price === 0;
+        if (isUnavailable) continue;
+        const price = typeof item?.price === 'number' && !Number.isNaN(item.price) ? item.price : null;
+        const key = `${symbol}:${provider}`;
+        if (price !== null) {
+          map[key] = price;
         }
+        const apiCurrency = item?.currency ? String(item.currency).toUpperCase().trim() : '';
+        const inferredCurrency = inferCurrencyFromSymbol(symbol);
+        const currency = apiCurrency || inferredCurrency || null;
+        currencyMap[key] = currency;
+        if (currency != null && currencyMap[symbol] == null) currencyMap[symbol] = currency;
       }
       setPrices((prevPrices) => {
         setPreviousPrices((prev) => ({ ...prev, ...prevPrices }));
@@ -1139,8 +1145,9 @@ function App() {
       watchlistItems.map((item) => {
         const symbol = String(item.symbol).toUpperCase().trim();
         const provider = String(item.provider || 'yahoo').toLowerCase().trim() || 'yahoo';
-        const current = prices[symbol];
-        const previous = previousPrices[symbol];
+        const key = `${symbol}:${provider}`;
+        const current = prices[key];
+        const previous = previousPrices[key];
         let trend = 'flat';
         if (typeof current === 'number' && typeof previous === 'number') {
           if (current > previous) trend = 'up';
@@ -1152,7 +1159,7 @@ function App() {
           current,
           previous,
           trend,
-          currency: quoteCurrencies[symbol],
+          currency: quoteCurrencies[key],
         };
       }),
     [previousPrices, prices, quoteCurrencies, watchlistItems]
