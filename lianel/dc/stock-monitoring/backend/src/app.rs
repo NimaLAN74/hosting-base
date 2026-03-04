@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::{header::AUTHORIZATION, HeaderMap, Request, StatusCode},
+    http::{header::AUTHORIZATION, header::CACHE_CONTROL, HeaderMap, Request, StatusCode},
     middleware,
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
@@ -805,10 +805,14 @@ fn cache_key(symbol: &str, provider: &str) -> String {
     format!("{}|{}", symbol.to_uppercase(), provider.to_lowercase())
 }
 
+/// Max quote cache age (60s) so prices always refresh from provider at least this often.
+const QUOTE_CACHE_MAX_TTL_SECS: u64 = 60;
+
 /// True if a cache entry is still within TTL (so we serve it and don't refetch).
 fn is_cache_fresh(fetched_at_ms: u64, now_ms: u64, ttl: &std::time::Duration) -> bool {
+    let ttl_ms = (ttl.as_millis() as u64).min(QUOTE_CACHE_MAX_TTL_SECS * 1000);
     let elapsed = now_ms.saturating_sub(fetched_at_ms);
-    elapsed < (ttl.as_millis() as u64)
+    elapsed < ttl_ms
 }
 
 /// Parse query into (symbol, provider) pairs. Uses pairs= if set, else symbols= with default provider yahoo.
@@ -1044,11 +1048,14 @@ async fn quotes(
         quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.provider.cmp(&b.provider)));
     }
 
-    Ok(Json(QuotesResponse {
+    let body = QuotesResponse {
         as_of_ms: now_ms,
         quotes,
         warnings,
-    }))
+    };
+    let mut headers = HeaderMap::new();
+    headers.insert(CACHE_CONTROL, "no-store".parse().unwrap());
+    Ok((headers, Json(body)))
 }
 
 async fn symbols_providers(State(_state): State<AppState>) -> Json<Vec<SymbolProviderDto>> {
