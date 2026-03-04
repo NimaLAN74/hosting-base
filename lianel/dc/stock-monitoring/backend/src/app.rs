@@ -929,6 +929,7 @@ async fn quotes(
 
     let mut fetched_quotes = Vec::new();
     let mut warnings = Vec::new();
+    let mut refetched_from_provider = false;
     if !missing.is_empty() {
         tracing::info!("quotes: refetching {} pairs from provider (cache stale or missing)", missing.len());
         let (items, from_waterfall) = match fetch_quotes_by_provider(&state.quote_service, &missing).await {
@@ -981,6 +982,7 @@ async fn quotes(
                         stale: false,
                         history,
                     });
+                    refetched_from_provider = true;
                 }
             }
             drop(day_hist);
@@ -1107,6 +1109,13 @@ async fn quotes(
     };
     let mut headers = HeaderMap::new();
     headers.insert(CACHE_CONTROL, "no-store".parse().unwrap());
+    // So curl can verify: provider = this request called the source; cache = served from cache (no provider call this minute).
+    headers.insert(
+        "X-Quotes-Source",
+        if refetched_from_provider { "provider" } else { "cache" }
+            .parse()
+            .unwrap(),
+    );
     Ok((headers, Json(body)))
 }
 
