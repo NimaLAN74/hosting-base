@@ -857,7 +857,7 @@ fn parse_quotes_query(query: &QuotesQuery) -> Result<Vec<(String, String)>, (Sta
 async fn quotes(
     State(state): State<AppState>,
     Query(query): Query<QuotesQuery>,
-) -> Result<Json<QuotesResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(HeaderMap, Json<QuotesResponse>), (StatusCode, Json<serde_json::Value>)> {
     let pairs = parse_quotes_query(&query)?;
     let now_ms = current_time_ms();
 
