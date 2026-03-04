@@ -937,7 +937,8 @@ function App() {
       setWatchlistError('Select at least one symbol from the list.');
       return;
     }
-    const provider = addSymbolProvider || 'yahoo';
+    // Use the symbol browser's selected provider (the one used for search), not the manual-add form's provider
+    const provider = selectedSymbolProvider || symbolProviders[0]?.id || 'yahoo';
     const existingPairs = new Set(
       watchlistItems.map((item) => `${String(item.symbol).toUpperCase()}:${String(item.provider || 'yahoo').toLowerCase()}`)
     );
@@ -965,7 +966,7 @@ function App() {
     } finally {
       setWatchlistBusy(false);
     }
-  }, [activeWatchlistId, addSymbolProvider, applyAuthError, loadWatchlistItems, selectedSymbolIds, watchlistItems]);
+  }, [activeWatchlistId, applyAuthError, loadWatchlistItems, selectedSymbolIds, selectedSymbolProvider, symbolProviders, watchlistItems]);
 
   const addAlert = useCallback(async () => {
     setAlertError('');
@@ -1500,9 +1501,9 @@ function App() {
                         {symbolSearchResults.map((item) => {
                           const sym = String(item.symbol || item.display_symbol || '').toUpperCase();
                           const label = item.description ? `${sym} — ${item.description}` : sym;
-                          const prov = (addSymbolProvider || 'yahoo').toLowerCase();
+                          const prov = (selectedSymbolProvider || 'yahoo').toLowerCase();
                           const inWatchlist = watchlistItems.some(
-                            (item) => String(item.symbol).toUpperCase() === sym && String(item.provider || 'yahoo').toLowerCase() === prov
+                            (wi) => String(wi.symbol).toUpperCase() === sym && String(wi.provider || 'yahoo').toLowerCase() === prov
                           );
                           return (
                             <li key={sym} className="symbol-browser-item">

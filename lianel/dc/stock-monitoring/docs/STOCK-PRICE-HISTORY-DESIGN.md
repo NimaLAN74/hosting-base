@@ -96,6 +96,24 @@ The `/api/v1/quotes` response includes a **per-quote `source`** field (when pres
 
 Example: call `GET /api/v1/quotes?symbols=SHL.L,ASML.AS,AAPL` and inspect each object in `quotes` for `"source"` to see whether prices come from both Finnhub and Yahoo or only Yahoo.
 
+### Testing the quotes API (root cause for all-unavailable)
+
+To verify the backend without browser auth, call it **on the host** (after SSH) so nginx/auth is bypassed:
+
+```bash
+# On the remote host (e.g. after ssh):
+curl -s "http://localhost:3003/api/v1/quotes?pairs=AAPL:yahoo,MSFT:yahoo,SHEL:finnhub" | jq .
+```
+
+- **200 + quotes with prices**: Backend and providers are working; check frontend/nginx if the UI still shows empty.
+- **200 + all quotes with `"source": "unavailable"`**: No provider returned data. Check:
+  1. **Env vars**: `STOCK_MONITORING_FINNHUB_API_KEY`, `STOCK_MONITORING_ALPACA_API_KEY` / `STOCK_MONITORING_ALPACA_API_SECRET` in the container (deploy script writes them from GitHub secrets).
+  2. **Network**: Container can reach Yahoo/Finnhub/Alpaca (no egress block, DNS OK).
+  3. **Logs**: Look for `Yahoo quote fetch failed`, `Finnhub quote fetch failed`, or HTTP 4xx/5xx from providers.
+- **400**: Invalid `pairs=` (e.g. typo in provider). Use `yahoo`, `finnhub`, `alpaca`, `stooq`, `alpha_vantage` only.
+
+Integration tests: `quotes_with_pairs_returns_200_and_shape`, `quotes_pairs_after_ingest_returns_cached_by_provider` (prove cache key `symbol|provider` and pairs path).
+
 ### Using all quote providers (not just Yahoo)
 
 The backend tries **Finnhub first** (when key is set), then **Alpaca** for unresolved (US stocks), then **Yahoo**, then **Stooq**, then **Alpha Vantage**. If you see `"source": "unavailable"` for US symbols (AAPL, MSFT, etc.) or only Stooq for European symbols, the provider chain failed for those symbols. Common causes: (1) **Deploy never ran** (e.g. CD failed with SSH timeout)—Finnhub/Alpaca env vars never reached the server; (2) **Yahoo fetch failed**—check logs for `Yahoo quote fetch failed`.

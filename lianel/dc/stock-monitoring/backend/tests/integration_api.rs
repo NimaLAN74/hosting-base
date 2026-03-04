@@ -145,6 +145,58 @@ async fn quotes_with_symbols_returns_200_and_shape() {
 }
 
 #[tokio::test]
+async fn quotes_with_pairs_returns_200_and_shape() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/quotes?pairs=AAPL:yahoo,MSFT:yahoo,SAP.DE:yahoo")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.get("quotes").is_some());
+    let quotes = json.get("quotes").and_then(|v| v.as_array()).unwrap();
+    assert!(!quotes.is_empty() || json.get("warnings").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false), "pairs= returns quotes or warnings");
+    for q in quotes {
+        assert!(q.get("symbol").and_then(|v| v.as_str()).is_some());
+        assert!(q.get("source").is_some() || q.get("price").is_some());
+    }
+}
+
+#[tokio::test]
+async fn quotes_pairs_after_ingest_returns_cached_by_provider() {
+    let state = test_state().await;
+    let app = create_router(state);
+    let ingest_body = r#"{"quotes":[{"symbol":"PAIRTEST","price":42.5,"currency":"USD","provider":"yahoo"}]}"#;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/internal/quotes/ingest")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(ingest_body.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/quotes?pairs=PAIRTEST:yahoo")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let quotes = json.get("quotes").and_then(|v| v.as_array()).unwrap();
+    let q = quotes.iter().find(|o| o.get("symbol").and_then(|v| v.as_str()) == Some("PAIRTEST"));
+    assert!(q.is_some(), "pairs=PAIRTEST:yahoo must return cached quote after ingest");
+    let q = q.unwrap();
+    assert_eq!(q.get("price").and_then(|v| v.as_f64()), Some(42.5));
+    assert_eq!(q.get("source").and_then(|v| v.as_str()), Some("yahoo"));
+}
+
+#[tokio::test]
 async fn internal_quotes_ingest_accepts_and_caches() {
     let state = test_state().await;
     let app = create_router(state);
