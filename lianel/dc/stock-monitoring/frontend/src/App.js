@@ -552,6 +552,7 @@ function App() {
     else loadPriceHistoryIntraday(symbol, prov);
   }, [loadPriceHistoryDaily, loadPriceHistoryIntraday]);
 
+  // When user clicks a symbol: call 7-day (from DB) and today (from cache) endpoints and update the charts.
   const openHistoryForSymbol = useCallback((symbol, provider) => {
     if (!symbol) return;
     const prov = provider || 'yahoo';
@@ -594,6 +595,7 @@ function App() {
     loadAuthState();
   }, [loadAuthState]);
 
+  // Call the endpoint that returns all latest prices for watchlist every 1 minute and update the dashboard table.
   useEffect(() => {
     if (!autoRefresh) {
       return undefined;
@@ -604,19 +606,20 @@ function App() {
       fetchQuotes();
       loadAlerts().catch(() => {});
       loadNotifications().catch(() => {});
-    }, 60000); // Every 60s; backend cache TTL is 30s so all symbols are refetched each time
+    }, 60000);
 
     return () => clearInterval(intervalId);
   }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
-  // Chart refresh: poll the endpoint for the active view every 60s while modal is open.
+  // When a symbol is chosen, both 7-day and today endpoints are called in openHistoryForSymbol. Refresh both every 60s while modal is open so charts stay updated.
   useEffect(() => {
     if (!selectedSymbolForHistory) return undefined;
     const intervalId = setInterval(() => {
-      loadPriceHistoryForView(selectedSymbolForHistory, selectedProviderForHistory, priceHistoryViewMode);
+      loadPriceHistoryDaily(selectedSymbolForHistory, selectedProviderForHistory);
+      loadPriceHistoryIntraday(selectedSymbolForHistory, selectedProviderForHistory);
     }, 60000);
     return () => clearInterval(intervalId);
-  }, [selectedSymbolForHistory, selectedProviderForHistory, priceHistoryViewMode, loadPriceHistoryForView]);
+  }, [selectedSymbolForHistory, selectedProviderForHistory, loadPriceHistoryDaily, loadPriceHistoryIntraday]);
 
   // Build session history from table updates so the chart shows a series even when backend returns little/no history.
   useEffect(() => {
