@@ -805,10 +805,10 @@ fn cache_key(symbol: &str, provider: &str) -> String {
     format!("{}|{}", symbol.to_uppercase(), provider.to_lowercase())
 }
 
-/// True if both timestamps (ms) fall on the same UTC calendar day (cache valid until end of day).
-fn is_same_calendar_day(ms1: u64, ms2: u64) -> bool {
-    const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
-    (ms1 / MS_PER_DAY) == (ms2 / MS_PER_DAY)
+/// True if a cache entry is still within TTL (so we serve it and don't refetch).
+fn is_cache_fresh(fetched_at_ms: u64, now_ms: u64, ttl: &std::time::Duration) -> bool {
+    let elapsed = now_ms.saturating_sub(fetched_at_ms);
+    elapsed < (ttl.as_millis() as u64)
 }
 
 /// Parse query into (symbol, provider) pairs. Uses pairs= if set, else symbols= with default provider yahoo.
@@ -857,7 +857,8 @@ async fn quotes(
     let pairs = parse_quotes_query(&query)?;
     let now_ms = current_time_ms();
 
-    // Cache key = symbol|provider; valid until end of day only.
+    // Cache key = symbol|provider; valid for cache_ttl (e.g. 60s) so prices update when providers change.
+    let ttl = &state.quote_service.cache_ttl;
     let mut cached = Vec::new();
     let mut missing = Vec::new();
     {
@@ -865,7 +866,7 @@ async fn quotes(
         for (symbol, provider) in &pairs {
             let key = cache_key(symbol, provider);
             if let Some(entry) = cache.get(&key) {
-                if is_same_calendar_day(entry.fetched_at_ms, now_ms) {
+                if is_cache_fresh(entry.fetched_at_ms, now_ms, ttl) {
                     let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
                     cached.push(QuoteDto {
                         symbol: entry.symbol.clone(),

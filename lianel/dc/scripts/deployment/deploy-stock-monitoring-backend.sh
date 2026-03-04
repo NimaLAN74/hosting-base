@@ -28,17 +28,22 @@ fi
 echo "Using directory: $DC_DIR"
 cd "$DC_DIR"
 
-ENV_FILE="$DC_DIR/.env"
-touch "$ENV_FILE"
-for var in STOCK_MONITORING_DATA_PROVIDER_API_KEY STOCK_MONITORING_FINNHUB_API_KEY FINNHUB_API_KEY FINNHUB_WEBHOOK_SECRET STOCK_MONITORING_ALPACA_API_KEY STOCK_MONITORING_ALPACA_API_SECRET STOCK_MONITORING_ALPACA_API_KEY_ID ALPACA_API_KEY_ID ALPACA_API_KEY STOCK_MONITORING_ALPACA_API_SECRET_KEY ALPACA_API_SECRET_KEY ALPACA_API_SECRET REDIS_URL; do
-  eval "val=\${${var}:-}"
-  if [ -n "$val" ]; then
-    tmp_env_file="$(mktemp)"
-    grep -v "^${var}=" "$ENV_FILE" > "$tmp_env_file" || true
-    printf '%s=%s\n' "$var" "$val" >> "$tmp_env_file"
-    mv "$tmp_env_file" "$ENV_FILE"
-    echo "Configured $var in $ENV_FILE"
-  fi
+# Write API keys to .env in BOTH possible compose dirs so whichever is used to start the container has the keys
+ENV_VARS="STOCK_MONITORING_DATA_PROVIDER_API_KEY STOCK_MONITORING_FINNHUB_API_KEY FINNHUB_API_KEY FINNHUB_WEBHOOK_SECRET STOCK_MONITORING_ALPACA_API_KEY STOCK_MONITORING_ALPACA_API_SECRET STOCK_MONITORING_ALPACA_API_KEY_ID ALPACA_API_KEY_ID ALPACA_API_KEY STOCK_MONITORING_ALPACA_API_SECRET_KEY ALPACA_API_SECRET_KEY ALPACA_API_SECRET REDIS_URL"
+for env_dir in /root/lianel/dc /root/hosting-base/lianel/dc; do
+  [ -d "$env_dir" ] || continue
+  ENV_FILE="$env_dir/.env"
+  touch "$ENV_FILE"
+  for var in $ENV_VARS; do
+    eval "val=\${${var}:-}"
+    if [ -n "$val" ]; then
+      tmp_env_file="$(mktemp)"
+      grep -v "^${var}=" "$ENV_FILE" > "$tmp_env_file" 2>/dev/null || true
+      printf '%s=%s\n' "$var" "$val" >> "$tmp_env_file"
+      mv "$tmp_env_file" "$ENV_FILE"
+      echo "Configured $var in $ENV_FILE"
+    fi
+  done
 done
 
 if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
