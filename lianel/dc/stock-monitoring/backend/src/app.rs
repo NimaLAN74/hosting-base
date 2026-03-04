@@ -124,6 +124,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/internal/quotes/ingest", post(ingest_quotes_internal))
         .route("/internal/symbols/refresh", post(symbols_refresh_internal))
         .route("/internal/price-history/roll-daily", post(price_history_roll_daily))
+        .route("/internal/quotes/pairs", get(internal_quotes_pairs))
+        .route("/internal/quotes", get(internal_quotes))
         .route("/internal/webhooks/finnhub", post(finnhub_webhook))
         .route("/api/v1/internal/webhooks/finnhub", post(finnhub_webhook));
 
@@ -889,6 +891,75 @@ fn parse_quotes_query(query: &QuotesQuery) -> Result<Vec<(String, String)>, (Sta
     }
     let symbols = parse_symbols(query.symbols.as_deref())?;
     Ok(symbols.into_iter().map(|s| (s, "yahoo".to_string())).collect())
+}
+
+/// Response for GET /internal/quotes/pairs: all (symbol, provider) from watchlist_items so callers use the data source for pairs.
+#[derive(Debug, Serialize)]
+struct SymbolProviderPair {
+    symbol: String,
+    provider: String,
+}
+
+/// GET /internal/quotes/pairs — returns all distinct (symbol, provider) from watchlist_items. Use to build pairs= for /api/v1/quotes.
+async fn internal_quotes_pairs(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SymbolProviderPair>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT DISTINCT UPPER(TRIM(i.symbol)), COALESCE(LOWER(TRIM(NULLIF(i.provider, ''))), 'yahoo')
+        FROM stock_monitoring.watchlist_items i
+        ORDER BY 1, 2
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let pairs = rows
+        .into_iter()
+        .map(|(symbol, provider)| SymbolProviderPair { symbol, provider })
+        .collect();
+    Ok(Json(pairs))
+}
+
+/// GET /internal/quotes — same as /api/v1/quotes but pairs are loaded from watchlist_items (data source). No auth.
+async fn internal_quotes(
+    State(state): State<AppState>,
+) -> Result<(HeaderMap, Json<QuotesResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let pairs = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT DISTINCT UPPER(TRIM(i.symbol)), COALESCE(LOWER(TRIM(NULLIF(i.provider, ''))), 'yahoo')
+        FROM stock_monitoring.watchlist_items i
+        ORDER BY 1, 2
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    if pairs.is_empty() {
+        let body = QuotesResponse {
+            as_of_ms: current_time_ms(),
+            quotes: vec![],
+            warnings: vec!["No watchlist items in DB; add symbols with provider in the UI".to_string()],
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(CACHE_CONTROL, "no-store".parse().unwrap());
+        return Ok((headers, Json(body)));
+    }
+
+    // Reuse the same logic as the public quotes handler with this pair list
+    let query = QuotesQuery {
+        pairs: Some(
+            pairs
+                .iter()
+                .map(|(s, p)| format!("{}:{}", s, p))
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+        symbols: None,
+    };
+    quotes(State(state), Query(query)).await
 }
 
 async fn quotes(
