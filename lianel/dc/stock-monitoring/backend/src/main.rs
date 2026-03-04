@@ -5,7 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tokio::sync::RwLock;
 
-use lianel_stock_monitoring_service::app::{create_router, AppState, QuoteService};
+use lianel_stock_monitoring_service::app::{create_router, refresh_quotes_cache_loop, AppState, QuoteService};
 use lianel_stock_monitoring_service::auth::KeycloakJwtValidator;
 use lianel_stock_monitoring_service::config::AppConfig;
 use lianel_stock_monitoring_service::db;
@@ -69,6 +69,9 @@ async fn main() -> anyhow::Result<()> {
         #[cfg(feature = "redis")]
         redis,
     };
+
+    // Refresh cache every 60s from watchlist_items so fetch_finnhub_quotes (and other providers) run every TTL even when no request arrives.
+    tokio::spawn(refresh_quotes_cache_loop(state.clone()));
 
     let app = create_router(state);
 

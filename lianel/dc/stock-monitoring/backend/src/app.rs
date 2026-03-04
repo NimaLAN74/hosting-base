@@ -111,6 +111,126 @@ fn normalize_display_name(
         .map(String::from)
 }
 
+/// Runs every 60s: loads (symbol, provider) pairs from watchlist_items and refreshes cache so fetch_finnhub_quotes (and other providers) are called every TTL even when no request arrives.
+pub async fn refresh_quotes_cache_loop(state: AppState) {
+    const INTERVAL_SECS: u64 = 60;
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(INTERVAL_SECS));
+    interval.tick().await; // first tick completes immediately; skip so we don't refresh before first request
+    loop {
+        interval.tick().await;
+        if let Err(e) = refresh_quotes_cache(&state).await {
+            tracing::warn!("refresh_quotes_cache: {}", e);
+        }
+    }
+}
+
+/// Load pairs from watchlist_items, fetch from provider for stale/missing, update cache and day_history.
+async fn refresh_quotes_cache(state: &AppState) -> anyhow::Result<()> {
+    let pairs: Vec<(String, String)> = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT DISTINCT UPPER(TRIM(i.symbol)), COALESCE(LOWER(TRIM(NULLIF(i.provider, ''))), 'yahoo')
+        FROM stock_monitoring.watchlist_items i
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    if pairs.is_empty() {
+        return Ok(());
+    }
+
+    let now_ms = current_time_ms();
+    let ttl = &state.quote_service.cache_ttl;
+    let mut missing = Vec::new();
+    {
+        let cache = state.quote_service.cache.read().await;
+        for (symbol, provider) in &pairs {
+            let key = cache_key(symbol, provider);
+            let need_fetch = cache
+                .get(&key)
+                .map(|e| !is_cache_fresh(e.fetched_at_ms, now_ms, ttl))
+                .unwrap_or(true);
+            if need_fetch {
+                missing.push((symbol.clone(), provider.clone()));
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!("refresh_quotes_cache: refetching {} pairs from provider (TTL interval)", missing.len());
+    let (items, from_waterfall) = match fetch_quotes_by_provider(&state.quote_service, &missing).await {
+        Ok(items) => (items, false),
+        Err(err) => {
+            tracing::warn!("refresh_quotes_cache: fetch_quotes_by_provider failed: {}", err);
+            let symbols: Vec<String> = missing.iter().map(|(s, _)| s.clone()).collect();
+            let waterfall = fetch_provider_quotes(&state.quote_service, &symbols)
+                .await
+                .unwrap_or_default();
+            (waterfall, true)
+        }
+    };
+
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    let mut write_cache = state.quote_service.cache.write().await;
+    let mut day_hist = state.quote_service.day_history.write().await;
+    let mut intraday_items: Vec<(String, String, f64)> = Vec::new();
+    for (symbol, provider) in &missing {
+        let item = items.iter().find(|i| {
+            i.symbol.eq_ignore_ascii_case(symbol)
+                && (from_waterfall || i.source.as_deref() == Some(provider.as_str()))
+        });
+        if let Some(item) = item {
+            let key = cache_key(symbol, provider);
+            let resolved_currency = item
+                .currency
+                .clone()
+                .or_else(|| infer_currency_from_symbol(&item.symbol));
+            let quote = CachedQuote {
+                symbol: item.symbol.clone(),
+                price: item.price,
+                currency: resolved_currency.clone(),
+                fetched_at_ms: now_ms,
+                source: Some(provider.clone()),
+            };
+            write_cache.insert(key.clone(), quote);
+            day_hist.entry(key.clone()).or_default().push((now_ms, item.price));
+            prune_to_same_day(day_hist.get_mut(&key).unwrap(), now_ms);
+            intraday_items.push((item.symbol.clone(), provider.clone(), item.price));
+        }
+    }
+    drop(day_hist);
+    drop(write_cache);
+
+    if !intraday_items.is_empty() {
+        let pool = state.pool.clone();
+        let observed_at_secs = current_time_secs();
+        let for_db = intraday_items.clone();
+        tokio::spawn(async move {
+            if let Err(e) = persist_intraday_quotes(&pool, &for_db, observed_at_secs).await {
+                tracing::warn!("refresh_quotes_cache persist intraday: {}", e);
+            }
+        });
+        #[cfg(feature = "redis")]
+        if let Some(redis) = state.redis.clone() {
+            let items = intraday_items;
+            let observed = observed_at_secs;
+            tokio::spawn(async move {
+                if let Err(e) = redis_push_intraday(redis, &items, observed).await {
+                    tracing::warn!("refresh_quotes_cache redis push intraday: {}", e);
+                }
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// Build the application router (used by main and by API integration tests).
 pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
@@ -125,7 +245,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/internal/symbols/refresh", post(symbols_refresh_internal))
         .route("/internal/price-history/roll-daily", post(price_history_roll_daily))
         .route("/internal/quotes/pairs", get(internal_quotes_pairs))
+        .route("/internal/quotes/cache", get(internal_quotes_cache))
+        .route("/internal/quotes/today", get(internal_quotes_today))
         .route("/internal/quotes", get(internal_quotes))
+        .route("/internal/price-history/daily", get(internal_price_history_daily))
         .route("/internal/webhooks/finnhub", post(finnhub_webhook))
         .route("/api/v1/internal/webhooks/finnhub", post(finnhub_webhook));
 
@@ -920,6 +1043,154 @@ async fn internal_quotes_pairs(
         .map(|(symbol, provider)| SymbolProviderPair { symbol, provider })
         .collect();
     Ok(Json(pairs))
+}
+
+/// GET /internal/quotes/cache — latest price of all watchlist symbols from cache only (no provider call).
+async fn internal_quotes_cache(
+    State(state): State<AppState>,
+) -> Result<Json<QuotesResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let pairs: Vec<(String, String)> = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT DISTINCT UPPER(TRIM(i.symbol)), COALESCE(LOWER(TRIM(NULLIF(i.provider, ''))), 'yahoo')
+        FROM stock_monitoring.watchlist_items i
+        ORDER BY 1, 2
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+
+    let now_ms = current_time_ms();
+    let mut quotes = Vec::new();
+    let cache = state.quote_service.cache.read().await;
+    let day_hist = state.quote_service.day_history.read().await;
+    for (symbol, provider) in &pairs {
+        let key = cache_key(symbol, provider);
+        if let Some(entry) = cache.get(&key) {
+            let history = get_day_history_sorted(&day_hist, &key, now_ms);
+            let currency = entry.currency.clone().or_else(|| infer_currency_from_symbol(&entry.symbol));
+            quotes.push(QuoteDto {
+                symbol: entry.symbol.clone(),
+                provider: provider.clone(),
+                price: entry.price,
+                currency,
+                fetched_at_ms: entry.fetched_at_ms,
+                stale: false,
+                history,
+            });
+        }
+    }
+    drop(day_hist);
+    drop(cache);
+    quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.provider.cmp(&b.provider)));
+    Ok(Json(QuotesResponse {
+        as_of_ms: now_ms,
+        quotes,
+        warnings: vec![],
+    }))
+}
+
+/// Response for GET /internal/quotes/today — today's price points from in-memory cache for chosen symbol.
+#[derive(Debug, Serialize)]
+struct QuotesTodayResponse {
+    symbol: String,
+    provider: String,
+    points: Vec<QuoteHistoryPoint>,
+}
+
+/// GET /internal/quotes/today?symbol=X&provider=Y — all today's prices for chosen symbol from cache (day_history).
+async fn internal_quotes_today(
+    State(state): State<AppState>,
+    Query(query): Query<PriceHistoryQuery>,
+) -> Result<Json<QuotesTodayResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = query
+        .symbol
+        .as_deref()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL&provider=yahoo"})),
+        ))?;
+    let provider = query
+        .provider
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| ALLOWED_PROVIDERS.contains(&s.as_str()))
+        .unwrap_or_else(|| "yahoo".to_string());
+
+    let now_ms = current_time_ms();
+    let key = cache_key(&symbol, &provider);
+    let day_hist = state.quote_service.day_history.read().await;
+    let points = get_day_history_sorted(&day_hist, &key, now_ms);
+    drop(day_hist);
+    Ok(Json(QuotesTodayResponse {
+        symbol: symbol.clone(),
+        provider: provider.clone(),
+        points,
+    }))
+}
+
+/// GET /internal/price-history/daily?symbol=X&provider=Y&days=7 — last seven days prices from DB for chosen symbol. No auth.
+async fn internal_price_history_daily(
+    State(state): State<AppState>,
+    Query(query): Query<PriceHistoryQuery>,
+) -> Result<Json<PriceHistoryDailyResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let symbol = query
+        .symbol
+        .as_deref()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing symbol", "detail": "Use ?symbol=AAPL&provider=yahoo&days=7"})),
+        ))?;
+    let provider = query
+        .provider
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| ALLOWED_PROVIDERS.contains(&s.as_str()))
+        .unwrap_or_else(|| "yahoo".to_string());
+    let days = query.days.unwrap_or(7).min(365);
+
+    let daily_rows = match sqlx::query_as::<_, (String, f64, f64, f64, f64)>(
+        r#"
+        SELECT trade_date::text, open_price, high_price, low_price, close_price
+        FROM stock_monitoring.price_history_daily
+        WHERE symbol = $1 AND provider = $2
+        ORDER BY trade_date DESC
+        LIMIT $3
+        "#,
+    )
+    .bind(symbol.as_str())
+    .bind(provider.as_str())
+    .bind(days as i64)
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("internal price_history_daily (returning empty): {}", e);
+            vec![]
+        }
+    };
+
+    let daily: Vec<PriceHistoryDailyPoint> = daily_rows
+        .into_iter()
+        .map(|(d, o, h, l, c)| PriceHistoryDailyPoint {
+            trade_date: d,
+            open_price: o,
+            high_price: h,
+            low_price: l,
+            close_price: c,
+        })
+        .collect();
+
+    Ok(Json(PriceHistoryDailyResponse {
+        symbol: symbol.to_string(),
+        provider: provider.to_string(),
+        daily,
+    }))
 }
 
 /// GET /internal/quotes — same as /api/v1/quotes but pairs are loaded from watchlist_items (data source). No auth.
