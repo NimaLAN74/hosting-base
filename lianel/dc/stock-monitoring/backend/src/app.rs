@@ -1842,6 +1842,24 @@ async fn price_history(
     #[cfg(not(feature = "redis"))]
     let _ = intraday_from_db;
 
+    // Merge full day_history (today's points from cache) so the chart shows full history.
+    let now_ms = current_time_ms();
+    {
+        let day_hist = state.quote_service.day_history.read().await;
+        let key = cache_key(&symbol, &provider);
+        if let Some(list) = day_hist.get(&key) {
+            let mut list = list.clone();
+            prune_to_same_day(&mut list, now_ms);
+            list.sort_by_key(|(ms, _)| *ms);
+            for (at_ms, price) in list {
+                if let Some(dt) = chrono::Utc.timestamp_millis_opt(at_ms as i64).single() {
+                    let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
+                    intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
+                }
+            }
+        }
+    }
+
     // Merge latest quote from in-memory cache so the chart shows current price without waiting for DB persist
     let cache = state.quote_service.cache.read().await;
     let cache_key_sym_prov = cache_key(&symbol, &provider);
@@ -1857,6 +1875,7 @@ async fn price_history(
     drop(cache);
 
     intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
+    intraday_today.dedup_by(|a, b| a.observed_at == b.observed_at);
     tracing::info!("price_history: symbol={} daily={} intraday_today={} (chart will show all)", symbol, daily.len(), intraday_today.len());
 
     Ok(Json(PriceHistoryResponse {
@@ -1992,6 +2011,24 @@ async fn price_history_intraday(
         }
     }
 
+    // Merge full day_history (today's points from cache) so the chart shows full history, not just one price.
+    let now_ms = current_time_ms();
+    {
+        let day_hist = state.quote_service.day_history.read().await;
+        let key = cache_key(&symbol, &provider);
+        if let Some(list) = day_hist.get(&key) {
+            let mut list = list.clone();
+            prune_to_same_day(&mut list, now_ms);
+            list.sort_by_key(|(ms, _)| *ms);
+            for (at_ms, price) in list {
+                if let Some(dt) = chrono::Utc.timestamp_millis_opt(at_ms as i64).single() {
+                    let observed_at = format!("{}", dt.format("%Y-%m-%dT%H:%M:%S%.3fZ"));
+                    intraday_today.push(PriceHistoryIntradayPoint { observed_at, price });
+                }
+            }
+        }
+    }
+
     let cache = state.quote_service.cache.read().await;
     let cache_key_sym_prov = cache_key(&symbol, &provider);
     if let Some(entry) = cache.get(&cache_key_sym_prov) {
@@ -2006,6 +2043,7 @@ async fn price_history_intraday(
     drop(cache);
 
     intraday_today.sort_by(|a, b| a.observed_at.cmp(&b.observed_at));
+    intraday_today.dedup_by(|a, b| a.observed_at == b.observed_at);
     tracing::info!("price_history_intraday: symbol={} provider={} points={}", symbol, provider, intraday_today.len());
 
     Ok(Json(PriceHistoryIntradayResponse {
