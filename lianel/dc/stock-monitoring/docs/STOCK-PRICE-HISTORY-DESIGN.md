@@ -114,6 +114,18 @@ curl -s "http://localhost:3003/api/v1/quotes?pairs=AAPL:yahoo,MSFT:yahoo,SHEL:fi
 
 Integration tests: `quotes_with_pairs_returns_200_and_shape`, `quotes_pairs_after_ingest_returns_cached_by_provider` (prove cache key `symbol|provider` and pairs path).
 
+### Troubleshooting: AAPL:finnhub (or any symbol:provider) returns price 0 / empty
+
+When the API returns `"price": 0.0`, `"stale": true` and a warning like `"No quote for: AAPL:finnhub"`, the backend tried that provider but got no valid price. Check:
+
+1. **Startup logs**: On the host, `docker logs <stock-monitoring-container>` (or journalctl). Look for `Quote providers: Finnhub=yes/...`. If `Finnhub=no`, the env var `STOCK_MONITORING_FINNHUB_API_KEY` (or `FINNHUB_API_KEY`) is not set in the container; fix the deploy secrets and redeploy.
+2. **Finnhub request/parse logs**: After a quotes request, look for:
+   - `Finnhub quote request failed for AAPL: ...` — network or TLS error.
+   - `Finnhub quote parse failed for AAPL (status=401)` — invalid or missing API key (Finnhub returns 401 or a non-JSON body).
+   - `Finnhub quote for AAPL: error=...` — Finnhub returned an error message in the JSON body (e.g. invalid token, rate limit).
+   - `Finnhub quote for AAPL: no valid price (c=0, pc=123.45)` — API returned but current price is 0 (e.g. outside market hours); backend now falls back to previous close `pc` when available, so if you still see this, both `c` and `pc` were 0 or invalid.
+3. **Use previous close**: The backend uses Finnhub’s `pc` (previous close) when `c` (current) is 0 so that symbols still show a price when the market is closed. If you still get 0, the Finnhub response had both zero or the request never succeeded (see logs above).
+
 ### Using all quote providers (not just Yahoo)
 
 The backend tries **Finnhub first** (when key is set), then **Alpaca** for unresolved (US stocks), then **Yahoo**, then **Stooq**, then **Alpha Vantage**. If you see `"source": "unavailable"` for US symbols (AAPL, MSFT, etc.) or only Stooq for European symbols, the provider chain failed for those symbols. Common causes: (1) **Deploy never ran** (e.g. CD failed with SSH timeout)—Finnhub/Alpaca env vars never reached the server; (2) **Yahoo fetch failed**—check logs for `Yahoo quote fetch failed`.

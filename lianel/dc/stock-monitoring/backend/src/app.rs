@@ -772,6 +772,9 @@ struct FinnhubQuoteResponse {
     /// Current price
     #[serde(default)]
     c: f64,
+    /// Previous close (use when c is 0, e.g. market closed)
+    #[serde(default)]
+    pc: f64,
     /// Error message when API key invalid or rate limited
     #[serde(default)]
     error: Option<String>,
@@ -1806,22 +1809,34 @@ async fn fetch_finnhub_quotes(
             req = req.header("X-Finnhub-Secret", secret);
         }
         let response = req.send().await;
-        let Ok(resp) = response else {
-            continue;
+        let resp = match response {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Finnhub quote request failed for {}: {}", symbol_for_request, e);
+                continue;
+            }
         };
+        let status = resp.status();
         let Ok(payload) = resp.json::<FinnhubQuoteResponse>().await else {
+            tracing::warn!("Finnhub quote parse failed for {} (status={})", symbol_for_request, status);
             continue;
         };
         if let Some(ref err) = payload.error {
-            tracing::warn!("Finnhub quote for {}: {}", symbol_for_request, err);
+            tracing::warn!("Finnhub quote for {}: error={}", symbol_for_request, err);
             continue;
         }
-        if !payload.c.is_finite() || payload.c <= 0.0 {
+        let price = if payload.c.is_finite() && payload.c > 0.0 {
+            payload.c
+        } else if payload.pc.is_finite() && payload.pc > 0.0 {
+            tracing::debug!("Finnhub {}: using previous close (c={})", symbol_for_request, payload.c);
+            payload.pc
+        } else {
+            tracing::warn!("Finnhub quote for {}: no valid price (c={}, pc={})", symbol_for_request, payload.c, payload.pc);
             continue;
-        }
+        };
         out.push(CachedQuote {
             symbol: original_symbol.to_uppercase(),
-            price: payload.c,
+            price,
             currency: infer_currency_from_symbol(original_symbol),
             fetched_at_ms: current_time_ms(),
             source: Some("finnhub".to_string()),
