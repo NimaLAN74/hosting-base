@@ -204,6 +204,31 @@ jobs:
           echo "Key file size: $KEY_SIZE bytes"
           echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
+      - name: Copy Deployment Script to Remote Host
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          SCRIPT_PATH="lianel/dc/scripts/deployment/deploy-profile-service.sh"
+          if [ ! -f "$SCRIPT_PATH" ]; then
+            echo "❌ Local script missing: $SCRIPT_PATH"
+            exit 1
+          fi
+          scp -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P "${REMOTE_PORT}" \
+            "$SCRIPT_PATH" \
+            "${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-profile-service.sh" || { echo "❌ scp failed"; exit 1; }
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "chmod +x /root/deploy-profile-service.sh && test -x /root/deploy-profile-service.sh && echo '✅ Script copied and executable'"
+          echo "✅ Deployment script ready on remote"
+
       - name: Deploy to Remote Host
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}

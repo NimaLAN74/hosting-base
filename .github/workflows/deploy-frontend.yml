@@ -395,6 +395,13 @@ jobs:
         env:
           FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
 
+      - name: E2E Stock Monitoring (routes + API)
+        run: |
+          echo "Running stock monitoring e2e against $BASE_URL"
+          bash lianel/dc/scripts/monitoring/e2e-stock-monitoring-routes.sh
+        env:
+          BASE_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
+
       - name: Deployment Summary
         run: |
           echo "## 🚀 Frontend Deployment Complete" >> $GITHUB_STEP_SUMMARY
