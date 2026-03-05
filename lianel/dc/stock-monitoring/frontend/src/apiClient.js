@@ -1,3 +1,5 @@
+import { getToken } from './keycloak';
+
 const STOCK_API_BASE = '/api/v1/stock-monitoring';
 
 function withBasePath(path) {
@@ -35,6 +37,10 @@ export async function apiFetch(path, options = {}) {
     Accept: 'application/json',
     ...(options.headers || {}),
   };
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   return fetch(withBasePath(path), {
     credentials: 'include',
     ...options,
@@ -57,13 +63,12 @@ export async function apiJson(path, options = {}) {
   return response.text();
 }
 
-export function getLoginUrl(returnToPath = '/stock') {
-  const rd = encodeURIComponent(returnToPath || '/stock');
-  return `/oauth2/start?rd=${rd}`;
+/** Return the current path for use as returnToPath after login (e.g. /stock or /stock/watchlists). */
+export function getLoginReturnPath() {
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/stock';
+  return path && path.startsWith('/stock') ? path : '/stock';
 }
 
-export function getLogoutUrl(returnToPath = '/stock') {
-  const rd = encodeURIComponent(returnToPath || '/stock');
-  return `/oauth2/sign_out?rd=${rd}`;
-}
+/** Use Keycloak login (same SSO as main app). Call login(returnToPath) to redirect; no URL string. */
+export { login as getLoginRedirect, logout as getLogoutRedirect } from './keycloak';
 

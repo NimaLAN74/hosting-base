@@ -9,8 +9,9 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import './App.css';
-import { ApiError, apiFetch, apiJson, getLoginUrl } from './apiClient';
+import { ApiError, apiFetch, apiJson, getLoginReturnPath } from './apiClient';
 import StockPageTemplate from './StockPageTemplate';
+import { useKeycloak } from './KeycloakProvider';
 
 const API_HEALTH = '/health';
 const API_STATUS = '/status';
@@ -21,6 +22,15 @@ const CRITICAL_LATENCY_MS = 2000;
 const DEFAULT_WATCHLIST = ['ASML.AS', 'SAP.DE', 'SHEL.L'];
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const SWEDISH_LOCALE = 'sv-SE';
+
+// Fallback when /symbols/providers has not loaded yet – open (Yahoo, Stooq) and key-based (Finnhub, Alpaca, Alpha Vantage).
+const FALLBACK_PROVIDERS = [
+  { id: 'yahoo', name: 'Yahoo Finance' },
+  { id: 'stooq', name: 'Stooq' },
+  { id: 'finnhub', name: 'Finnhub' },
+  { id: 'alpaca', name: 'Alpaca' },
+  { id: 'alpha_vantage', name: 'Alpha Vantage' },
+];
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -182,6 +192,7 @@ function inferCurrencyFromSymbol(symbol) {
 }
 
 function App() {
+  const { keycloakReady, authenticated, login } = useKeycloak();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [health, setHealth] = useState('');
@@ -280,6 +291,25 @@ function App() {
       }
     }
   }, [applyAuthError]);
+
+  // Sync Keycloak state: when ready and not authenticated show login; when authenticated load /me.
+  useEffect(() => {
+    if (!keycloakReady) {
+      setAuthState((prev) => ({ ...prev, checking: true }));
+      return;
+    }
+    if (!authenticated) {
+      setAuthState({
+        checking: false,
+        isAuthenticated: false,
+        userId: '',
+        displayName: '',
+        email: '',
+      });
+      return;
+    }
+    loadAuthState();
+  }, [keycloakReady, authenticated, loadAuthState]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -588,16 +618,14 @@ function App() {
   }, [applyAuthError, prices]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    loadAuthState();
-  }, [loadAuthState]);
+    if (keycloakReady && authenticated) {
+      loadData();
+    }
+  }, [keycloakReady, authenticated, loadData]);
 
   // Call the endpoint that returns all latest prices for watchlist every 1 minute and update the dashboard table.
   useEffect(() => {
-    if (!autoRefresh) {
+    if (!autoRefresh || !keycloakReady || !authenticated) {
       return undefined;
     }
 
@@ -609,7 +637,7 @@ function App() {
     }, 60000);
 
     return () => clearInterval(intervalId);
-  }, [autoRefresh, fetchQuotes, loadAlerts, loadData, loadNotifications]);
+  }, [autoRefresh, keycloakReady, authenticated, fetchQuotes, loadAlerts, loadData, loadNotifications]);
 
   // When a symbol is chosen, both 7-day and today endpoints are called in openHistoryForSymbol. Refresh both every 60s while modal is open so charts stay updated.
   useEffect(() => {
@@ -644,28 +672,31 @@ function App() {
     }
   }, [alertSymbol, watchlistItems]);
   useEffect(() => {
+    if (!keycloakReady || !authenticated) return;
     loadWatchlists().catch((err) => {
       applyAuthError(err);
       setWatchlistError(err instanceof Error ? err.message : 'Failed to load watchlists');
     });
-  }, [applyAuthError, loadWatchlists]);
+  }, [keycloakReady, authenticated, applyAuthError, loadWatchlists]);
   useEffect(() => {
     if (authState.isAuthenticated && !authState.checking) {
       loadSymbolProviders().catch(() => {});
     }
   }, [authState.isAuthenticated, authState.checking, loadSymbolProviders]);
   useEffect(() => {
+    if (!keycloakReady || !authenticated) return;
     loadAlerts().catch((err) => {
       applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to load alerts');
     });
-  }, [applyAuthError, loadAlerts]);
+  }, [keycloakReady, authenticated, applyAuthError, loadAlerts]);
   useEffect(() => {
+    if (!keycloakReady || !authenticated) return;
     loadNotifications().catch((err) => {
       applyAuthError(err);
       setAlertError(err instanceof Error ? err.message : 'Failed to load notifications');
     });
-  }, [applyAuthError, loadNotifications]);
+  }, [keycloakReady, authenticated, applyAuthError, loadNotifications]);
   useEffect(() => {
     const active = watchlists.find((item) => item.id === activeWatchlistId);
     setRenameWatchlistName(active?.name || '');
@@ -1194,9 +1225,7 @@ function App() {
               <button
                 type="button"
                 className="refresh-btn auth-login-btn"
-                onClick={() => {
-                  window.location.href = getLoginUrl(routePath);
-                }}
+                onClick={() => login(getLoginReturnPath())}
               >
                 Sign in with Keycloak
               </button>
@@ -1405,11 +1434,11 @@ function App() {
                 aria-label="Quote provider for this symbol"
                 className="provider-select"
               >
-                <option value="yahoo">Yahoo</option>
-                <option value="finnhub">Finnhub</option>
-                <option value="alpaca">Alpaca</option>
-                <option value="stooq">Stooq</option>
-                <option value="alpha_vantage">Alpha Vantage</option>
+                {(symbolProviders.length ? symbolProviders : FALLBACK_PROVIDERS).map((p) => (
+                  <option key={p.id || p.name} value={p.id || (p.name && p.name.toLowerCase().replace(/\s+/g, '_')) || p.name}>
+                    {p.name || p.id}
+                  </option>
+                ))}
               </select>
               <button type="button" className="raw-toggle-btn" onClick={addSymbol} disabled={watchlistBusy}>
                 Add symbol
@@ -1432,15 +1461,12 @@ function App() {
                     <label htmlFor="symbol-provider">Provider</label>
                     <select
                       id="symbol-provider"
-                      value={selectedSymbolProvider}
+                      value={selectedSymbolProvider || (symbolProviders.length ? symbolProviders[0]?.id : FALLBACK_PROVIDERS[0]?.id) || 'yahoo'}
                       onChange={(e) => setSelectedSymbolProvider(e.target.value)}
                       aria-label="Data provider for symbol list"
                     >
-                      {symbolProviders.length === 0 && (
-                        <option value="">Loading…</option>
-                      )}
-                      {symbolProviders.map((p) => (
-                        <option key={p.id || p.name} value={p.id || p.name}>
+                      {(symbolProviders.length ? symbolProviders : FALLBACK_PROVIDERS).map((p) => (
+                        <option key={p.id || p.name} value={p.id || (p.name && p.name.toLowerCase().replace(/\s+/g, '_')) || p.name}>
                           {p.name || p.id}
                         </option>
                       ))}

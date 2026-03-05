@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getLoginUrl, getLogoutUrl } from './apiClient';
+import { getLoginReturnPath, getLoginRedirect, getLogoutRedirect } from './apiClient';
 
 function getUserInitials(displayName) {
   const source = String(displayName || '').trim();
@@ -91,7 +91,15 @@ function StockPageTemplate({
                       <span className="dropdown-icon">👤</span>
                       Profile
                     </a>
-                    <a href={getLogoutUrl('/stock')} className="user-dropdown-item" onClick={() => setUserMenuOpen(false)}>
+                    <a
+                      href="#"
+                      className="user-dropdown-item"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setUserMenuOpen(false);
+                        getLogoutRedirect('/stock');
+                      }}
+                    >
                       <span className="dropdown-icon">🚪</span>
                       Logout
                     </a>
@@ -100,9 +108,13 @@ function StockPageTemplate({
               </div>
             ) : (
               <a
-                href={getLoginUrl(routePath)}
+                href="#"
                 className="profile-link"
                 aria-label="Sign in with Keycloak"
+                onClick={(e) => {
+                  e.preventDefault();
+                  getLoginRedirect(routePath || getLoginReturnPath());
+                }}
               >
                 <span className="profile-avatar">U</span>
                 <span>Sign in</span>

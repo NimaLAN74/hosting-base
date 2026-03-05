@@ -126,6 +126,15 @@ When the API returns `"price": 0.0`, `"stale": true` and a warning like `"No quo
    - `Finnhub quote for AAPL: no valid price (c=0, pc=123.45)` — API returned but current price is 0 (e.g. outside market hours); backend now falls back to previous close `pc` when available, so if you still see this, both `c` and `pc` were 0 or invalid.
 3. **Use previous close**: The backend uses Finnhub’s `pc` (previous close) when `c` (current) is 0 so that symbols still show a price when the market is closed. If you still get 0, the Finnhub response had both zero or the request never succeeded (see logs above).
 
+### Troubleshooting: Finnhub site shows new prices but UI does not
+
+If you see prices changing on Finnhub's site but the app still shows old values, check backend logs (e.g. `docker logs -f <stock-monitoring-container>`) for:
+
+1. **Background refresh** — Every ~60s you should see either `refresh_quotes_cache: refetching N pairs from provider (TTL interval)` (backend calling providers) or `refresh_quotes_cache: no refetch (all X pairs cache fresh)`. If you only ever see `no refetch`, the cache may be considered fresh too long.
+2. **What Finnhub returns** — For each symbol: `Finnhub quote SYMBOL: c=... pc=... t=... -> using price=...`. If `c` and `t` stay the same every minute, the Finnhub API may be returning delayed data (e.g. free tier) while the website is real-time.
+3. **What we store** — After refresh: `refresh_quotes_cache: updated SYMBOL provider price=...` or `quotes: updated cache SYMBOL provider price=...`. Same price every run means the provider response is unchanged.
+4. **Initial load** — The backend runs one full refresh on startup, then every 60s. First request may see stale data for a few seconds.
+
 ### Using all quote providers (not just Yahoo)
 
 The backend tries **Finnhub first** (when key is set), then **Alpaca** for unresolved (US stocks), then **Yahoo**, then **Stooq**, then **Alpha Vantage**. If you see `"source": "unavailable"` for US symbols (AAPL, MSFT, etc.) or only Stooq for European symbols, the provider chain failed for those symbols. Common causes: (1) **Deploy never ran** (e.g. CD failed with SSH timeout)—Finnhub/Alpaca env vars never reached the server; (2) **Yahoo fetch failed**—check logs for `Yahoo quote fetch failed`.

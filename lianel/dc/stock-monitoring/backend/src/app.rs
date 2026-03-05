@@ -114,8 +114,10 @@ fn normalize_display_name(
 /// Runs every 60s: loads (symbol, provider) pairs from watchlist_items and refreshes cache so fetch_finnhub_quotes (and other providers) are called every TTL even when no request arrives.
 pub async fn refresh_quotes_cache_loop(state: AppState) {
     const INTERVAL_SECS: u64 = 60;
+    if let Err(e) = refresh_quotes_cache(&state).await {
+        tracing::warn!("refresh_quotes_cache (initial): {}", e);
+    }
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(INTERVAL_SECS));
-    interval.tick().await; // first tick completes immediately; skip so we don't refresh before first request
     loop {
         interval.tick().await;
         if let Err(e) = refresh_quotes_cache(&state).await {
@@ -157,6 +159,7 @@ async fn refresh_quotes_cache(state: &AppState) -> anyhow::Result<()> {
     }
 
     if missing.is_empty() {
+        tracing::info!("refresh_quotes_cache: no refetch (all {} pairs cache fresh)", pairs.len());
         return Ok(());
     }
 
@@ -199,6 +202,7 @@ async fn refresh_quotes_cache(state: &AppState) -> anyhow::Result<()> {
                 source: Some(provider.clone()),
             };
             write_cache.insert(key.clone(), quote);
+            tracing::info!("refresh_quotes_cache: updated {} {} price={}", symbol, provider, item.price);
             let list = day_hist.entry(key.clone()).or_default();
             append_day_history_if_changed(list, now_ms, item.price);
             prune_to_same_day(list, now_ms);
@@ -913,6 +917,9 @@ struct FinnhubQuoteResponse {
     /// Previous close (use when c is 0, e.g. market closed)
     #[serde(default)]
     pc: f64,
+    /// Unix timestamp (seconds) of the quote; log to verify API returns fresh data
+    #[serde(default)]
+    t: Option<u64>,
     /// Error message when API key invalid or rate limited
     #[serde(default)]
     error: Option<String>,
@@ -1327,6 +1334,7 @@ async fn quotes(
                         source: Some(provider.clone()),
                     };
                     write_cache.insert(key.clone(), quote);
+                    tracing::info!("quotes: updated cache {} {} price={}", symbol, provider, item.price);
                     let list = day_hist.entry(key.clone()).or_default();
                     append_day_history_if_changed(list, now_ms, item.price);
                     prune_to_same_day(list, now_ms);
@@ -1477,12 +1485,13 @@ async fn quotes(
     Ok((headers, Json(body)))
 }
 
+/// All supported quote providers: open (Yahoo, Stooq) and key-based (Finnhub, Alpaca, Alpha Vantage).
 async fn symbols_providers(State(_state): State<AppState>) -> Json<Vec<SymbolProviderDto>> {
     let list = vec![
         SymbolProviderDto { id: "yahoo".to_string(), name: "Yahoo Finance".to_string() },
+        SymbolProviderDto { id: "stooq".to_string(), name: "Stooq".to_string() },
         SymbolProviderDto { id: "finnhub".to_string(), name: "Finnhub".to_string() },
         SymbolProviderDto { id: "alpaca".to_string(), name: "Alpaca".to_string() },
-        SymbolProviderDto { id: "stooq".to_string(), name: "Stooq".to_string() },
         SymbolProviderDto { id: "alpha_vantage".to_string(), name: "Alpha Vantage".to_string() },
     ];
     Json(list)
@@ -1495,15 +1504,15 @@ async fn symbols_list(
     let provider = query
         .provider
         .as_deref()
-        .unwrap_or("finnhub")
+        .unwrap_or("yahoo")
         .trim()
         .to_lowercase();
-    if provider != "finnhub" {
+    if !ALLOWED_PROVIDERS.contains(&provider.as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "error": "Unsupported provider",
-                "detail": "Only provider=finnhub is supported"
+                "detail": format!("Use one of: {}", ALLOWED_PROVIDERS.join(", "))
             })),
         ));
     }
@@ -2299,6 +2308,7 @@ async fn fetch_finnhub_quotes(
             tracing::warn!("Finnhub quote for {}: no valid price (c={}, pc={})", symbol_for_request, payload.c, payload.pc);
             continue;
         };
+        tracing::info!("Finnhub quote {}: c={} pc={} t={:?} -> using price={}", symbol_for_request, payload.c, payload.pc, payload.t, price);
         out.push(CachedQuote {
             symbol: original_symbol.to_uppercase(),
             price,
