@@ -4,7 +4,6 @@
 
 use lianel_stock_monitoring_service::config::AppConfig;
 use lianel_stock_monitoring_service::db;
-use sqlx::PgPool;
 
 #[tokio::test]
 async fn config_from_env_produces_valid_database_url() {
