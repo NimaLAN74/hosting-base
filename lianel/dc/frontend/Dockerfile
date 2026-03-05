@@ -40,7 +40,9 @@ ENV REACT_APP_DOMAIN_MONITORING=$REACT_APP_DOMAIN_MONITORING
 ENV REACT_APP_DOMAIN_AIRFLOW=$REACT_APP_DOMAIN_AIRFLOW
 ENV REACT_APP_OAUTH2_PROXY_CLIENT_ID=$REACT_APP_OAUTH2_PROXY_CLIENT_ID
 
-# Build the React app
+# Build the React app (increase Node memory for large bundle; CI avoids interactive prompts)
+ENV CI=true
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
 # Production stage
