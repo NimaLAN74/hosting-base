@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Profile from './Profile';
 import LandingPage from './LandingPage';
 import Dashboard from './Dashboard';
@@ -54,6 +54,7 @@ function App() {
             <Route path="/comp-ai/monitoring" element={<CompAIMonitoring />} />
             <Route path="/comp-ai/audit-docs" element={<CompAIAuditDocs />} />
             <Route path="/comp-ai/scan" element={<CompAIScanDocuments />} />
+            <Route path="/stock-app" element={<Navigate to="/stock" replace />} />
             <Route path="/stock/*" element={<StockMonitoringApp />} />
             <Route
               path="/admin/users"

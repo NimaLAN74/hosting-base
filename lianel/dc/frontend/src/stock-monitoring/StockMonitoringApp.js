@@ -193,7 +193,7 @@ function inferCurrencyFromSymbol(symbol) {
 }
 
 function App() {
-  const { keycloakReady, authenticated, login } = useKeycloak();
+  const { keycloakReady, authenticated, login, userInfo: keycloakUserInfo } = useKeycloak();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [health, setHealth] = useState('');
@@ -262,20 +262,20 @@ function App() {
 
   const applyAuthError = useCallback((err) => {
     if (err instanceof ApiError && err.status === 401) {
-      setAuthState({
+      setAuthState((prev) => ({
+        ...prev,
         checking: false,
         isAuthenticated: false,
         userId: '',
         displayName: '',
         email: '',
-      });
+      }));
       return true;
     }
     return false;
   }, []);
 
   const loadAuthState = useCallback(async () => {
-    setAuthState((prev) => ({ ...prev, checking: true }));
     try {
       const mePayload = await apiJson(API_ME);
       const userId = String(mePayload?.user_id || '').trim();
@@ -289,13 +289,24 @@ function App() {
         email,
       });
     } catch (err) {
-      if (!applyAuthError(err)) {
+      if (err instanceof ApiError && err.status === 401) {
+        // Main app is authenticated; backend /me may reject token (e.g. issuer). Keep showing UI with Keycloak userInfo.
+        const name = keycloakUserInfo?.name || keycloakUserInfo?.username || keycloakUserInfo?.firstName || '';
+        const email = keycloakUserInfo?.email || '';
+        setAuthState({
+          checking: false,
+          isAuthenticated: true,
+          userId: keycloakUserInfo?.id || '',
+          displayName: name,
+          email,
+        });
+      } else {
         setAuthState((prev) => ({ ...prev, checking: false }));
       }
     }
-  }, [applyAuthError]);
+  }, [keycloakUserInfo]);
 
-  // Sync Keycloak state: when ready and not authenticated show login; when authenticated load /me.
+  // Sync Keycloak state: when ready and not authenticated show login; when authenticated set auth from Keycloak then try /me.
   useEffect(() => {
     if (!keycloakReady) {
       setAuthState((prev) => ({ ...prev, checking: true }));
@@ -311,8 +322,19 @@ function App() {
       });
       return;
     }
+    // Main app says authenticated: set authState from Keycloak userInfo immediately so we don't show "Authentication required".
+    const name = keycloakUserInfo?.name || keycloakUserInfo?.username || keycloakUserInfo?.firstName || '';
+    const email = keycloakUserInfo?.email || '';
+    setAuthState((prev) => ({
+      ...prev,
+      checking: false,
+      isAuthenticated: true,
+      userId: keycloakUserInfo?.id || prev.userId,
+      displayName: prev.displayName || name,
+      email: prev.email || email,
+    }));
     loadAuthState();
-  }, [keycloakReady, authenticated, loadAuthState]);
+  }, [keycloakReady, authenticated, keycloakUserInfo, loadAuthState]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
