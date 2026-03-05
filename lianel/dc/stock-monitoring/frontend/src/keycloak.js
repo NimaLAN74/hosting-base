@@ -2,6 +2,26 @@
 // Use https://www.lianel.se/auth so login hits the same proxy as the main frontend.
 import Keycloak from 'keycloak-js';
 
+/** Return JWT exp (seconds since epoch) or null if unreadable. */
+function getTokenExp(token) {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(payload));
+    return typeof decoded.exp === 'number' ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True if token exists and expires in more than minSeconds. */
+function isTokenValidFor(token, minSeconds = 60) {
+  const exp = getTokenExp(token);
+  return exp != null && exp > Math.floor(Date.now() / 1000) + minSeconds;
+}
+
 const getKeycloakUrl = () => {
   const fromEnv = process.env.REACT_APP_KEYCLOAK_URL;
   return fromEnv || 'https://www.lianel.se/auth';
@@ -55,26 +75,46 @@ export const initKeycloak = () => {
         } else {
           const storedToken = localStorage.getItem('keycloak_token');
           const storedRefresh = localStorage.getItem('keycloak_refresh_token');
-          if (storedToken && storedRefresh) {
+          // Restore session from localStorage (main app and stock share same origin – tokens from main login are visible here)
+          if (storedToken) {
             keycloak.token = storedToken;
-            keycloak.refreshToken = storedRefresh;
+            keycloak.refreshToken = storedRefresh || null;
             keycloak.authenticated = true;
-            keycloak.updateToken(70)
-              .then((refreshed) => {
+            if (storedRefresh) {
+              keycloak.updateToken(70)
+                .then((refreshed) => {
+                  persistTokens();
+                  resolve(true);
+                })
+                .catch(() => {
+                  // Refresh failed – keep session if access token still valid (SSO from main app)
+                  if (isTokenValidFor(storedToken, 60)) {
+                    persistTokens();
+                    resolve(true);
+                  } else {
+                    try {
+                      localStorage.removeItem('keycloak_token');
+                      localStorage.removeItem('keycloak_refresh_token');
+                      localStorage.removeItem('keycloak_token_timestamp');
+                    } catch (e) {}
+                    keycloak.authenticated = false;
+                    keycloak.token = null;
+                    keycloak.refreshToken = null;
+                    resolve(false);
+                  }
+                });
+            } else {
+              // No refresh token – accept if access token still valid
+              if (isTokenValidFor(storedToken, 60)) {
                 persistTokens();
                 resolve(true);
-              })
-              .catch(() => {
-                try {
-                  localStorage.removeItem('keycloak_token');
-                  localStorage.removeItem('keycloak_refresh_token');
-                  localStorage.removeItem('keycloak_token_timestamp');
-                } catch (e) {}
+              } else {
+                try { localStorage.removeItem('keycloak_token'); localStorage.removeItem('keycloak_token_timestamp'); } catch (e) {}
                 keycloak.authenticated = false;
                 keycloak.token = null;
-                keycloak.refreshToken = null;
                 resolve(false);
-              });
+              }
+            }
             return;
           }
           resolve(false);
