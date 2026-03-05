@@ -12,6 +12,15 @@ import {
 
 const KeycloakContext = createContext(null);
 
+function hasValidTokenInStorage() {
+  try {
+    const t = localStorage.getItem('keycloak_token');
+    return !!(t && typeof t === 'string' && t.length > 10);
+  } catch {
+    return false;
+  }
+}
+
 export const useKeycloak = () => {
   const context = useContext(KeycloakContext);
   if (!context) {
@@ -22,7 +31,7 @@ export const useKeycloak = () => {
 
 export const KeycloakProvider = ({ children }) => {
   const [ready, setReady] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(hasValidTokenInStorage);
   const [userInfo, setUserInfo] = useState(null);
 
   useEffect(() => {

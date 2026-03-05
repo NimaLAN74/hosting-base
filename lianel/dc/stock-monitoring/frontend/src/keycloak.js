@@ -52,10 +52,31 @@ const initOptions = {
   scope: 'openid profile email offline_access',
 };
 
+/** Apply token from localStorage to keycloak instance so getToken() works. Returns true if a valid token was applied. */
+function restoreFromLocalStorage() {
+  try {
+    const storedToken = localStorage.getItem('keycloak_token');
+    const storedRefresh = localStorage.getItem('keycloak_refresh_token');
+    if (!storedToken || !isTokenValidFor(storedToken, 0)) return false;
+    keycloak.token = storedToken;
+    keycloak.refreshToken = storedRefresh || null;
+    keycloak.authenticated = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const initKeycloak = () => {
   return new Promise((resolve) => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
+
+    // Use token from main app immediately if present (same origin = same localStorage)
+    if (restoreFromLocalStorage()) {
+      resolve(true);
+      return;
+    }
 
     keycloak.init(initOptions)
       .then((authenticated) => {
@@ -84,7 +105,6 @@ export const initKeycloak = () => {
         } else {
           const storedToken = localStorage.getItem('keycloak_token');
           const storedRefresh = localStorage.getItem('keycloak_refresh_token');
-          // Restore session from localStorage (main app and stock share same origin – tokens from main login are visible here)
           if (storedToken) {
             keycloak.token = storedToken;
             keycloak.refreshToken = storedRefresh || null;
@@ -96,7 +116,6 @@ export const initKeycloak = () => {
                   resolve(true);
                 })
                 .catch(() => {
-                  // Refresh failed – keep session if access token still valid (SSO from main app)
                   if (isTokenValidFor(storedToken, 60)) {
                     persistTokens();
                     resolve(true);
@@ -113,7 +132,6 @@ export const initKeycloak = () => {
                   }
                 });
             } else {
-              // No refresh token – accept if access token still valid
               if (isTokenValidFor(storedToken, 60)) {
                 persistTokens();
                 resolve(true);
@@ -130,8 +148,9 @@ export const initKeycloak = () => {
         }
       })
       .catch((err) => {
-        console.error('Keycloak init error:', err);
-        resolve(false);
+        console.warn('Keycloak init error (trying localStorage):', err);
+        if (restoreFromLocalStorage()) resolve(true);
+        else resolve(false);
       });
   });
 };
