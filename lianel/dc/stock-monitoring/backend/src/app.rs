@@ -320,7 +320,16 @@ async fn require_auth(
         });
 
     if let Some(token) = token {
-        match state.validator.validate_bearer_identity(&token).await {
+        // Same pattern as profile-service: validate via Keycloak userinfo first so tokens from
+        // www.lianel.se/auth or auth.lianel.se are accepted (no issuer mismatch).
+        let identity = match state.validator.validate_bearer_identity_via_userinfo(&token).await {
+            Ok(id) => Ok(id),
+            Err(e_userinfo) => {
+                tracing::debug!("Userinfo validation failed ({}), trying JWKS", e_userinfo);
+                state.validator.validate_bearer_identity(&token).await
+            }
+        };
+        match identity {
             Ok(identity) => {
                 let display_name = normalize_display_name(
                     identity.display_name.clone(),
@@ -334,7 +343,7 @@ async fn require_auth(
                 return next.run(req).await;
             }
             Err(e) => {
-                tracing::warn!("JWT validation failed (token present): {}", e);
+                tracing::warn!("Token validation failed (token present): {}", e);
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({
