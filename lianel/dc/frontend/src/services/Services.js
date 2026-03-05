@@ -62,7 +62,7 @@ function Services() {
       name: 'Stock Monitoring',
       description: 'EU stock monitoring dashboard with watchlists, alerts, and ops views',
       icon: '📈',
-      url: '/stock-app',
+      url: '/stock',
       status: 'active',
       enabled: true,
       gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
@@ -190,11 +190,11 @@ function Services() {
                 );
               }
 
-              if (service.url === '/stock-app') {
+              if (service.url === '/stock') {
                 return (
                   <Link
                     key={index}
-                    to="/stock-app"
+                    to="/stock"
                     className={className}
                   >
                     {content}

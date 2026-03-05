@@ -25,10 +25,26 @@ function getTokenExp(token) {
   }
 }
 
-/** True if token exists and expires in more than minSeconds. */
+/** True if token exists and expires in more than minSeconds. Use negative minSeconds to allow expired (e.g. -60 for clock skew). */
 function isTokenValidFor(token, minSeconds = 60) {
   const exp = getTokenExp(token);
-  return exp != null && exp > Math.floor(Date.now() / 1000) + minSeconds;
+  if (exp == null) return false;
+  return exp > Math.floor(Date.now() / 1000) + minSeconds;
+}
+
+/** Decode JWT payload to object or null. */
+function decodeTokenPayload(token) {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = base64Decode(payload);
+    if (!decoded) return null;
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
 }
 
 const getKeycloakUrl = () => {
@@ -52,15 +68,22 @@ const initOptions = {
   scope: 'openid profile email offline_access',
 };
 
-/** Apply token from localStorage to keycloak instance so getToken() works. Returns true if a valid token was applied. */
+/** Apply token from localStorage to keycloak instance (same keys as main app). Sets tokenParsed so getUserInfo() works. Returns true if a token was applied. */
 function restoreFromLocalStorage() {
   try {
     const storedToken = localStorage.getItem('keycloak_token');
     const storedRefresh = localStorage.getItem('keycloak_refresh_token');
-    if (!storedToken || !isTokenValidFor(storedToken, 0)) return false;
+    // Accept token if present and not expired, or expired within 60s (clock skew) so we can try refresh
+    if (!storedToken || storedToken.length < 10) return false;
+    const stillValid = isTokenValidFor(storedToken, 0);
+    const expiredRecently = !stillValid && isTokenValidFor(storedToken, -60);
+    if (!stillValid && !expiredRecently) return false;
+
     keycloak.token = storedToken;
     keycloak.refreshToken = storedRefresh || null;
     keycloak.authenticated = true;
+    const parsed = decodeTokenPayload(storedToken);
+    if (parsed) keycloak.tokenParsed = parsed;
     return true;
   } catch {
     return false;

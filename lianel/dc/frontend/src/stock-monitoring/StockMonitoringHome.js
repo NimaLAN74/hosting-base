@@ -11,7 +11,7 @@ function StockMonitoringHome() {
           <h3>Stock UI</h3>
           <p>Open the deployed stock monitoring frontend for dashboards and watchlists.</p>
           <div className="stock-monitoring-actions">
-            <Link to="/stock-app">Open Stock UI</Link>
+            <Link to="/stock">Open Stock UI</Link>
           </div>
         </div>
 

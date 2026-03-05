@@ -15,7 +15,7 @@ import CompAIMonitoring from './comp-ai/CompAIMonitoring';
 import CompAIControls from './comp-ai/CompAIControls';
 import CompAIAuditDocs from './comp-ai/CompAIAuditDocs';
 import CompAIScanDocuments from './comp-ai/CompAIScanDocuments';
-import StockFrame from './StockFrame';
+import StockMonitoringApp from './stock-monitoring/StockMonitoringApp';
 import { useKeycloak } from './KeycloakProvider';
 import UsersList from './admin/UsersList';
 import UserDetails from './admin/UserDetails';
@@ -54,7 +54,7 @@ function App() {
             <Route path="/comp-ai/monitoring" element={<CompAIMonitoring />} />
             <Route path="/comp-ai/audit-docs" element={<CompAIAuditDocs />} />
             <Route path="/comp-ai/scan" element={<CompAIScanDocuments />} />
-            <Route path="/stock-app" element={<StockFrame />} />
+            <Route path="/stock/*" element={<StockMonitoringApp />} />
             <Route
               path="/admin/users"
               element={
