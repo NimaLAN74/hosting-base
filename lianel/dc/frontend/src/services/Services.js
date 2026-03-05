@@ -1,8 +1,8 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
 import { useKeycloak } from '../KeycloakProvider';
 import keycloak from '../keycloak';
-import { persistTokenForStock } from '../keycloak';
 import './Services.css';
 
 function Services() {
@@ -62,7 +62,7 @@ function Services() {
       name: 'Stock Monitoring',
       description: 'EU stock monitoring dashboard with watchlists, alerts, and ops views',
       icon: '📈',
-      url: '/stock',
+      url: '/stock-app',
       status: 'active',
       enabled: true,
       gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
@@ -190,22 +190,15 @@ function Services() {
                 );
               }
 
-              if (service.url === '/stock') {
+              if (service.url === '/stock-app') {
                 return (
-                  <a
+                  <Link
                     key={index}
-                    href="/stock"
+                    to="/stock-app"
                     className={className}
-                    target="_self"
-                    rel=""
-                    onClick={(e) => {
-                      e.preventDefault();
-                      persistTokenForStock();
-                      window.location.href = '/stock';
-                    }}
                   >
                     {content}
-                  </a>
+                  </Link>
                 );
               }
 
