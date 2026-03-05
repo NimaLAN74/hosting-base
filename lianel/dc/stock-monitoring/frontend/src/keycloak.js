@@ -2,6 +2,13 @@
 // Use https://www.lianel.se/auth so login hits the same proxy as the main frontend.
 import Keycloak from 'keycloak-js';
 
+/** Base64-decode string (browser atob or Node Buffer). */
+function base64Decode(str) {
+  if (typeof atob !== 'undefined') return atob(str);
+  if (typeof Buffer !== 'undefined') return Buffer.from(str, 'base64').toString('utf8');
+  return null;
+}
+
 /** Return JWT exp (seconds since epoch) or null if unreadable. */
 function getTokenExp(token) {
   if (!token || typeof token !== 'string') return null;
@@ -9,8 +16,10 @@ function getTokenExp(token) {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = JSON.parse(atob(payload));
-    return typeof decoded.exp === 'number' ? decoded.exp : null;
+    const decoded = base64Decode(payload);
+    if (!decoded) return null;
+    const obj = JSON.parse(decoded);
+    return typeof obj.exp === 'number' ? obj.exp : null;
   } catch {
     return null;
   }
