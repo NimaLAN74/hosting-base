@@ -1,0 +1,184 @@
+# Force-update production: sync nginx config and redeploy frontend + stock-monitoring backend
+# so the server runs the latest images and nginx has the /auth/resources/ and multi-issuer fixes.
+# Run this manually (Actions → Force update production → Run workflow) when errors persist
+# after pushing (e.g. Keycloak CSS MIME, stock API 401).
+name: Force Update Production (nginx + frontend + stock backend)
+
+on:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  force-update:
+    name: Sync nginx and redeploy services
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${REMOTE_PORT}" -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Test SSH connection
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in 1 2 3 4 5; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=45 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+              echo "✅ SSH reachable (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ Attempt $i failed; retrying in 20s..."
+            [ $i -lt 5 ] && sleep 20
+          done
+          echo "❌ SSH failed after 5 attempts"
+          exit 1
+
+      # 1) Nginx: copy repo nginx.conf to the exact path the container mounts, then reload
+      - name: Sync nginx config (fix Keycloak CSS MIME + routes)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          set -e
+          # Path used by nginx-proxy volume in docker-compose.infra.yaml
+          NGINX_MOUNT_PATH="/root/lianel/dc/nginx/config/nginx.conf"
+          echo "Syncing nginx.conf to $NGINX_MOUNT_PATH and backup path..."
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:${NGINX_MOUNT_PATH}"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/root/hosting-base/lianel/dc/nginx/config/nginx.conf"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload && echo '✅ Nginx reloaded'"
+          echo "✅ Nginx config synced (/auth/resources/ MIME fix active)"
+
+      # 2) Frontend: copy deploy script, force-pull :latest and recreate container
+      - name: Copy and run frontend deploy script
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_TAG="${{ env.REGISTRY }}/${REPO_LC}/lianel-frontend:latest"
+          echo "Redeploying frontend: $IMAGE_TAG"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/scripts/deployment/deploy-frontend.sh "${REMOTE_USER}@${REMOTE_HOST}:/root/deploy-frontend.sh"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /root/deploy-frontend.sh"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-frontend.sh '${IMAGE_TAG}'"
+          echo "✅ Frontend redeployed"
+
+      # 3) Stock monitoring backend: copy script + compose, force-pull :latest and recreate
+      - name: Copy deploy script and compose (stock backend)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/scripts/deployment/deploy-stock-monitoring-backend.sh \
+            lianel/dc/docker-compose.stock-monitoring.yaml lianel/dc/docker-compose.infra.yaml \
+            lianel/dc/dags/stock_monitoring_ingest_dag.py lianel/dc/dags/stock_monitoring_alerts_dag.py \
+            lianel/dc/dags/stock_monitoring_symbol_sync_dag.py lianel/dc/dags/stock_monitoring_price_history_roll_dag.py \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /tmp/deploy-stock-monitoring-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-monitoring.yaml /tmp/docker-compose.infra.yaml \"\$d/\"; mkdir -p \"\$d/dags\"; cp /tmp/stock_monitoring_*.py \"\$d/dags/\" 2>/dev/null; echo \"Updated \$d\"; done"
+          echo "✅ Script and compose synced"
+
+      - name: Deploy stock monitoring backend
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STOCK_MONITORING_DATA_PROVIDER_API_KEY: ${{ secrets['STOCK_MONITORING_DATA_PROVIDER_API_KEY'] }}
+          STOCK_MONITORING_FINNHUB_API_KEY: ${{ secrets['STOCK_MONITORING_FINNHUB_API_KEY'] }}
+          FINNHUB_API_KEY: ${{ secrets['FINNHUB_API_KEY'] }}
+          FINNHUB_WEBHOOK_SECRET: ${{ secrets['FINNHUB_WEBHOOK_SECRET'] }}
+          STOCK_MONITORING_ALPACA_API_KEY: ${{ secrets['STOCK_MONITORING_ALPACA_API_KEY'] }}
+          STOCK_MONITORING_ALPACA_API_SECRET: ${{ secrets['STOCK_MONITORING_ALPACA_API_SECRET'] }}
+          STOCK_MONITORING_ALPACA_API_KEY_ID: ${{ secrets['STOCK_MONITORING_ALPACA_API_KEY_ID'] }}
+          ALPACA_API_KEY_ID: ${{ secrets['ALPACA_API_KEY_ID'] }}
+          ALPACA_API_KEY: ${{ secrets['ALPACA_API_KEY'] }}
+          STOCK_MONITORING_ALPACA_API_SECRET_KEY: ${{ secrets['STOCK_MONITORING_ALPACA_API_SECRET_KEY'] }}
+          ALPACA_API_SECRET_KEY: ${{ secrets['ALPACA_API_SECRET_KEY'] }}
+          ALPACA_API_SECRET: ${{ secrets['ALPACA_API_SECRET'] }}
+          REDIS_URL: ${{ secrets['REDIS_URL'] }}
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-monitoring-service:latest"
+          echo "Redeploying stock backend: $IMAGE_LC"
+          REMOTE_ENV="GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}'"
+          [ -n "${STOCK_MONITORING_DATA_PROVIDER_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_DATA_PROVIDER_API_KEY='${STOCK_MONITORING_DATA_PROVIDER_API_KEY}'"
+          [ -n "${STOCK_MONITORING_FINNHUB_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_FINNHUB_API_KEY='${STOCK_MONITORING_FINNHUB_API_KEY}'"
+          [ -n "${FINNHUB_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_API_KEY='${FINNHUB_API_KEY}'"
+          [ -n "${FINNHUB_WEBHOOK_SECRET:-}" ] && REMOTE_ENV="$REMOTE_ENV FINNHUB_WEBHOOK_SECRET='${FINNHUB_WEBHOOK_SECRET}'"
+          [ -n "${STOCK_MONITORING_ALPACA_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_ALPACA_API_KEY='${STOCK_MONITORING_ALPACA_API_KEY}'"
+          [ -n "${STOCK_MONITORING_ALPACA_API_SECRET:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_ALPACA_API_SECRET='${STOCK_MONITORING_ALPACA_API_SECRET}'"
+          [ -n "${STOCK_MONITORING_ALPACA_API_KEY_ID:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_ALPACA_API_KEY_ID='${STOCK_MONITORING_ALPACA_API_KEY_ID}'"
+          [ -n "${ALPACA_API_KEY_ID:-}" ] && REMOTE_ENV="$REMOTE_ENV ALPACA_API_KEY_ID='${ALPACA_API_KEY_ID}'"
+          [ -n "${ALPACA_API_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV ALPACA_API_KEY='${ALPACA_API_KEY}'"
+          [ -n "${STOCK_MONITORING_ALPACA_API_SECRET_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV STOCK_MONITORING_ALPACA_API_SECRET_KEY='${STOCK_MONITORING_ALPACA_API_SECRET_KEY}'"
+          [ -n "${ALPACA_API_SECRET_KEY:-}" ] && REMOTE_ENV="$REMOTE_ENV ALPACA_API_SECRET_KEY='${ALPACA_API_SECRET_KEY}'"
+          [ -n "${ALPACA_API_SECRET:-}" ] && REMOTE_ENV="$REMOTE_ENV ALPACA_API_SECRET='${ALPACA_API_SECRET}'"
+          [ -n "${REDIS_URL:-}" ] && REMOTE_ENV="$REMOTE_ENV REDIS_URL='${REDIS_URL}'"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} "${REMOTE_ENV} /tmp/deploy-stock-monitoring-backend.sh '${IMAGE_LC}'"
+          echo "✅ Stock monitoring backend redeployed"
+
+      - name: Verify stock backend health
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in $(seq 1 12); do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
+              ${REMOTE_USER}@${REMOTE_HOST} "docker exec lianel-stock-monitoring-service curl -fsS http://localhost:3003/health" 2>/dev/null; then
+              echo "✅ Stock backend health OK"
+              exit 0
+            fi
+            [ $i -lt 12 ] && sleep 5
+          done
+          echo "⚠️ Stock backend health check did not pass (container may still be starting)"
+        continue-on-error: true
+
+      - name: Summary
+        run: |
+          echo "## Force update complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Nginx**: config synced to \`/root/lianel/dc/nginx/config/nginx.conf\`, reloaded" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend**: redeployed from \`ghcr.io/.../lianel-frontend:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stock backend**: redeployed from \`ghcr.io/.../lianel-stock-monitoring-service:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "If errors persist, run **Deploy Frontend** and **Stock Monitoring Backend** workflows to build and push new images first, then run this again." >> $GITHUB_STEP_SUMMARY

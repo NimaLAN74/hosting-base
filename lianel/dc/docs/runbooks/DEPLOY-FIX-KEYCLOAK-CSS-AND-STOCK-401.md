@@ -4,6 +4,21 @@ If you still see **Keycloak login CSS** (“MIME type text/html”) or **Stock m
 
 ---
 
+## 0. One-click: Force update production (recommended)
+
+**GitHub Actions → “Force Update Production (nginx + frontend + stock backend)” → Run workflow.**
+
+This workflow:
+
+1. Syncs `nginx.conf` to the path the nginx container actually uses (`/root/lianel/dc/nginx/config/nginx.conf`) and reloads nginx (fixes Keycloak CSS MIME).
+2. Redeploys the frontend container (force-pull `:latest` and recreate).
+3. Redeploys the stock-monitoring backend container (force-pull `:latest` and recreate).
+
+**When to use:** After pushing fixes, or when you still see the same errors and suspect the server is running old images or old nginx config.  
+**Note:** The workflow pulls **existing** `:latest` images from the registry. To deploy **new** code, run **Deploy Frontend** and **Stock Monitoring Backend** workflows first (to build and push new images), then run **Force Update Production**.
+
+---
+
 ## 1. Keycloak login CSS (stylesheet MIME type "text/html")
 
 **Symptom:** Browser console: “The stylesheet https://www.lianel.se/auth/resources/.../patternfly.min.css was not loaded because its MIME type, "text/html", is not "text/css".”
@@ -16,7 +31,7 @@ If you still see **Keycloak login CSS** (“MIME type text/html”) or **Stock m
 
 **Deploy steps:**
 
-1. Copy the current `lianel/dc/nginx/config/nginx.conf` to the server (e.g. into `/root/lianel/dc/nginx/config/` or wherever your nginx config lives).
+1. Copy the current `lianel/dc/nginx/config/nginx.conf` to the **exact path** the nginx container mounts: `/root/lianel/dc/nginx/config/nginx.conf` (see `docker-compose.infra.yaml` volumes). Create the directory if needed: `mkdir -p /root/lianel/dc/nginx/config`.
 2. Reload nginx:
    ```bash
    docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload

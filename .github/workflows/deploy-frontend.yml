@@ -310,19 +310,18 @@ jobs:
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
           REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Syncing nginx config to remote..."
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -P ${REMOTE_PORT} \
-            lianel/dc/nginx/config/nginx.conf \
-            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
+          set -e
+          # Path used by nginx-proxy volume in docker-compose.infra.yaml (must update this path)
+          NGINX_MOUNT_PATH="/root/lianel/dc/nginx/config/nginx.conf"
+          echo "Syncing nginx config to $NGINX_MOUNT_PATH and backup path..."
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:${NGINX_MOUNT_PATH}"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/root/hosting-base/lianel/dc/nginx/config/nginx.conf"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" ${REMOTE_USER}@${REMOTE_HOST} \
+            "docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped'"
           echo "✅ Nginx config synced"
 
       - name: Apply Keycloak redirect fix on remote (ensure keycloak+nginx on same network)
