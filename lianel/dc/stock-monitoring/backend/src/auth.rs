@@ -50,49 +50,58 @@ impl KeycloakJwtValidator {
     }
 
     /// Validate Bearer token and return user identity claims.
+    /// Tries each accepted issuer (primary + KEYCLOAK_ISSUER_ALT) so tokens from www.lianel.se/auth and auth.lianel.se both work.
     pub async fn validate_bearer_identity(&self, token: &str) -> anyhow::Result<UserIdentity> {
         let kid = token_kid(token).map_err(|_| anyhow::anyhow!("Invalid token format"))?
             .ok_or_else(|| anyhow::anyhow!("Token missing kid"))?;
         let jwks = self.get_jwks().await?;
         let jwk = jwks.find(&kid).ok_or_else(|| anyhow::anyhow!("Key not found in JWKS"))?;
-        let issuer = self.config.keycloak_issuer();
-        let validations = vec![
-            Validation::Issuer(issuer),
-            Validation::SubjectPresent,
-        ];
-        let valid = validate(token, jwk, validations)
-            .map_err(|e| anyhow::anyhow!("Token validation failed: {:?}", e))?;
+        let issuers = self.config.keycloak_issuers();
+        let mut last_err = None;
+        for issuer in &issuers {
+            let validations = vec![
+                Validation::Issuer(issuer.clone()),
+                Validation::SubjectPresent,
+            ];
+            match validate(token, jwk, validations) {
+                Ok(valid) => {
+                    let claim_str = |key: &str| -> Option<String> {
+                        valid.claims
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(String::from)
+                    };
 
-        let claim_str = |key: &str| -> Option<String> {
-            valid.claims
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-        };
-
-        let sub = valid
-            .claims
-            .get("sub")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .unwrap_or_else(|| "unknown".to_string());
-        let display_name = claim_str("given_name")
-            .and_then(|given| {
-                claim_str("family_name")
-                    .map(|family| format!("{} {}", given, family))
-                    .or(Some(given))
-            })
-            .or_else(|| claim_str("name"))
-            .or_else(|| claim_str("preferred_username"))
-            .or_else(|| claim_str("email"));
-        let email = claim_str("email");
-        Ok(UserIdentity {
-            user_id: sub,
-            display_name,
-            email,
-        })
+                    let sub = valid
+                        .claims
+                        .get("sub")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let display_name = claim_str("given_name")
+                        .and_then(|given| {
+                            claim_str("family_name")
+                                .map(|family| format!("{} {}", given, family))
+                                .or(Some(given))
+                        })
+                        .or_else(|| claim_str("name"))
+                        .or_else(|| claim_str("preferred_username"))
+                        .or_else(|| claim_str("email"));
+                    let email = claim_str("email");
+                    return Ok(UserIdentity {
+                        user_id: sub,
+                        display_name,
+                        email,
+                    });
+                }
+                Err(e) => {
+                    last_err = Some(anyhow::anyhow!("Token validation failed (issuer {}): {:?}", issuer, e));
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("No issuer matched")))
     }
 
     /// Validate Bearer token and return subject (user_id). Returns Err on missing/invalid token.

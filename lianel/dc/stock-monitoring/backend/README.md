@@ -38,7 +38,7 @@ CI runs all tests against a Postgres service after applying 022/023.
 
 - `PORT` – default 3003
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` – for DB (or `DATABASE_URL`)
-- `KEYCLOAK_URL`, `KEYCLOAK_REALM` – JWT validation via JWKS (defaults: https://auth.lianel.se, lianel)
+- `KEYCLOAK_URL`, `KEYCLOAK_REALM` – JWT validation via JWKS (defaults: https://auth.lianel.se, lianel). Optional `KEYCLOAK_ISSUER_ALT` (e.g. `https://www.lianel.se/auth/realms/lianel`) so tokens from the main app’s Keycloak URL are accepted.
 - `STOCK_MONITORING_QUOTE_PROVIDER`, `STOCK_MONITORING_DATA_PROVIDER_API_KEY`, `STOCK_MONITORING_QUOTE_CACHE_TTL_SECONDS` – quote provider and cache
 - `STOCK_MONITORING_FINNHUB_API_KEY` or `FINNHUB_API_KEY` – when set, [Finnhub.io](https://finnhub.io) is used as a quote source (real-time quote API); fallback remains Yahoo/Stooq/Alpha Vantage
 

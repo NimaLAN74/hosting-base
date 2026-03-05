@@ -15,6 +15,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB_STOCK_MONITORING:-lianel_stock_monitoring}
       KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.lianel.se}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
+      # Accept tokens from main app Keycloak (www.lianel.se/auth) as well as auth.lianel.se
+      KEYCLOAK_ISSUER_ALT: ${KEYCLOAK_ISSUER_ALT:-https://www.lianel.se/auth/realms/lianel}
       STOCK_MONITORING_DATA_PROVIDER_API_KEY: ${STOCK_MONITORING_DATA_PROVIDER_API_KEY:-}
       STOCK_MONITORING_FINNHUB_API_KEY: ${STOCK_MONITORING_FINNHUB_API_KEY:-}
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}

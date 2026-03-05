@@ -251,11 +251,16 @@ export const logout = () => {
 };
 
 /**
- * Get access token
+ * Get access token. Falls back to localStorage so /stock and other routes get the token even if keycloak.token is not yet set (e.g. after client-side nav).
  * @returns {string|null} Access token or null
  */
 export const getToken = () => {
-  return keycloak.token;
+  if (keycloak.token) return keycloak.token;
+  try {
+    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('keycloak_token');
+    if (stored) return stored;
+  } catch (_) {}
+  return null;
 };
 
 /**

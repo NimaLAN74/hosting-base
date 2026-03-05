@@ -113,12 +113,31 @@ impl AppConfig {
         )
     }
 
-    /// Issuer expected in JWT (for validation).
+    /// Primary issuer expected in JWT (for validation).
     pub fn keycloak_issuer(&self) -> String {
         format!(
             "{}/realms/{}",
             self.keycloak_url.trim_end_matches('/'),
             self.keycloak_realm
         )
+    }
+
+    /// All accepted issuers (primary + optional KEYCLOAK_ISSUER_ALT). Main app may use https://www.lianel.se/auth so tokens have that issuer.
+    pub fn keycloak_issuers(&self) -> Vec<String> {
+        let primary = self.keycloak_issuer();
+        let alt = env::var("KEYCLOAK_ISSUER_ALT")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let mut out = vec![primary.clone()];
+        if let Some(a) = alt {
+            for part in a.split(',') {
+                let t = part.trim();
+                if !t.is_empty() && t != primary {
+                    out.push(t.to_string());
+                }
+            }
+        }
+        out
     }
 }

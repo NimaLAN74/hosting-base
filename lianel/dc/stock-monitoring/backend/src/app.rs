@@ -334,7 +334,15 @@ async fn require_auth(
                 return next.run(req).await;
             }
             Err(e) => {
-                tracing::debug!("JWT validation failed: {}", e);
+                tracing::warn!("JWT validation failed (token present): {}", e);
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "error": "Invalid or expired token",
+                        "detail": e.to_string()
+                    })),
+                )
+                    .into_response();
             }
         }
     }

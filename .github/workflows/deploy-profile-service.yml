@@ -10,6 +10,7 @@ on:
       - 'lianel/dc/docker-compose.backend.yaml'
       - 'lianel/dc/docker-compose.yaml'
       - 'lianel/dc/nginx/config/nginx.conf'
+      - 'lianel/dc/scripts/deployment/deploy-profile-service.sh'
       - '.github/workflows/deploy-profile-service.yml'
   workflow_dispatch:  # Allow manual trigger
 
