@@ -1,5 +1,6 @@
 import React from 'react';
 import PageTemplate from '../PageTemplate';
+import { persistTokenForStock } from '../keycloak';
 import './StockMonitoring.css';
 
 function StockMonitoringHome() {
@@ -10,7 +11,16 @@ function StockMonitoringHome() {
           <h3>Stock UI</h3>
           <p>Open the deployed stock monitoring frontend for dashboards and watchlists.</p>
           <div className="stock-monitoring-actions">
-            <a href="/stock">Open Stock UI</a>
+            <a
+              href="/stock"
+              onClick={(e) => {
+                e.preventDefault();
+                persistTokenForStock();
+                window.location.href = '/stock';
+              }}
+            >
+              Open Stock UI
+            </a>
           </div>
         </div>
 

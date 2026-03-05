@@ -259,6 +259,24 @@ export const getToken = () => {
 };
 
 /**
+ * Persist current token to localStorage so the stock monitoring app (same origin, /stock) can use it for SSO.
+ * Call this before navigating to /stock so the token is available when the stock app loads.
+ */
+export const persistTokenForStock = () => {
+  try {
+    if (keycloak.token) {
+      localStorage.setItem('keycloak_token', keycloak.token);
+      if (keycloak.refreshToken) {
+        localStorage.setItem('keycloak_refresh_token', keycloak.refreshToken);
+      }
+      localStorage.setItem('keycloak_token_timestamp', Date.now().toString());
+    }
+  } catch (e) {
+    console.warn('Could not persist token for stock app:', e);
+  }
+};
+
+/**
  * Get user info from token
  * @returns {object|null} User info or null
  */

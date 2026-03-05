@@ -1,6 +1,7 @@
 import React from 'react';
 import { useKeycloak } from './KeycloakProvider';
 import keycloak from './keycloak';
+import { persistTokenForStock } from './keycloak';
 import UserDropdown from './UserDropdown';
 import './Dashboard.css';
 
@@ -210,6 +211,23 @@ function Dashboard() {
                     <div key={index} className={className} aria-disabled="true">
                       {content}
                     </div>
+                  );
+                }
+
+                if (service.url === '/stock') {
+                  return (
+                    <a
+                      key={index}
+                      href="/stock"
+                      className={className}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        persistTokenForStock();
+                        window.location.href = '/stock';
+                      }}
+                    >
+                      {content}
+                    </a>
                   );
                 }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import PageTemplate from '../PageTemplate';
 import { useKeycloak } from '../KeycloakProvider';
 import keycloak from '../keycloak';
+import { persistTokenForStock } from '../keycloak';
 import './Services.css';
 
 function Services() {
@@ -186,6 +187,25 @@ function Services() {
                   <div key={index} className={className} aria-disabled="true">
                     {content}
                   </div>
+                );
+              }
+
+              if (service.url === '/stock') {
+                return (
+                  <a
+                    key={index}
+                    href="/stock"
+                    className={className}
+                    target="_self"
+                    rel=""
+                    onClick={(e) => {
+                      e.preventDefault();
+                      persistTokenForStock();
+                      window.location.href = '/stock';
+                    }}
+                  >
+                    {content}
+                  </a>
                 );
               }
 
