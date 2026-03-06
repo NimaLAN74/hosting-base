@@ -12,7 +12,7 @@ use num_traits::Num;
 use rand::Rng;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::sha2::Sha256;
-use rsa::signature::{Signature, Signer};
+use rsa::signature::Signer;
 use rsa::traits::{Decryptor, PrivateKeyParts, PublicKeyParts};
 use rsa::RsaPrivateKey;
 use serde::Deserialize;
@@ -295,8 +295,8 @@ fn compute_live_session_token(
     use rsa::pkcs1v15::SigningKey;
     let signing_key = SigningKey::<Sha256>::new(keys.signature_key.clone());
     let signature = signing_key.sign(base_string.as_bytes());
-    let sig_bytes = signature.to_vec();
-    let sig_b64 = percent_encode_rfc3986(&BASE64.encode(&sig_bytes));
+    let sig_bytes: Box<[u8]> = signature.into();
+    let sig_b64 = percent_encode_rfc3986(&BASE64.encode(&*sig_bytes));
     oauth_params.insert("oauth_signature".to_string(), sig_b64);
     oauth_params.insert("realm".to_string(), realm.to_string());
 
