@@ -1,5 +1,5 @@
 # Build and deploy Comp-AI (Rust) via CI only. No local cargo build required.
-# Deploy is manual only (workflow_dispatch) so pushes (e.g. stock-monitoring, nginx) do not deploy Comp AI.
+# Deploy is manual only (workflow_dispatch) so pushes (e.g. stock-service, nginx) do not deploy Comp AI.
 name: Deploy Comp AI Service to Production
 
 on:

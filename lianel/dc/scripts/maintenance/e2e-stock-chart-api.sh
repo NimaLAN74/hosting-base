@@ -1,16 +1,16 @@
 #!/bin/bash
-# E2E: Call stock-monitoring price-history and quotes APIs, then report why charts may be incomplete.
+# E2E: Call stock-service price-history and quotes APIs, then report why charts may be incomplete.
 # Run ON the remote server. Uses docker exec to hit the backend from inside the stack.
 #
 # Usage (on server):
-#   docker exec lianel-stock-monitoring-service bash -c 'curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history?symbol=SHL.L&days=7"' | jq .
-# Or run this script on the host with CONTAINER=lianel-stock-monitoring-service and call backend via docker exec.
+#   docker exec lianel-stock-service bash -c 'curl -s -H "x-auth-request-user: test" "http://localhost:3003/api/v1/price-history?symbol=SHL.L&days=7"' | jq .
+# Or run this script on the host with CONTAINER=lianel-stock-service and call backend via docker exec.
 #
 # Required on host: curl, jq (optional but recommended). CONTAINER can be overridden.
 
 set -e
 
-CONTAINER="${CONTAINER:-lianel-stock-monitoring-service}"
+CONTAINER="${CONTAINER:-lianel-stock-service}"
 BASE="http://localhost:3003/api/v1"
 AUTH="x-auth-request-user: test"
 SYMBOLS="${E2E_SYMBOLS:-SHL.L ASML.AS SAP.DE AAPL}"

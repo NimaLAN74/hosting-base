@@ -7,14 +7,14 @@
 
 ## Fix: same pattern as profile (userinfo)
 
-The stock-monitoring backend now validates the token **the same way as profile-service**:
+The stock-service backend now validates the token **the same way as profile-service**:
 
 1. **Primary:** Call Keycloak userinfo with the Bearer token (same URL pattern as profile). If Keycloak returns 200, use the userinfo response for identity. This accepts tokens from any Keycloak frontend URL (www.lianel.se/auth, auth.lianel.se) because the same Keycloak server validates them.
 2. **Fallback:** If the userinfo request fails (e.g. network), fall back to existing JWKS + multi-issuer validation.
 
 So the stock page uses the **exact same auth pattern** as the rest of the FE (Profile, Comp-AI, etc.): same `authenticatedFetch` and same backend validation method (userinfo).
 
-- **Code:** `lianel/dc/stock-monitoring/backend/src/auth.rs` – `validate_bearer_identity_via_userinfo()`; `app.rs` – `require_auth` tries userinfo first, then JWKS.
+- **Code:** `lianel/dc/stock-service/backend/src/auth.rs` – `validate_bearer_identity_via_userinfo()`; `app.rs` – `require_auth` tries userinfo first, then JWKS.
 - **Config:** `KEYCLOAK_URL` (and optionally `KEYCLOAK_REALM`) must be set so the backend can reach Keycloak (e.g. `https://auth.lianel.se` or `http://keycloak:8080` inside Docker). No `KEYCLOAK_ISSUER_ALT` needed for SSO when using userinfo.
 
 ## Keycloak CSS MIME type ("text/html" instead of "text/css")
@@ -30,5 +30,5 @@ So the stock page uses the **exact same auth pattern** as the rest of the FE (Pr
 ## Deploy checklist
 
 - Deploy **frontend** (so `getToken()` and token persistence are current).
-- Rebuild and deploy **stock-monitoring backend** (userinfo validation).
+- Rebuild and deploy **stock-service backend** (userinfo validation).
 - Sync **nginx** config to the path the nginx container uses and reload nginx (so `/auth/resources/` and Content-Type fix are active).

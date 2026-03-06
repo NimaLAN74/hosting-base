@@ -128,7 +128,7 @@ function Dashboard() {
       category: 'AI Services'
     },
     {
-      name: 'Stock Monitoring',
+      name: 'Stock Service',
       description: 'EU stock monitoring service and operational subpages',
       icon: '📈',
       url: '/stock',

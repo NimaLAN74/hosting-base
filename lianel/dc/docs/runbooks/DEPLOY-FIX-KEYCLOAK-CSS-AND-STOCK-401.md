@@ -12,10 +12,10 @@ This workflow:
 
 1. Syncs `nginx.conf` to the path the nginx container actually uses (`/root/lianel/dc/nginx/config/nginx.conf`) and reloads nginx (fixes Keycloak CSS MIME).
 2. Redeploys the frontend container (force-pull `:latest` and recreate).
-3. Redeploys the stock-monitoring backend container (force-pull `:latest` and recreate).
+3. Redeploys the stock-service backend container (force-pull `:latest` and recreate).
 
 **When to use:** After pushing fixes, or when you still see the same errors and suspect the server is running old images or old nginx config.  
-**Note:** The workflow pulls **existing** `:latest` images from the registry. To deploy **new** code, run **Deploy Frontend** and **Stock Monitoring Backend** workflows first (to build and push new images), then run **Force Update Production**.
+**Note:** The workflow pulls **existing** `:latest` images from the registry. To deploy **new** code, run **Deploy Frontend** and **Stock Service Backend** workflows first (to build and push new images), then run **Force Update Production**.
 
 ---
 
@@ -49,9 +49,9 @@ curl -sI "https://www.lianel.se/auth/resources/lbvvu/common/keycloak/vendor/patt
 
 ---
 
-## 2. Stock monitoring 401 (XHR to /api/v1/stock-monitoring/*)
+## 2. Stock monitoring 401 (XHR to /api/v1/stock-service/*)
 
-**Symptom:** Logged in on the main site, but `/stock` shows “Authentication required” and XHRs to `/api/v1/stock-monitoring/me`, `/watchlists`, etc. return **401 Unauthorized**.
+**Symptom:** Logged in on the main site, but `/stock` shows “Authentication required” and XHRs to `/api/v1/stock-service/me`, `/watchlists`, etc. return **401 Unauthorized**.
 
 **Causes:**
 
@@ -61,21 +61,21 @@ curl -sI "https://www.lianel.se/auth/resources/lbvvu/common/keycloak/vendor/patt
 **What’s in repo:**
 
 - **Frontend** (`lianel/dc/frontend/src/keycloak.js`): `getToken()` falls back to `localStorage.getItem('keycloak_token')` when `keycloak.token` is empty.
-- **Backend** (stock-monitoring): Accepts multiple issuers (primary from `KEYCLOAK_URL` + `KEYCLOAK_ISSUER_ALT`). When a token is sent but invalid, responds with `{"error":"Invalid or expired token","detail":"..."}` instead of “Missing authorization token”.
-- **Compose** (`lianel/dc/docker-compose.stock-monitoring.yaml`): `KEYCLOAK_ISSUER_ALT=https://www.lianel.se/auth/realms/lianel` so tokens from the main app’s Keycloak URL are accepted.
+- **Backend** (stock-service): Accepts multiple issuers (primary from `KEYCLOAK_URL` + `KEYCLOAK_ISSUER_ALT`). When a token is sent but invalid, responds with `{"error":"Invalid or expired token","detail":"..."}` instead of “Missing authorization token”.
+- **Compose** (`lianel/dc/docker-compose.stock-service.yaml`): `KEYCLOAK_ISSUER_ALT=https://www.lianel.se/auth/realms/lianel` so tokens from the main app’s Keycloak URL are accepted.
 
 **Deploy steps:**
 
 1. **Frontend:** Build and deploy the main frontend (so the updated `keycloak.js` is live).
-2. **Stock-monitoring backend:** Rebuild the image, set env (including `KEYCLOAK_ISSUER_ALT`), and redeploy the profile that serves `/api/v1/stock-monitoring/`.
-3. On the server, ensure the stock-monitoring service has in its environment:
+2. **Stock-monitoring backend:** Rebuild the image, set env (including `KEYCLOAK_ISSUER_ALT`), and redeploy the profile that serves `/api/v1/stock-service/`.
+3. On the server, ensure the stock-service service has in its environment:
    - `KEYCLOAK_ISSUER_ALT=https://www.lianel.se/auth/realms/lianel`  
    (or the same value in your `.env` / compose).
 
 **Verify:**
 
 1. Open the site, log in, go to `/stock`.
-2. In DevTools → Network, open a failing request to e.g. `/api/v1/stock-monitoring/me` and check the **response body**:
+2. In DevTools → Network, open a failing request to e.g. `/api/v1/stock-service/me` and check the **response body**:
    - `{"error":"Missing authorization token"}` → token not sent; confirm frontend deploy and that you’re logged in (and that `getToken()` / localStorage are used).
    - `{"error":"Invalid or expired token","detail":"..."}` → token sent but invalid; check `KEYCLOAK_ISSUER_ALT` and that the backend was rebuilt/redeployed with multi-issuer support.
 

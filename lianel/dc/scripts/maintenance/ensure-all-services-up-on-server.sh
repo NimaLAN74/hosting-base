@@ -54,11 +54,11 @@ fi
 
 echo ""
 echo "=== 5. Stock monitoring (backend + UI) ==="
-if [ -f docker-compose.stock-monitoring.yaml ]; then
-  $COMPOSE -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d
+if [ -f docker-compose.stock-service.yaml ]; then
+  $COMPOSE -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml up -d
   sleep 2
 else
-  echo "  (docker-compose.stock-monitoring.yaml not found, skip)"
+  echo "  (docker-compose.stock-service.yaml not found, skip)"
 fi
 
 echo ""
@@ -103,7 +103,7 @@ docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -60
 
 echo ""
 echo "=== Summary: key containers ==="
-for name in keycloak nginx-proxy lianel-stock-monitoring-service lianel-stock-monitoring-ui lianel-comp-ai-service prometheus grafana cadvisor loki promtail; do
+for name in keycloak nginx-proxy lianel-stock-service lianel-comp-ai-service prometheus grafana cadvisor loki promtail; do
   status=$(docker ps -a --filter "name=${name}" --format "{{.Names}}\t{{.Status}}" 2>/dev/null | head -1)
   if [ -n "$status" ]; then
     n=$(echo "$status" | cut -f1); s=$(echo "$status" | cut -f2-)

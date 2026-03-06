@@ -2,7 +2,7 @@
 # Verify quotes: use symbol+provider pairs from the data source (watchlist_items) and call quotes.
 # On server: use /internal/quotes so backend loads pairs from DB (no need to pass pairs=).
 # Usage (on server via SSH):
-#   ssh root@SERVER "docker exec lianel-stock-monitoring-service curl -sS -i -H 'Accept: application/json' 'http://localhost:3003/internal/quotes'"
+#   ssh root@SERVER "docker exec lianel-stock-service curl -sS -i -H 'Accept: application/json' 'http://localhost:3003/internal/quotes'"
 # Or run this script on the server with USE_DATA_SOURCE=1 (pairs come from DB):
 #   USE_DATA_SOURCE=1 BASE_URL=http://localhost:3003 ./verify-quotes-provider-cadence.sh
 # With explicit pairs (e.g. local): PAIRS=MSFT:finnhub,AAPL:yahoo ./verify-quotes-provider-cadence.sh

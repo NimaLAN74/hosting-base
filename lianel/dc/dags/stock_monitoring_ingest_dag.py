@@ -1,5 +1,5 @@
 """
-Stock Monitoring – Quote Ingestion DAG (EU markets MVP)
+Stock Service – Quote Ingestion DAG (EU markets MVP)
 
 Warms the backend quote cache on a schedule by calling GET /api/v1/quotes with a
 configurable symbol list. The backend fetches from its providers (Yahoo/Stooq/Alpha Vantage)
@@ -24,7 +24,7 @@ DEFAULT_INGEST_SYMBOLS = "ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L"
 
 def ingest_eu_quotes(**context):
     """Fetch quotes for symbols via GET /internal/quotes/fetch?symbols=... (no auth). Backend persists to intraday; roll DAG aggregates to price_history_daily for 7-day chart."""
-    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-monitoring-service:3003")
+    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-service:3003")
     symbols_str = Variable.get("stock_monitoring_ingest_symbols", default_var=DEFAULT_INGEST_SYMBOLS)
     symbols_str = (symbols_str or "").strip() or DEFAULT_INGEST_SYMBOLS
     symbols_param = parse.quote(symbols_str)
@@ -58,7 +58,7 @@ dag = DAG(
     description="Warm backend quote cache for EU symbols (schedule triggers fetch and cache)",
     schedule="0 8-17 * * 1-5",  # Hourly 08–17 UTC on weekdays (EU session)
     catchup=False,
-    tags=["stock-monitoring", "eu-markets", "quotes", "mvp"],
+    tags=["stock-service", "eu-markets", "quotes", "mvp"],
 )
 
 PythonOperator(

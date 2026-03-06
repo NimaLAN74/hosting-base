@@ -6,7 +6,7 @@ set -e
 REMOTE_HOST="${REMOTE_HOST:-72.60.80.84}"
 REMOTE_USER="${REMOTE_USER:-root}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519_host}"
-CONTAINER="${CONTAINER:-lianel-stock-monitoring-service}"
+CONTAINER="${CONTAINER:-lianel-stock-service}"
 BACKEND_PORT="${BACKEND_PORT:-3003}"
 
 echo "=== Quotes from server (pairs from watchlist_items in DB) ==="

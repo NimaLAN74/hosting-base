@@ -59,7 +59,7 @@ function Services() {
       category: 'Account'
     },
     {
-      name: 'Stock Monitoring',
+      name: 'Stock Service',
       description: 'EU stock monitoring dashboard with watchlists, alerts, and ops views',
       icon: '📈',
       url: '/stock',

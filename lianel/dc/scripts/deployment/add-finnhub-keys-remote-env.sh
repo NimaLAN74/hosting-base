@@ -1,5 +1,5 @@
 #!/bin/bash
-# Add FINNHUB_API_KEY and FINNHUB_WEBHOOK_SECRET to the remote host .env (used by stock-monitoring).
+# Add FINNHUB_API_KEY and FINNHUB_WEBHOOK_SECRET to the remote host .env (used by stock-service).
 # Run from repo root. Uses SSH; does not commit or store keys in the repo.
 #
 # Usage:
@@ -51,9 +51,9 @@ for var in FINNHUB_API_KEY FINNHUB_WEBHOOK_SECRET; do
     echo "Configured $var in $ENV_FILE"
   fi
 done
-echo "Restarting stock-monitoring-service to pick up env..."
+echo "Restarting stock-service to pick up env..."
 cd "$DC_DIR"
-docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d --force-recreate --no-deps stock-monitoring-service 2>/dev/null || true
+docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml up -d --force-recreate --no-deps stock-service 2>/dev/null || true
 echo "Done."
 '
 

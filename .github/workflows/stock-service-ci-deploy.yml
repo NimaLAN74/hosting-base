@@ -1,0 +1,192 @@
+# Stock service backend: CI (test + build) then CD (image push + deploy). No DB.
+name: Stock Service Backend – CI and Deploy
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/stock-service/backend/**'
+      - 'lianel/dc/docker-compose.stock-service.yaml'
+      - 'lianel/dc/scripts/deployment/deploy-stock-service-backend.sh'
+      - '.github/workflows/stock-service-ci-deploy.yml'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lianel/dc/stock-service/backend/**'
+      - '.github/workflows/stock-service-ci-deploy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  ci:
+    name: CI (test + build)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lianel/dc/stock-service/backend
+
+      - name: Run tests (health, status, me 401)
+        run: |
+          cd lianel/dc/stock-service/backend && cargo test
+          echo "✅ All tests passed"
+
+      - name: Build release binary
+        run: |
+          cd lianel/dc/stock-service/backend && cargo build --release
+          echo "✅ Binary built"
+
+      - name: Set image name
+        id: image-name
+        run: |
+          IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-stock-service" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./lianel/dc/stock-service/backend
+          file: ./lianel/dc/stock-service/backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make package public
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
+          ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
+          gh api -X PATCH "/user/packages/container/${ENCODED}" -f visibility=public 2>/dev/null || \
+          gh api -X PATCH "/orgs/$(echo $PACKAGE_NAME | cut -d'/' -f1)/packages/container/$(echo $PACKAGE_NAME | cut -d'/' -f2- | sed 's/\//%2F/g')" -f visibility=public 2>/dev/null || true
+          echo "✅ Package visibility updated or skipped"
+
+  cd:
+    name: CD (build image, push, deploy, verify)
+    needs: ci
+    runs-on: ubuntu-latest
+    if: success() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${REMOTE_PORT}" -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready (port ${REMOTE_PORT})"
+
+      - name: Test SSH connection (retry on timeout)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          for i in 1 2 3 4 5; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} "echo ok"; then
+              echo "✅ SSH reachable (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ SSH attempt $i failed (timeout or refused); retrying in 30s..."
+            [ $i -lt 5 ] && sleep 30
+          done
+          echo "❌ SSH to remote failed after 5 attempts. Check REMOTE_HOST, REMOTE_PORT, SSH key, and that the host is reachable from GitHub Actions."
+          exit 1
+
+      - name: Copy deploy script and compose to remote
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -P ${REMOTE_PORT} \
+            lianel/dc/scripts/deployment/deploy-stock-service-backend.sh \
+            lianel/dc/docker-compose.stock-service.yaml lianel/dc/docker-compose.infra.yaml \
+            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
+            "chmod +x /tmp/deploy-stock-service-backend.sh && for d in /root/hosting-base/lianel/dc /root/lianel/dc; do [ -d \"\$d\" ] || continue; cp /tmp/docker-compose.stock-service.yaml /tmp/docker-compose.infra.yaml \"\$d/\" 2>/dev/null; echo \"Updated \$d\"; done"
+          echo "✅ Script and compose synced"
+
+      - name: Deploy to remote host (stock service backend)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LC="${{ env.REGISTRY }}/${REPO_LC}/lianel-stock-service:latest"
+          echo "Deploying: $IMAGE_LC"
+          REMOTE_ENV="GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}'"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "${REMOTE_ENV} /tmp/deploy-stock-service-backend.sh '${IMAGE_LC}'"
+          echo "✅ Deployed"
+
+      - name: Verify deployment (health)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=60 -p ${REMOTE_PORT} \
+            ${REMOTE_USER}@${REMOTE_HOST} \
+            "set -e; for i in \$(seq 1 15); do docker exec lianel-stock-service curl -fsS http://localhost:3003/health && exit 0; sleep 3; done; exit 1" || \
+          { echo "❌ Health check failed after retries"; exit 1; }
+          echo "✅ Health check passed"
+
+      - name: Summary
+        run: |
+          echo "## Stock Service Backend – CI and CD" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI**: cargo test + build (no DB)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CD**: image push, deploy, health verify" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ github.repository }}/lianel-stock-service:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY

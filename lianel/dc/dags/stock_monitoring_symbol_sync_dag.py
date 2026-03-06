@@ -1,5 +1,5 @@
 """
-Stock Monitoring – Symbol catalog sync DAG
+Stock Service – Symbol catalog sync DAG
 
 Calls the backend internal endpoint POST /internal/symbols/refresh?provider=finnhub
 to fetch symbols from Finnhub (US, LON, AS, DE) and upsert them into stock_monitoring.symbols.
@@ -19,7 +19,7 @@ def sync_symbols(**context):
     """POST /internal/symbols/refresh?provider=finnhub to refresh symbol catalog in DB.
     Backend batches DB upserts; allow up to 10 min for 4 exchanges."""
     import time
-    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-monitoring-service:3003")
+    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-service:3003")
     url = f"{base_url.rstrip('/')}/internal/symbols/refresh?provider=finnhub"
     req = request.Request(url=url, method="POST", data=b"")
     req.add_header("Content-Type", "application/json")
@@ -58,7 +58,7 @@ dag = DAG(
     description="Refresh symbol catalog from Finnhub into DB (backend serves list from DB)",
     schedule="0 3 * * 1,4",  # 03:00 UTC on Monday and Thursday
     catchup=False,
-    tags=["stock-monitoring", "symbols", "finnhub", "mvp"],
+    tags=["stock-service", "symbols", "finnhub", "mvp"],
 )
 
 PythonOperator(

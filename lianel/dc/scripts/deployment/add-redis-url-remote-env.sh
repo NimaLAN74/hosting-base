@@ -1,5 +1,5 @@
 #!/bin/bash
-# Add REDIS_URL to the remote host .env (for stock-monitoring real-time intraday chart).
+# Add REDIS_URL to the remote host .env (for stock-service real-time intraday chart).
 # Run from repo root. Uses SSH.
 #
 # Usage:
@@ -32,11 +32,11 @@ printf "%s\n" '\''REDIS_URL=redis://:${REDIS_PASSWORD}@dc-redis-1:6379/1'\'' >> 
 mv "${ENV_FILE}.tmp" "$ENV_FILE"
 echo "Configured REDIS_URL in $ENV_FILE"
 cd "$DC_DIR"
-docker compose -f docker-compose.infra.yaml -f docker-compose.stock-monitoring.yaml up -d --force-recreate --no-deps stock-monitoring-service 2>/dev/null || true
+docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml up -d --force-recreate --no-deps stock-service 2>/dev/null || true
 echo "Done."
 '
 
 SSH_OPTS="-o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -p ${REMOTE_PORT}"
 [ -f "$SSH_KEY" ] && SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
 ssh $SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<< "$REMOTE_SCRIPT"
-echo "✅ REDIS_URL added to remote .env (and stock-monitoring-service restarted if compose available)"
+echo "✅ REDIS_URL added to remote .env (and stock-service restarted if compose available)"

@@ -8,7 +8,7 @@ Use when containers fail to start, after server restarts, or when you need stock
 2. **Infra** – keycloak, nginx (from `docker-compose.infra.yaml`)
 3. **Monitoring** – loki, promtail, prometheus, grafana, cadvisor, node-exporter
 4. **Airflow** – redis, scheduler, worker, apiserver, triggerer, flower
-5. **Stock** – stock-monitoring-service, stock-monitoring-ui
+5. **Stock** – stock-service
 6. **Comp-AI** – comp-ai-service
 7. **Frontend** – main app
 8. **Backend** – profile-service

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run ON the remote server (or in a container that can reach the stock-monitoring backend).
+# Run ON the remote server (or in a container that can reach the stock-service backend).
 # Calls the price-history API for each symbol (days=7) and prints daily + intraday_today
 # so you can compare with what the chart shows.
 #

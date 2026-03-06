@@ -1,0 +1,37 @@
+# Stock service (minimal: SSO verification, IBKR OAuth). No DB.
+# Nginx: /api/v1/stock-service/ -> this backend. UI: main frontend at /stock.
+services:
+  stock-service:
+    image: ghcr.io/nimalan74/hosting-base/lianel-stock-service:latest
+    container_name: lianel-stock-service
+    env_file:
+      - .env
+    environment:
+      PORT: 3003
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.lianel.se}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
+      KEYCLOAK_ISSUER_ALT: ${KEYCLOAK_ISSUER_ALT:-https://www.lianel.se/auth/realms/lianel}
+      # Optional: IBKR OAuth (see .env.example)
+      IBKR_OAUTH_CONSUMER_KEY: ${IBKR_OAUTH_CONSUMER_KEY:-}
+      IBKR_OAUTH_ACCESS_TOKEN: ${IBKR_OAUTH_ACCESS_TOKEN:-}
+      IBKR_OAUTH_ACCESS_TOKEN_SECRET: ${IBKR_OAUTH_ACCESS_TOKEN_SECRET:-}
+      IBKR_OAUTH_REALM: ${IBKR_OAUTH_REALM:-limited_poa}
+      IBKR_OAUTH_DH_PARAM_PATH: ${IBKR_OAUTH_DH_PARAM_PATH:-}
+      IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH: ${IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH:-}
+      IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH: ${IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH:-}
+      RUST_LOG: info
+    expose:
+      - "3003"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  lianel-network:
+    external: true

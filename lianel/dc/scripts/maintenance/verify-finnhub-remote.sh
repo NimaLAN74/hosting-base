@@ -11,7 +11,7 @@ REMOTE_USER="${REMOTE_USER:-root}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519_host}"
 
 REMOTE_SCRIPT='
-KEY=$(docker exec lianel-stock-monitoring-service env 2>/dev/null | grep "^FINNHUB_API_KEY=" | cut -d= -f2-);
+KEY=$(docker exec lianel-stock-service env 2>/dev/null | grep "^FINNHUB_API_KEY=" | cut -d= -f2-);
 if [ -z "$KEY" ]; then
   echo "FINNHUB_API_KEY not set in container.";
   exit 1;

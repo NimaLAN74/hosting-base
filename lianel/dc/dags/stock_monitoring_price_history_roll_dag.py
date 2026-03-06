@@ -1,5 +1,5 @@
 """
-Stock Monitoring – Daily price history roll (EOD)
+Stock Service – Daily price history roll (EOD)
 
 Calls POST /internal/price-history/roll-daily to aggregate intraday cache
 into price_history_daily (OHLC) and clear the intraday table for past days.
@@ -16,7 +16,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 def roll_daily_price_history(**context):
     """POST /internal/price-history/roll-daily to roll intraday -> daily OHLC and clear cache."""
-    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-monitoring-service:3003")
+    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-service:3003")
     url = f"{base_url.rstrip('/')}/internal/price-history/roll-daily"
     req = request.Request(url=url, method="POST", data=b"")
     req.add_header("Content-Type", "application/json")
@@ -48,7 +48,7 @@ dag = DAG(
     description="Roll intraday price cache into daily OHLC and clear cache (EOD)",
     schedule="5 0 * * *",  # 00:05 UTC daily
     catchup=False,
-    tags=["stock-monitoring", "price-history", "eod", "mvp"],
+    tags=["stock-service", "price-history", "eod", "mvp"],
 )
 
 PythonOperator(

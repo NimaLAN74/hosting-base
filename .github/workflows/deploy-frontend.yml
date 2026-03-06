@@ -394,10 +394,10 @@ jobs:
         env:
           FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
 
-      - name: E2E Stock Monitoring (routes + API)
+      - name: E2E Stock Service (routes + API)
         run: |
-          echo "Running stock monitoring e2e against $BASE_URL"
-          bash lianel/dc/scripts/monitoring/e2e-stock-monitoring-routes.sh
+          echo "Running stock service e2e against $BASE_URL"
+          bash lianel/dc/scripts/monitoring/e2e-stock-service-routes.sh
         env:
           BASE_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
 
