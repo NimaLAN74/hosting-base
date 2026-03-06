@@ -249,6 +249,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/internal/quotes/ingest", post(ingest_quotes_internal))
         .route("/internal/symbols/refresh", post(symbols_refresh_internal))
         .route("/internal/price-history/roll-daily", post(price_history_roll_daily))
+        .route("/internal/quotes/fetch", get(internal_quotes_fetch))
         .route("/internal/quotes/pairs", get(internal_quotes_pairs))
         .route("/internal/quotes/cache", get(internal_quotes_cache))
         .route("/internal/quotes/today", get(internal_quotes_today))
@@ -1053,6 +1054,30 @@ fn parse_quotes_query(query: &QuotesQuery) -> Result<Vec<(String, String)>, (Sta
     }
     let symbols = parse_symbols(query.symbols.as_deref())?;
     Ok(symbols.into_iter().map(|s| (s, "yahoo".to_string())).collect())
+}
+
+/// GET /internal/quotes/fetch?symbols=A,B,C — fetch quotes for symbols (default provider yahoo), persist to intraday. No auth. For Airflow ingest DAG.
+async fn internal_quotes_fetch(
+    State(state): State<AppState>,
+    Query(query): Query<QuotesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if query.symbols.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Missing symbols",
+                "detail": "Use ?symbols=ASML.AS,SAP.DE,SHEL.L"
+            })),
+        ));
+    }
+    match quotes(State(state), Query(query)).await {
+        Ok((_, Json(resp))) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "count": resp.quotes.len(),
+            "as_of_ms": resp.as_of_ms
+        }))),
+        Err(e) => Err(e),
+    }
 }
 
 /// Response for GET /internal/quotes/pairs: all (symbol, provider) from watchlist_items so callers use the data source for pairs.

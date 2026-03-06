@@ -23,23 +23,22 @@ DEFAULT_INGEST_SYMBOLS = "ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L"
 
 
 def ingest_eu_quotes(**context):
-    """Warm backend quote cache by calling GET /api/v1/quotes?symbols=..."""
+    """Fetch quotes for symbols via GET /internal/quotes/fetch?symbols=... (no auth). Backend persists to intraday; roll DAG aggregates to price_history_daily for 7-day chart."""
     base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-monitoring-service:3003")
     symbols_str = Variable.get("stock_monitoring_ingest_symbols", default_var=DEFAULT_INGEST_SYMBOLS)
     symbols_str = (symbols_str or "").strip() or DEFAULT_INGEST_SYMBOLS
     symbols_param = parse.quote(symbols_str)
-    url = f"{base_url.rstrip('/')}/api/v1/quotes?symbols={symbols_param}"
+    url = f"{base_url.rstrip('/')}/internal/quotes/fetch?symbols={symbols_param}"
     req = request.Request(url=url, method="GET")
     with request.urlopen(req, timeout=60) as response:  # nosec B310 - trusted internal endpoint
         status = response.status
         body = response.read().decode("utf-8")
     if status < 200 or status >= 300:
-        raise RuntimeError(f"Quotes request failed: HTTP {status} - {body[:500]}")
-    # Log summary (body can be large)
+        raise RuntimeError(f"Quotes fetch failed: HTTP {status} - {body[:500]}")
     try:
         data = json.loads(body)
-        quotes = data.get("quotes", [])
-        print(f"Ingest complete: {len(quotes)} quotes cached (symbols requested: {len(symbols_str.split(','))})")
+        count = data.get("count", 0)
+        print(f"Ingest complete: {count} quotes fetched and persisted to intraday (symbols: {len(symbols_str.split(','))})")
     except Exception:
         print(f"Ingest complete: HTTP {status}")
 
