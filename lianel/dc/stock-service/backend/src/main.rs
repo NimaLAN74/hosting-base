@@ -18,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = AppConfig::from_env()?;
     let config = Arc::new(config);
+    let port = config.port;
     let validator = Arc::new(KeycloakJwtValidator::new(config.clone()));
 
     let state = AppState {
@@ -26,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = create_router(state);
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Stock service listening on {}", addr);
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
     Ok(())
