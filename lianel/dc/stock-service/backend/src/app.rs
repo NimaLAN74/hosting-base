@@ -1,4 +1,4 @@
-//! Stock service: minimal API for SSO verification. Health, status, /me (Keycloak).
+//! Stock service: minimal API for SSO verification and IBKR authentication. Health, status, /me, /api/v1/ibkr/verify.
 
 use axum::{
     extract::State,
@@ -12,11 +12,13 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
+use crate::ibkr::IbkrOAuthClient;
 
 #[derive(Clone)]
 pub struct AppState {
     pub validator: Arc<KeycloakJwtValidator>,
     pub config: Option<Arc<crate::config::AppConfig>>,
+    pub ibkr_client: Option<Arc<IbkrOAuthClient>>,
 }
 
 #[derive(Clone)]
@@ -64,6 +66,7 @@ pub fn create_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
+        .route("/api/v1/ibkr/verify", get(ibkr_verify))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -167,6 +170,40 @@ async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         "scope": "SSO verification and IBKR integration",
         "ibkr_oauth_configured": ibkr_oauth_configured
     }))
+}
+
+async fn ibkr_verify(State(state): State<AppState>) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": "IBKR OAuth not configured"
+                })),
+            )
+                .into_response()
+        }
+    };
+    match client.get_live_session_token().await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "ok": true, "message": "IBKR authentication verified (LST obtained)" })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!("IBKR verify failed: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": e.to_string()
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn me(

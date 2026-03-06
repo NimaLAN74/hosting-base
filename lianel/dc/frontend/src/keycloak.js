@@ -264,7 +264,7 @@ export const getToken = () => {
 };
 
 /**
- * Persist current token to localStorage so the stock monitoring app (same origin, /stock) can use it for SSO.
+ * Persist current token to localStorage so the stock service page (same origin, /stock) can use it for IBKR verification.
  * Call this before navigating to /stock so the token is available when the stock app loads.
  */
 export const persistTokenForStock = () => {

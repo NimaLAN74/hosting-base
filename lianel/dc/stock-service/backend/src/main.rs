@@ -6,6 +6,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use lianel_stock_service::app::{create_router, AppState};
 use lianel_stock_service::auth::KeycloakJwtValidator;
 use lianel_stock_service::config::AppConfig;
+use lianel_stock_service::ibkr::IbkrOAuthClient;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,10 +21,16 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(config);
     let port = config.port;
     let validator = Arc::new(KeycloakJwtValidator::new(config.clone()));
+    let ibkr_client = if config.ibkr_oauth_configured() {
+        Some(Arc::new(IbkrOAuthClient::new(config.clone())))
+    } else {
+        None
+    };
 
     let state = AppState {
         validator,
         config: Some(config),
+        ibkr_client,
     };
 
     let app = create_router(state);

@@ -60,7 +60,7 @@ function Services() {
     },
     {
       name: 'Stock Service',
-      description: 'EU stock monitoring dashboard with watchlists, alerts, and ops views',
+      description: 'IBKR authentication verification',
       icon: '📈',
       url: '/stock',
       status: 'active',

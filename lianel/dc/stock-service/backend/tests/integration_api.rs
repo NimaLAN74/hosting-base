@@ -76,5 +76,6 @@ fn test_state() -> AppState {
     AppState {
         validator,
         config: Some(config),
+        ibkr_client: None,
     }
 }

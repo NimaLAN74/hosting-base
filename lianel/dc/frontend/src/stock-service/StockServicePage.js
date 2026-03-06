@@ -1,62 +1,55 @@
 /**
- * Stock service – simple SSO verification page.
- * Verifies that the same Keycloak token used by the main app works with the stock service backend.
+ * Stock service – simple IBKR authentication verification.
+ * Shows whether IBKR OAuth is configured and allows verifying the connection (LST).
  */
 import React, { useEffect, useState } from 'react';
 import { useKeycloak } from '../KeycloakProvider';
 import { apiJson } from './stockApiClient';
 import './StockServicePage.css';
 
-const API_ME = '/me';
 const API_STATUS = '/status';
+const API_IBKR_VERIFY = '/ibkr/verify';
 
 export default function StockServicePage() {
   const { keycloak, authenticated } = useKeycloak();
-  const [me, setMe] = useState(null);
   const [status, setStatus] = useState(null);
+  const [ibkrVerify, setIbkrVerify] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
 
-  const verify = () => {
+  const loadStatus = () => {
     setError(null);
     setLoading(true);
-    setMe(null);
     setStatus(null);
+    setIbkrVerify(null);
+    fetch('/api/v1/stock-service/status', { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((data) => setStatus(data))
+      .catch(() => setStatus(null))
+      .finally(() => setLoading(false));
+  };
 
-    const load = async () => {
-      try {
-        const [meRes, statusRes] = await Promise.all([
-          authenticated ? apiJson(API_ME).catch((e) => ({ error: e.message, status: e.status })) : Promise.resolve(null),
-          fetch('/api/v1/stock-service/status', { credentials: 'include', headers: { Accept: 'application/json' } })
-            .then((r) => r.json())
-            .catch(() => null),
-        ]);
-
-        if (meRes && meRes.error) {
-          setError(meRes.error);
-          setMe(null);
-        } else if (meRes) {
-          setMe(meRes);
-          setError(null);
-        } else if (!authenticated) {
-          setError('Not logged in. Sign in with Keycloak to verify SSO.');
-        }
-
-        setStatus(statusRes);
-      } catch (e) {
-        setError(e?.message || 'Request failed');
-        setMe(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+  const verifyIbkr = async () => {
+    if (!authenticated) {
+      setError('Sign in first to verify IBKR.');
+      return;
+    }
+    setError(null);
+    setIbkrVerify(null);
+    setVerifying(true);
+    try {
+      const data = await apiJson(API_IBKR_VERIFY);
+      setIbkrVerify(data);
+    } catch (e) {
+      setIbkrVerify({ ok: false, error: e?.message || 'Request failed' });
+    } finally {
+      setVerifying(false);
+    }
   };
 
   useEffect(() => {
-    verify();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when login state changes
+    loadStatus();
   }, [authenticated]);
 
   const login = () => {
@@ -67,51 +60,61 @@ export default function StockServicePage() {
     if (keycloak) keycloak.logout();
   };
 
+  const ibkrConfigured = status && status.ibkr_oauth_configured === true;
+
   return (
     <div className="stock-service-page">
       <header className="stock-service-header">
         <h1>Stock Service</h1>
-        <p className="stock-service-subtitle">SSO verification</p>
+        <p className="stock-service-subtitle">IBKR authentication verification</p>
       </header>
 
       <section className="stock-service-card">
-        <h2>Authentication &amp; SSO</h2>
-        {loading && <p className="stock-service-loading">Verifying…</p>}
-        {!loading && error && (
-          <div className="stock-service-error">
-            <p><strong>Verification failed</strong></p>
-            <p>{error}</p>
-            {!authenticated && (
-              <button type="button" className="stock-service-btn primary" onClick={login}>
-                Sign in with Keycloak
-              </button>
+        <h2>IBKR authentication</h2>
+        {loading && <p className="stock-service-loading">Loading…</p>}
+        {!loading && status && (
+          <>
+            <p>
+              <strong>IBKR OAuth:</strong>{' '}
+              {ibkrConfigured ? (
+                <span className="stock-service-ok">Configured</span>
+              ) : (
+                <span className="stock-service-warn">Not configured</span>
+              )}
+            </p>
+            {authenticated && ibkrConfigured && (
+              <div className="stock-service-verify-block">
+                <button
+                  type="button"
+                  className="stock-service-btn primary"
+                  onClick={verifyIbkr}
+                  disabled={verifying}
+                >
+                  {verifying ? 'Verifying…' : 'Verify IBKR'}
+                </button>
+                {ibkrVerify !== null && (
+                  <div className={ibkrVerify.ok ? 'stock-service-success' : 'stock-service-error'}>
+                    {ibkrVerify.ok ? (
+                      <p>{ibkrVerify.message || 'IBKR authentication verified.'}</p>
+                    ) : (
+                      <p>{ibkrVerify.error || 'Verification failed.'}</p>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
-          </div>
+            {authenticated && !ibkrConfigured && (
+              <p className="stock-service-hint">Configure IBKR OAuth on the server to enable verification.</p>
+            )}
+            {!authenticated && (
+              <p className="stock-service-hint">Sign in to verify IBKR authentication.</p>
+            )}
+          </>
         )}
-        {!loading && !error && me && (
-          <div className="stock-service-success">
-            <p><strong>SSO verified</strong></p>
-            <p>You are logged in as: <strong>{me.display_name || me.user_id || me.email || 'User'}</strong></p>
-            {me.email && <p className="stock-service-email">{me.email}</p>}
-            <p className="stock-service-hint">The same Keycloak token is accepted by the stock service backend.</p>
-            <button type="button" className="stock-service-btn" onClick={verify}>
-              Verify again
-            </button>
-          </div>
-        )}
-        {!loading && !error && !me && authenticated && (
-          <p>No /me response. Check backend and token.</p>
+        {!loading && !status && (
+          <p className="stock-service-error">Could not load service status.</p>
         )}
       </section>
-
-      {status && (
-        <section className="stock-service-card">
-          <h2>Service status</h2>
-          <pre className="stock-service-status-json">
-            {JSON.stringify(status, null, 2)}
-          </pre>
-        </section>
-      )}
 
       <footer className="stock-service-footer">
         {authenticated ? (

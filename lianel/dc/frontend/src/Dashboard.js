@@ -129,7 +129,7 @@ function Dashboard() {
     },
     {
       name: 'Stock Service',
-      description: 'EU stock monitoring service and operational subpages',
+      description: 'Stock service – IBKR authentication verification',
       icon: '📈',
       url: '/stock',
       status: 'active',
