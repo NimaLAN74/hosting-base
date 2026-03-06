@@ -13,6 +13,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 
+#[derive(Clone)]
 pub struct AppState {
     pub validator: Arc<KeycloakJwtValidator>,
     pub config: Option<Arc<crate::config::AppConfig>>,
