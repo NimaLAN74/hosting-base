@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "express": "^4.18.2",
+    "express": "^4.22.1",
     "keycloak-js": "^26.2.1",
     "leaflet": "^1.9.4",
     "react": "^18.2.0",
