@@ -12,8 +12,7 @@ use num_traits::Num;
 use rand::Rng;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::sha2::Sha256;
-use rsa::signature::Signer;
-use signature::Signature;
+use rsa::signature::{Signature, Signer};
 use rsa::traits::{Decryptor, PrivateKeyParts, PublicKeyParts};
 use rsa::RsaPrivateKey;
 use serde::Deserialize;
@@ -40,7 +39,7 @@ pub struct IbkrOAuthClient {
     /// Cached LST; refreshed when expired or missing.
     cache: RwLock<Option<CachedLst>>,
     /// Preloaded keys (avoid reading files on every LST refresh).
-    keys: Option<IbkrKeys>,
+    keys: Option<Arc<IbkrKeys>>,
 }
 
 struct IbkrKeys {
@@ -57,7 +56,7 @@ fn percent_encode_rfc3986(s: &str) -> String {
 
 impl IbkrOAuthClient {
     pub fn new(config: Arc<AppConfig>) -> Self {
-        let keys = Self::load_keys(config.as_ref()).ok();
+        let keys = Self::load_keys(config.as_ref()).ok().map(Arc::new);
         if keys.is_none() && config.ibkr_oauth_configured() {
             tracing::warn!("IBKR OAuth env set but key files could not be loaded; IBKR API calls will fail until PEM paths are correct");
         }
@@ -124,7 +123,7 @@ impl IbkrOAuthClient {
         }
 
         let config = self.config.clone();
-        let keys = self.keys.clone().context("IBKR keys not loaded")?;
+        let keys = Arc::clone(self.keys.as_ref().context("IBKR keys not loaded")?);
         let consumer_key = config
             .ibkr_oauth_consumer_key
             .as_ref()
@@ -149,7 +148,7 @@ impl IbkrOAuthClient {
 
         let (token, expires_at_ms) = tokio::task::spawn_blocking(move || {
             compute_live_session_token(
-                &keys,
+                keys.as_ref(),
                 &consumer_key,
                 &access_token,
                 &access_token_secret_b64,
@@ -296,8 +295,8 @@ fn compute_live_session_token(
     use rsa::pkcs1v15::SigningKey;
     let signing_key = SigningKey::<Sha256>::new(keys.signature_key.clone());
     let signature = signing_key.sign(base_string.as_bytes());
-    let sig_bytes: &[u8] = signature.as_ref();
-    let sig_b64 = percent_encode_rfc3986(&BASE64.encode(sig_bytes));
+    let sig_bytes = signature.to_vec();
+    let sig_b64 = percent_encode_rfc3986(&BASE64.encode(&sig_bytes));
     oauth_params.insert("oauth_signature".to_string(), sig_b64);
     oauth_params.insert("realm".to_string(), realm.to_string());
 
