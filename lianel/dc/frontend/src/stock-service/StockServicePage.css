@@ -1,71 +1,118 @@
-.stock-service-page {
-  max-width: 560px;
+/* Wrapper inside PageTemplate .page-content */
+.stock-service-content {
+  max-width: 600px;
   margin: 0 auto;
-  padding: 1.5rem;
-}
-
-.stock-service-header {
-  margin-bottom: 1.5rem;
-}
-
-.stock-service-header h1 {
-  margin: 0 0 0.25rem 0;
-  font-size: 1.5rem;
-}
-
-.stock-service-subtitle {
-  margin: 0;
-  color: #666;
-  font-size: 0.95rem;
+  color: #1a1a1a;
 }
 
 .stock-service-card {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
+  background: #f5f5f5;
+  border: 1px solid #ccc;
   border-radius: 8px;
   padding: 1.25rem;
   margin-bottom: 1rem;
+  color: #1a1a1a;
 }
 
-.stock-service-card h2 {
+.stock-service-card-title {
   margin: 0 0 0.75rem 0;
   font-size: 1.1rem;
+  color: #1a1a1a;
 }
 
 .stock-service-loading {
   margin: 0;
-  color: #666;
+  color: #444;
+}
+
+/* Status row: label + badge */
+.stock-service-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.stock-service-status-label {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.stock-service-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.stock-service-badge-ok {
+  background: #0f5132;
+  color: #fff;
+}
+
+.stock-service-badge-warn {
+  background: #664d03;
+  color: #fff;
+}
+
+/* Explainer text – high contrast */
+.stock-service-explainer {
+  font-size: 0.9rem;
+  color: #333;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.45;
+}
+
+.stock-service-explainer:last-child {
+  margin-bottom: 0;
+}
+
+.stock-service-explainer code {
+  background: #e0e0e0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: #1a1a1a;
+}
+
+.stock-service-not-configured {
+  margin-top: 0.5rem;
+}
+
+.stock-service-not-configured .stock-service-explainer {
+  margin-bottom: 0.75rem;
 }
 
 .stock-service-error {
   color: #721c24;
+  background: #f8d7da;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #f5c2c7;
 }
 
 .stock-service-error p {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
+}
+
+.stock-service-success {
+  color: #0f5132;
+  background: #d1e7dd;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #badbcc;
 }
 
 .stock-service-success p {
-  margin: 0 0 0.5rem 0;
-}
-
-.stock-service-email {
-  font-size: 0.9rem;
-  color: #555;
+  margin: 0;
 }
 
 .stock-service-hint {
-  font-size: 0.85rem;
-  color: #666;
+  font-size: 0.9rem;
+  color: #444;
   margin-top: 0.75rem !important;
-}
-
-.stock-service-ok {
-  color: #0f5132;
-}
-
-.stock-service-warn {
-  color: #856404;
+  line-height: 1.4;
 }
 
 .stock-service-verify-block {
@@ -113,10 +160,4 @@
 
 .stock-service-btn.secondary:hover {
   background: #f8f9fa;
-}
-
-.stock-service-footer {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid #dee2e6;
 }

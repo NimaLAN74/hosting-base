@@ -1,25 +1,24 @@
 /**
- * Stock service – simple IBKR authentication verification.
+ * Stock service – IBKR authentication verification.
+ * Uses the same PageTemplate as Profile, Services, Monitoring, etc.
  * Shows whether IBKR OAuth is configured and allows verifying the connection (LST).
  */
 import React, { useEffect, useState } from 'react';
+import PageTemplate from '../PageTemplate';
 import { useKeycloak } from '../KeycloakProvider';
 import { apiJson } from './stockApiClient';
 import './StockServicePage.css';
 
-const API_STATUS = '/status';
 const API_IBKR_VERIFY = '/ibkr/verify';
 
 export default function StockServicePage() {
-  const { keycloak, authenticated } = useKeycloak();
+  const { authenticated } = useKeycloak();
   const [status, setStatus] = useState(null);
   const [ibkrVerify, setIbkrVerify] = useState(null);
-  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
 
   const loadStatus = () => {
-    setError(null);
     setLoading(true);
     setStatus(null);
     setIbkrVerify(null);
@@ -31,11 +30,7 @@ export default function StockServicePage() {
   };
 
   const verifyIbkr = async () => {
-    if (!authenticated) {
-      setError('Sign in first to verify IBKR.');
-      return;
-    }
-    setError(null);
+    if (!authenticated) return;
     setIbkrVerify(null);
     setVerifying(true);
     try {
@@ -52,81 +47,77 @@ export default function StockServicePage() {
     loadStatus();
   }, [authenticated]);
 
-  const login = () => {
-    if (keycloak) keycloak.login();
-  };
-
-  const logout = () => {
-    if (keycloak) keycloak.logout();
-  };
-
   const ibkrConfigured = status && status.ibkr_oauth_configured === true;
 
   return (
-    <div className="stock-service-page">
-      <header className="stock-service-header">
-        <h1>Stock Service</h1>
-        <p className="stock-service-subtitle">IBKR authentication verification</p>
-      </header>
-
-      <section className="stock-service-card">
-        <h2>IBKR authentication</h2>
-        {loading && <p className="stock-service-loading">Loading…</p>}
-        {!loading && status && (
-          <>
-            <p>
-              <strong>IBKR OAuth:</strong>{' '}
-              {ibkrConfigured ? (
-                <span className="stock-service-ok">Configured</span>
-              ) : (
-                <span className="stock-service-warn">Not configured</span>
-              )}
-            </p>
-            {authenticated && ibkrConfigured && (
-              <div className="stock-service-verify-block">
-                <button
-                  type="button"
-                  className="stock-service-btn primary"
-                  onClick={verifyIbkr}
-                  disabled={verifying}
-                >
-                  {verifying ? 'Verifying…' : 'Verify IBKR'}
-                </button>
-                {ibkrVerify !== null && (
-                  <div className={ibkrVerify.ok ? 'stock-service-success' : 'stock-service-error'}>
-                    {ibkrVerify.ok ? (
-                      <p>{ibkrVerify.message || 'IBKR authentication verified.'}</p>
-                    ) : (
-                      <p>{ibkrVerify.error || 'Verification failed.'}</p>
-                    )}
-                  </div>
+    <PageTemplate
+      title="Stock Service"
+      subtitle="IBKR authentication verification"
+    >
+      <div className="stock-service-content">
+        <section className="stock-service-card">
+          <h2 className="stock-service-card-title">IBKR authentication</h2>
+          {loading && <p className="stock-service-loading">Loading…</p>}
+          {!loading && status && (
+            <>
+              <div className="stock-service-status-row">
+                <span className="stock-service-status-label">Connection to Interactive Brokers (IBKR):</span>
+                {ibkrConfigured ? (
+                  <span className="stock-service-badge stock-service-badge-ok">Configured</span>
+                ) : (
+                  <span className="stock-service-badge stock-service-badge-warn">Not configured</span>
                 )}
               </div>
-            )}
-            {authenticated && !ibkrConfigured && (
-              <p className="stock-service-hint">Configure IBKR OAuth on the server to enable verification.</p>
-            )}
-            {!authenticated && (
-              <p className="stock-service-hint">Sign in to verify IBKR authentication.</p>
-            )}
-          </>
-        )}
-        {!loading && !status && (
-          <p className="stock-service-error">Could not load service status.</p>
-        )}
-      </section>
-
-      <footer className="stock-service-footer">
-        {authenticated ? (
-          <button type="button" className="stock-service-btn secondary" onClick={logout}>
-            Sign out
-          </button>
-        ) : (
-          <button type="button" className="stock-service-btn primary" onClick={login}>
-            Sign in
-          </button>
-        )}
-      </footer>
-    </div>
+              {ibkrConfigured ? (
+                <p className="stock-service-explainer">
+                  The server can talk to the IBKR API. Use the button below to confirm the connection works.
+                </p>
+              ) : (
+                <div className="stock-service-not-configured">
+                  <p className="stock-service-explainer">
+                    <strong>What this means:</strong> The server is not yet set up to connect to Interactive Brokers.
+                    No API credentials or key files are configured, so verification is not available.
+                  </p>
+                  <p className="stock-service-explainer">
+                    <strong>What to do:</strong> An administrator must add IBKR OAuth credentials and PEM key paths
+                    in the server environment (e.g. <code>IBKR_OAUTH_*</code> variables). Once that is done, this page
+                    will show “Configured” and you can run verification.
+                  </p>
+                </div>
+              )}
+              {authenticated && ibkrConfigured && (
+                <div className="stock-service-verify-block">
+                  <button
+                    type="button"
+                    className="stock-service-btn primary"
+                    onClick={verifyIbkr}
+                    disabled={verifying}
+                  >
+                    {verifying ? 'Verifying…' : 'Verify IBKR'}
+                  </button>
+                  {ibkrVerify !== null && (
+                    <div className={ibkrVerify.ok ? 'stock-service-success' : 'stock-service-error'}>
+                      {ibkrVerify.ok ? (
+                        <p>{ibkrVerify.message || 'IBKR authentication verified.'}</p>
+                      ) : (
+                        <p>{ibkrVerify.error || 'Verification failed.'}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!authenticated && (
+                <p className="stock-service-hint">
+                  Sign in (use the menu above) to verify IBKR authentication.
+                </p>
+              )}
+            </>
+          )}
+          {!loading && !status && (
+            <p className="stock-service-error">Could not load service status.</p>
+          )}
+        </section>
+      </div>
+    </PageTemplate>
   );
 }
