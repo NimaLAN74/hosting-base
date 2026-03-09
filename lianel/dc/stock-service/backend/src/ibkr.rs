@@ -85,11 +85,25 @@ impl IbkrOAuthClient {
         let enc_pem = std::fs::read_to_string(enc_path).context("read encryption key PEM")?;
         let sig_pem = std::fs::read_to_string(sig_path).context("read signature key PEM")?;
 
-        let dh_key = RsaPrivateKey::from_pkcs8_pem(&dh_pem).context("parse DH param as RSA key")?;
-        let n_bytes = dh_key.n().to_bytes_be();
-        let e_bytes = dh_key.e().to_bytes_be();
-        let dh_prime = BigInt::from_bytes_be(num_bigint::Sign::Plus, &n_bytes);
-        let dh_generator = BigInt::from_bytes_be(num_bigint::Sign::Plus, &e_bytes);
+        let (dh_prime, dh_generator) = if dh_pem.contains("BEGIN DH PARAMETERS") {
+            let dh = openssl::dh::Dh::params_from_pem(dh_pem.as_bytes())
+                .context("parse DH PARAMETERS PEM")?;
+            let p_bytes = dh.prime_p().to_vec();
+            let g_bytes = dh.generator().to_vec();
+            (
+                BigInt::from_bytes_be(num_bigint::Sign::Plus, &p_bytes),
+                BigInt::from_bytes_be(num_bigint::Sign::Plus, &g_bytes),
+            )
+        } else {
+            let dh_key =
+                RsaPrivateKey::from_pkcs8_pem(&dh_pem).context("parse DH param as RSA key")?;
+            let n_bytes = dh_key.n().to_bytes_be();
+            let e_bytes = dh_key.e().to_bytes_be();
+            (
+                BigInt::from_bytes_be(num_bigint::Sign::Plus, &n_bytes),
+                BigInt::from_bytes_be(num_bigint::Sign::Plus, &e_bytes),
+            )
+        };
 
         let encryption_key = RsaPrivateKey::from_pkcs8_pem(&enc_pem).context("parse encryption key")?;
         let signature_key = RsaPrivateKey::from_pkcs8_pem(&sig_pem).context("parse signature key")?;

@@ -1,5 +1,6 @@
 # Stock service (minimal: SSO verification, IBKR OAuth). No DB.
 # Nginx: /api/v1/stock-service/ -> this backend. UI: main frontend at /stock.
+# IBKR: place PEM files in ./stock-service-ibkr/ on the host; they appear at /app/ibkr-conf/ in the container.
 services:
   stock-service:
     image: ghcr.io/nimalan74/hosting-base/lianel-stock-service:latest
@@ -11,15 +12,17 @@ services:
       KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.lianel.se}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-lianel}
       KEYCLOAK_ISSUER_ALT: ${KEYCLOAK_ISSUER_ALT:-https://www.lianel.se/auth/realms/lianel}
-      # Optional: IBKR OAuth (see .env.example)
+      # Optional: IBKR OAuth (see .env.example). Paths are inside the container.
       IBKR_OAUTH_CONSUMER_KEY: ${IBKR_OAUTH_CONSUMER_KEY:-}
       IBKR_OAUTH_ACCESS_TOKEN: ${IBKR_OAUTH_ACCESS_TOKEN:-}
       IBKR_OAUTH_ACCESS_TOKEN_SECRET: ${IBKR_OAUTH_ACCESS_TOKEN_SECRET:-}
       IBKR_OAUTH_REALM: ${IBKR_OAUTH_REALM:-limited_poa}
-      IBKR_OAUTH_DH_PARAM_PATH: ${IBKR_OAUTH_DH_PARAM_PATH:-}
-      IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH: ${IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH:-}
-      IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH: ${IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH:-}
+      IBKR_OAUTH_DH_PARAM_PATH: ${IBKR_OAUTH_DH_PARAM_PATH:-/app/ibkr-conf/dhparam.pem}
+      IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH: ${IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH:-/app/ibkr-conf/private_encryption.pem}
+      IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH: ${IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH:-/app/ibkr-conf/private_signature.pem}
       RUST_LOG: info
+    volumes:
+      - ./stock-service-ibkr:/app/ibkr-conf:ro
     expose:
       - "3003"
     restart: unless-stopped
