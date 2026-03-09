@@ -332,9 +332,8 @@ fn compute_live_session_token(
         .header("Authorization", &auth_header)
         .header("User-Agent", "lianel-stock-service/1.0")
         .header("Accept", "*/*")
-        .header("Accept-Encoding", "gzip, deflate")
-        .header("Connection", "keep-alive")
-        .header("Host", "api.ibkr.com")
+        .header("Content-Length", "0")
+        .body("")
         .send()
         .context("POST live_session_token")?;
 
