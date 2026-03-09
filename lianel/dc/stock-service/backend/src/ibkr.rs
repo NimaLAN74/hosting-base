@@ -49,9 +49,18 @@ struct IbkrKeys {
     signature_key: RsaPrivateKey,
 }
 
+/// RFC 3986 unreserved characters (A-Za-z0-9-._~) must NOT be encoded in OAuth signature base string.
+/// NON_ALPHANUMERIC encodes everything except 0-9 A-Z a-z; we must not encode - . _ ~.
+const RFC3986_ENCODE_SET: percent_encoding::AsciiSet =
+    percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+
 fn percent_encode_rfc3986(s: &str) -> String {
-    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-    utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
+    use percent_encoding::utf8_percent_encode;
+    utf8_percent_encode(s, &RFC3986_ENCODE_SET).to_string()
 }
 
 impl IbkrOAuthClient {
