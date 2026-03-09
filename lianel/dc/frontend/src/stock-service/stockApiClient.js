@@ -16,7 +16,8 @@ async function parseErrorBody(response) {
     const payload = await response.json();
     if (payload && typeof payload.error === 'string' && payload.error.trim()) {
       const detail = typeof payload.detail === 'string' && payload.detail.trim() ? `: ${payload.detail}` : '';
-      return `${payload.error}${detail}`;
+      const hint = typeof payload.hint === 'string' && payload.hint.trim() ? ` ${payload.hint}` : '';
+      return `${payload.error}${detail}${hint}`;
     }
   } catch {
     // ignore

@@ -39,8 +39,8 @@ In the Self Service portal you will:
    - Copy the access token → `IBKR_OAUTH_ACCESS_TOKEN`.
 
 5. **Realm**  
-   - Use the realm shown in the portal (e.g. `limited_poa` for production, or a test realm).  
-   - This is `IBKR_OAUTH_REALM`.
+   - **What to use:** The app **defaults to `test_realm`** (for TESTCONS or testing). For production (live) with your own consumer key, set **`IBKR_OAUTH_REALM=limited_poa`** in your `.env`.  
+   - Per IBKR docs: `test_realm` for TESTCONS/paper; `limited_poa` for your own consumer key.
 
 ---
 
@@ -59,7 +59,7 @@ In the Self Service portal you will:
   IBKR_OAUTH_CONSUMER_KEY=Your9CharConsumerKey
   IBKR_OAUTH_ACCESS_TOKEN=the_access_token_from_portal
   IBKR_OAUTH_ACCESS_TOKEN_SECRET=the_base64_secret_from_portal
-  IBKR_OAUTH_REALM=limited_poa
+  # Omit IBKR_OAUTH_REALM for testing (defaults to test_realm). For production: IBKR_OAUTH_REALM=limited_poa
   ```
 
   The PEM **paths** are already set by the deploy (container paths like `/app/ibkr-conf/dhparam.pem`); you don’t need to change them unless you use different paths.
@@ -82,3 +82,27 @@ In the Self Service portal you will:
 | **Consumer key, access token, secret, PEMs** | Created **inside that portal**; you then put them in server `.env` and the `stock-service-ibkr/` folder |
 
 If the portal URL or menu changes, check IBKR’s current documentation (e.g. [IBKR API OAuth](https://www.interactivebrokers.com/campus/ibkr-api-page/oauth-1-0a-extended/) or “Web API” / “OAuth” in their site).
+
+---
+
+## Troubleshooting: “invalid consumer” (401)
+
+If the API returns `401 Unauthorized` with an error like `"invalid consumer"` (error ids 30883, 31470, etc. all mean the same), check:
+
+1. **Consumer key**
+   - Must match **exactly** the value from the IBKR OAuth Self Service portal (same application).
+   - No leading/trailing spaces or quotes in `.env`.
+   - Case-sensitive.
+   - New keys can take until **after midnight** (portal region time) to become active; if you just created the app, try again later.
+
+2. **Realm**
+   - `IBKR_OAUTH_REALM`: use `test_realm` for TESTCONS/testing (app default), or `limited_poa` for production with your own consumer key.
+
+3. **Application status**
+   - In the portal, confirm the application is **active** and approved for API access (no pending steps).
+
+4. **Environment**
+   - Production: base URL should be `https://api.ibkr.com/v1/api` (default). Paper/demo may use a different base URL; set `IBKR_API_BASE_URL` if required.
+
+5. **Access token and secret**
+   - Must be from the **same** application as the consumer key. Regenerate token/secret in the portal if you recreated the app or consumer key.

@@ -193,12 +193,28 @@ async fn ibkr_verify(State(state): State<AppState>) -> impl IntoResponse {
         )
             .into_response(),
         Err(e) => {
-            tracing::warn!("IBKR verify failed: {}", e);
+            let msg = e.to_string();
+            tracing::warn!("IBKR verify failed: {}", msg);
+            // IBKR 401 (invalid consumer, wrong realm, etc.) → return 401 so UI shows auth error, not "bad gateway"
+            let is_unauthorized = msg.contains("401")
+                || msg.contains("Unauthorized")
+                || msg.contains("invalid consumer");
+            let status = if is_unauthorized {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            let hint = if is_unauthorized {
+                "Check consumer key, realm (test_realm for TESTCONS, limited_poa for production), and that the key is active after midnight in the portal region."
+            } else {
+                ""
+            };
             (
-                StatusCode::BAD_GATEWAY,
+                status,
                 Json(serde_json::json!({
                     "ok": false,
-                    "error": e.to_string()
+                    "error": msg,
+                    "hint": hint
                 })),
             )
                 .into_response()

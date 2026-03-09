@@ -156,7 +156,7 @@ impl IbkrOAuthClient {
         let realm = config
             .ibkr_oauth_realm
             .as_deref()
-            .unwrap_or("limited_poa")
+            .unwrap_or("test_realm")
             .to_string();
         let base_url = config.ibkr_api_base_url.clone();
 
@@ -229,7 +229,7 @@ impl IbkrOAuthClient {
             .config
             .ibkr_oauth_realm
             .as_deref()
-            .unwrap_or("limited_poa");
+            .unwrap_or("test_realm");
         let header_value = format!(
             "OAuth realm=\"{}\", {}",
             realm,

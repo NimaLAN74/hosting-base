@@ -52,7 +52,7 @@ impl AppConfig {
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
-                .or(Some("limited_poa".to_string())),
+                .or(Some("test_realm".to_string())),
             ibkr_oauth_dh_param_path: env::var("IBKR_OAUTH_DH_PARAM_PATH")
                 .or_else(|_| env::var("STOCK_MONITORING_IBKR_OAUTH_DH_PARAM_PATH"))
                 .ok()
