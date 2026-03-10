@@ -7,6 +7,7 @@ use lianel_stock_service::app::{create_router, AppState};
 use lianel_stock_service::auth::KeycloakJwtValidator;
 use lianel_stock_service::config::AppConfig;
 use lianel_stock_service::ibkr::IbkrOAuthClient;
+use lianel_stock_service::watchlist;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,10 +28,20 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let watchlist_cache = std::sync::Arc::new(tokio::sync::RwLock::new(
+        watchlist::WatchlistCache::default(),
+    ));
+    watchlist::spawn_watchlist_ticker(
+        watchlist_cache.clone(),
+        ibkr_client.clone(),
+        config.ibkr_api_base_url.clone(),
+    );
+
     let state = AppState {
         validator,
         config: Some(config),
         ibkr_client,
+        watchlist_cache,
     };
 
     let app = create_router(state);

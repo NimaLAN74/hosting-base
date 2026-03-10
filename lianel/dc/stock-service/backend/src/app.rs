@@ -13,12 +13,15 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 use crate::ibkr::IbkrOAuthClient;
+use crate::watchlist;
+use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct AppState {
     pub validator: Arc<KeycloakJwtValidator>,
     pub config: Option<Arc<crate::config::AppConfig>>,
     pub ibkr_client: Option<Arc<IbkrOAuthClient>>,
+    pub watchlist_cache: Arc<RwLock<watchlist::WatchlistCache>>,
 }
 
 #[derive(Clone)]
@@ -62,7 +65,8 @@ fn normalize_display_name(
 pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
-        .route("/api/v1/status", get(status));
+        .route("/api/v1/status", get(status))
+        .route("/api/v1/watchlist", get(watchlist_handler));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -156,6 +160,10 @@ async fn require_auth(
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn watchlist_handler(State(state): State<AppState>) -> Json<watchlist::WatchlistResponse> {
+    Json(watchlist::get_watchlist_response(&state.watchlist_cache).await)
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
