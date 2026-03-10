@@ -195,7 +195,31 @@ pub async fn refresh_from_ibkr(
     };
 
     let status = resp.status();
-    let body: Result<Vec<serde_json::Value>, _> = resp.json().await;
+    let body_text = match resp.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("Watchlist IBKR snapshot body read failed (status {}): {}", status, e);
+            let mut next = WatchlistCache::default();
+            next.as_of = as_of.clone();
+            for s in DEFAULT_SYMBOLS {
+                next.quotes.insert(
+                    (*s).to_string(),
+                    WatchlistQuote {
+                        symbol: (*s).to_string(),
+                        price: None,
+                        currency: Some("USD".to_string()),
+                        updated_at: Some(as_of.clone()),
+                        error: Some(format!("IBKR response read failed: {}", e)),
+                    },
+                );
+            }
+            let mut g = cache.write().await;
+            *g = next;
+            return;
+        }
+    };
+
+    let body: Result<Vec<serde_json::Value>, _> = serde_json::from_str(body_text.trim());
     let mut next = WatchlistCache::default();
     next.as_of = as_of.clone();
 
@@ -251,7 +275,25 @@ pub async fn refresh_from_ibkr(
             }
         }
         Err(e) => {
-            tracing::warn!("Watchlist IBKR snapshot parse failed (status {}): {}", status, e);
+            let preview = body_text.trim();
+            let preview = if preview.len() > 200 {
+                format!("{}...", &preview[..200])
+            } else {
+                preview.to_string()
+            };
+            tracing::warn!(
+                "Watchlist IBKR snapshot parse failed (status {}): {}; body: {:?}",
+                status,
+                e,
+                preview
+            );
+            let hint = if body_text.trim().is_empty() {
+                "empty response (check IBKR session/cookie)"
+            } else if body_text.trim().starts_with('<') {
+                "HTML response (IBKR may require session cookie or login)"
+            } else {
+                "non-JSON response"
+            };
             for s in DEFAULT_SYMBOLS {
                 next.quotes.insert(
                     (*s).to_string(),
@@ -260,7 +302,7 @@ pub async fn refresh_from_ibkr(
                         price: None,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
-                        error: Some(format!("IBKR response error: {}", e)),
+                        error: Some(format!("IBKR {} (status {}): {}", hint, status, e)),
                     },
                 );
             }
