@@ -161,6 +161,31 @@ pub async fn refresh_from_ibkr(
         }
     };
 
+    // /iserver/* requires brokerage session cookie from /tickle (otherwise 403)
+    let cookie = match client.get_session_for_cookie().await {
+        Ok(session) => format!("api={}", session),
+        Err(e) => {
+            tracing::warn!("Watchlist IBKR tickle (session) failed: {}", e);
+            let mut next = WatchlistCache::default();
+            next.as_of = as_of.clone();
+            for s in DEFAULT_SYMBOLS {
+                next.quotes.insert(
+                    (*s).to_string(),
+                    WatchlistQuote {
+                        symbol: (*s).to_string(),
+                        price: None,
+                        currency: Some("USD".to_string()),
+                        updated_at: Some(as_of.clone()),
+                        error: Some(format!("IBKR session failed (tickle): {}", e)),
+                    },
+                );
+            }
+            let mut g = cache.write().await;
+            *g = next;
+            return;
+        }
+    };
+
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -168,6 +193,7 @@ pub async fn refresh_from_ibkr(
     let resp = match http_client
         .get(&url)
         .header("Authorization", auth)
+        .header("Cookie", cookie)
         .send()
         .await
     {

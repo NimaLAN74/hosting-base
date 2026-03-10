@@ -250,6 +250,36 @@ impl IbkrOAuthClient {
         );
         Ok(header_value)
     }
+
+    /// Call GET /tickle to obtain brokerage session token. Required for /iserver/* (e.g. marketdata/snapshot).
+    /// Returns the session value to send as cookie: `api={session}`.
+    pub async fn get_session_for_cookie(&self) -> Result<String> {
+        let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
+        let tickle_url = format!("{}/tickle", base_url);
+        let auth = self.sign_request("GET", &tickle_url, None).await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("reqwest client")?;
+        let resp = client
+            .get(&tickle_url)
+            .header("Authorization", auth)
+            .send()
+            .await
+            .context("GET /tickle")?;
+        let status = resp.status();
+        let body = resp.text().await.context("tickle body")?;
+        if !status.is_success() {
+            anyhow::bail!("tickle failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
+        }
+        let tickle: TickleResponse = serde_json::from_str(&body).context("parse tickle JSON")?;
+        Ok(tickle.session)
+    }
+}
+
+#[derive(Deserialize)]
+struct TickleResponse {
+    session: String,
 }
 
 #[derive(Deserialize)]
