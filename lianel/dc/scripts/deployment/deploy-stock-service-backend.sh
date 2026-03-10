@@ -36,13 +36,21 @@ for env_dir in /root/lianel/dc /root/hosting-base/lianel/dc; do
   touch "$ENV_FILE"
   for var in $ENV_VARS; do
     eval "val=\${${var}:-}"
-    if [ -n "$val" ]; then
-      tmp_env_file="$(mktemp)"
-      grep -v "^${var}=" "$ENV_FILE" > "$tmp_env_file" 2>/dev/null || true
-      printf '%s=%s\n' "$var" "$val" >> "$tmp_env_file"
-      mv "$tmp_env_file" "$ENV_FILE"
-      echo "Configured $var in $ENV_FILE"
+    [ -n "$val" ] || continue
+
+    # Do not overwrite existing non-empty values in ENV_FILE.
+    # This prevents CI/CD env from accidentally replacing secrets that were manually set on the server.
+    existing="$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | tail -n 1 | sed -E "s/^${var}=//" || true)"
+    if [ -n "$existing" ]; then
+      echo "Keeping existing $var in $ENV_FILE (non-empty)"
+      continue
     fi
+
+    tmp_env_file="$(mktemp)"
+    grep -v "^${var}=" "$ENV_FILE" > "$tmp_env_file" 2>/dev/null || true
+    printf '%s=%s\n' "$var" "$val" >> "$tmp_env_file"
+    mv "$tmp_env_file" "$ENV_FILE"
+    echo "Configured $var in $ENV_FILE"
   done
 done
 

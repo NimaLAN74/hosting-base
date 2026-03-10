@@ -1,4 +1,5 @@
-# Run E2E stock service checks (routes + API). No deploy; tests live site.
+# E2E Stock Service: IBKR (via backend), backend APIs, frontend. No deploy; tests live site.
+# Optional: set E2E_STOCK_KEYCLOAK_* secrets to test /ibkr/verify with auth (full IBKR path).
 name: E2E Stock Service
 
 on:
@@ -7,16 +8,25 @@ on:
     branches: [master, main]
     paths:
       - 'lianel/dc/scripts/monitoring/e2e-stock-service-routes.sh'
+      - 'lianel/dc/stock-service/**'
+      - 'lianel/dc/frontend/src/stock-service/**'
+      - 'lianel/dc/nginx/config/nginx.conf'
       - '.github/workflows/e2e-stock-service.yml'
 
 jobs:
   e2e:
-    name: Stock routes + API
+    name: IBKR → Backend → Frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: E2E Stock Service (routes + API)
+      - name: E2E Stock Service (IBKR, backend, frontend)
         run: bash lianel/dc/scripts/monitoring/e2e-stock-service-routes.sh
         env:
           BASE_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
+          KEYCLOAK_URL: ${{ vars.KEYCLOAK_URL || 'https://www.lianel.se/auth' }}
+          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'lianel' }}
+          E2E_STOCK_KEYCLOAK_CLIENT_ID: ${{ secrets.E2E_STOCK_KEYCLOAK_CLIENT_ID }}
+          E2E_STOCK_KEYCLOAK_CLIENT_SECRET: ${{ secrets.E2E_STOCK_KEYCLOAK_CLIENT_SECRET }}
+          E2E_STOCK_KEYCLOAK_USER: ${{ secrets.E2E_STOCK_KEYCLOAK_USER }}
+          E2E_STOCK_KEYCLOAK_PASSWORD: ${{ secrets.E2E_STOCK_KEYCLOAK_PASSWORD }}

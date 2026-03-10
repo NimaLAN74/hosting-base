@@ -118,11 +118,31 @@ impl KeycloakJwtValidator {
             }
         }
         let url = self.config.keycloak_jwks_url();
-        let jwks: JWKS = reqwest::get(&url)
+        // Keycloak JWKS may include non-signing keys (e.g. RSA-OAEP) that `alcoholic_jwt` can't deserialize.
+        // Filter to signing keys (RS256 / alg missing) before deserializing.
+        let raw: Value = reqwest::get(&url)
             .await
             .map_err(|e| anyhow::anyhow!("JWKS fetch failed: {}", e))?
             .json()
             .await
+            .map_err(|e| anyhow::anyhow!("JWKS JSON failed: {}", e))?;
+
+        let filtered = match raw {
+            Value::Object(mut obj) => {
+                if let Some(Value::Array(keys)) = obj.get_mut("keys") {
+                    keys.retain(|k| {
+                        let alg = k.get("alg").and_then(Value::as_str);
+                        let use_ = k.get("use").and_then(Value::as_str);
+                        // Prefer signature keys. Keep if explicitly RS256, or if alg missing but use=sig.
+                        matches!(alg, Some("RS256")) || (alg.is_none() && matches!(use_, Some("sig")))
+                    });
+                }
+                Value::Object(obj)
+            }
+            other => other,
+        };
+
+        let jwks: JWKS = serde_json::from_value(filtered)
             .map_err(|e| anyhow::anyhow!("JWKS parse failed: {}", e))?;
         {
             let mut g = self.jwks.write().await;
