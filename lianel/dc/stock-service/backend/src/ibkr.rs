@@ -366,7 +366,15 @@ fn compute_live_session_token(
     if hex_k.len() % 2 == 1 {
         hex_k = format!("0{}", hex_k);
     }
-    let k_bytes = hex::decode(&hex_k).context("K hex to bytes")?;
+    let mut k_bytes = hex::decode(&hex_k).context("K hex to bytes")?;
+    // IBKR spec: prepend a null byte if K would lack a sign bit (i.e., MSB set).
+    // Equivalent to: if bitlen(K) % 8 == 0 then prefix 0x00.
+    if !k_bytes.is_empty() && (k_bytes[0] & 0x80) != 0 {
+        let mut prefixed = Vec::with_capacity(k_bytes.len() + 1);
+        prefixed.push(0u8);
+        prefixed.extend_from_slice(&k_bytes);
+        k_bytes = prefixed;
+    }
 
     let mut mac = HmacSha1::new_from_slice(&k_bytes).context("HMAC-SHA1 key")?;
     mac.update(&prepend_bytes);
