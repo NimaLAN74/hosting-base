@@ -6,6 +6,7 @@ use axum::http::{Request, StatusCode};
 use lianel_stock_service::app::{create_router, AppState};
 use lianel_stock_service::auth::KeycloakJwtValidator;
 use lianel_stock_service::config::AppConfig;
+use lianel_stock_service::watchlist;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -77,5 +78,8 @@ fn test_state() -> AppState {
         validator,
         config: Some(config),
         ibkr_client: None,
+        watchlist_cache: Arc::new(tokio::sync::RwLock::new(
+            watchlist::WatchlistCache::default(),
+        )),
     }
 }
