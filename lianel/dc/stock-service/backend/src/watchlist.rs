@@ -213,9 +213,13 @@ pub async fn refresh_from_ibkr(
                 let symbol = conid
                     .and_then(|c| conid_to_symbol.get(&c).cloned())
                     .unwrap_or_else(|| "?".to_string());
-                let price_str = item.get("31").and_then(|v| v.as_str());
-                let price = price_str.and_then(|p| p.replace(',', "").parse::<f64>().ok());
-                let error = if price.is_none() && price_str.is_none() {
+                // Field 31 = last price; IBKR may return number or string
+                let price = item.get("31").and_then(|v| v.as_f64()).or_else(|| {
+                    item.get("31")
+                        .and_then(|v| v.as_str())
+                        .and_then(|p| p.replace(',', "").parse::<f64>().ok())
+                });
+                let error = if price.is_none() {
                     Some("no price (pre-flight or stream not ready)".to_string())
                 } else {
                     None

@@ -71,9 +71,15 @@ export default function StockServicePage() {
                       <td>{row.currency || '—'}</td>
                       <td>
                         {row.error ? (
-                          <span className="stock-service-wl-error" title={row.error}>
-                            {row.error}
-                          </span>
+                          row.error.includes('pre-flight or stream not ready') ? (
+                            <span className="stock-service-wl-pending" title={row.error}>
+                              Pending
+                            </span>
+                          ) : (
+                            <span className="stock-service-wl-error" title={row.error}>
+                              {row.error}
+                            </span>
+                          )
                         ) : (
                           <span className="stock-service-wl-ok">OK</span>
                         )}

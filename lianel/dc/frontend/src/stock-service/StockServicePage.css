@@ -217,6 +217,11 @@
   font-size: 0.9rem;
 }
 
+.stock-service-wl-pending {
+  color: #666;
+  font-size: 0.9rem;
+}
+
 .stock-service-wl-error {
   color: #721c24;
   font-size: 0.85rem;
