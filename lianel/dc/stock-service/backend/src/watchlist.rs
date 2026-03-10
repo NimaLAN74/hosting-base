@@ -125,9 +125,8 @@ pub async fn refresh_from_ibkr(
                 },
             );
         }
-        if let Ok(mut g) = cache.write().await {
-            *g = next;
-        }
+        let mut g = cache.write().await;
+        *g = next;
         return;
     };
 
@@ -156,9 +155,8 @@ pub async fn refresh_from_ibkr(
                     },
                 );
             }
-            if let Ok(mut g) = cache.write().await {
-                *g = next;
-            }
+            let mut g = cache.write().await;
+            *g = next;
             return;
         }
     };
@@ -190,9 +188,8 @@ pub async fn refresh_from_ibkr(
                     },
                 );
             }
-            if let Ok(mut g) = cache.write().await {
-                *g = next;
-            }
+            let mut g = cache.write().await;
+            *g = next;
             return;
         }
     };
@@ -266,9 +263,8 @@ pub async fn refresh_from_ibkr(
         }
     }
 
-    if let Ok(mut g) = cache.write().await {
-        *g = next;
-    }
+    let mut g = cache.write().await;
+    *g = next;
 }
 
 /// Spawn the background task that refreshes the watchlist every REFRESH_INTERVAL_SECS (IBKR only).
