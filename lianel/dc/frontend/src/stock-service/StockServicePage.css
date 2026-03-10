@@ -161,3 +161,68 @@
 .stock-service-btn.secondary:hover {
   background: #f8f9fa;
 }
+
+/* Watchlist section */
+.stock-service-watchlist-card {
+  margin-top: 1rem;
+}
+
+.stock-service-watchlist-meta {
+  font-size: 0.85rem;
+  color: #555;
+  margin-bottom: 0.75rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.stock-service-watchlist-provider {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.stock-service-watchlist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.stock-service-watchlist-table th,
+.stock-service-watchlist-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+.stock-service-watchlist-table th {
+  font-weight: 600;
+  color: #1a1a1a;
+  background: #eee;
+}
+
+.stock-service-watchlist-table tbody tr:hover {
+  background: #fafafa;
+}
+
+.stock-service-wl-symbol {
+  font-weight: 600;
+}
+
+.stock-service-wl-price {
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-service-wl-ok {
+  color: #0f5132;
+  font-size: 0.9rem;
+}
+
+.stock-service-wl-error {
+  color: #721c24;
+  font-size: 0.85rem;
+  max-width: 12rem;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
