@@ -356,9 +356,35 @@ pub fn spawn_watchlist_ticker(
     });
 }
 
-/// Build the API response from current cache.
+/// Fallback response when cache is unavailable (avoids 502).
+pub fn fallback_response() -> WatchlistResponse {
+    let symbols: Vec<WatchlistQuote> = DEFAULT_SYMBOLS
+        .iter()
+        .map(|s| WatchlistQuote {
+            symbol: (*s).to_string(),
+            price: None,
+            currency: Some("USD".to_string()),
+            updated_at: None,
+            error: Some("Service temporarily unavailable".to_string()),
+        })
+        .collect();
+    WatchlistResponse {
+        symbols,
+        as_of: iso_ts(),
+        provider: "IBKR".to_string(),
+    }
+}
+
+/// Build the API response from current cache. Uses fallback if cache read times out (e.g. ticker holding lock).
 pub async fn get_watchlist_response(cache: &RwLock<WatchlistCache>) -> WatchlistResponse {
-    let g = cache.read().await;
+    let read_guard = match tokio::time::timeout(Duration::from_secs(5), cache.read()).await {
+        Ok(g) => g,
+        Err(_) => {
+            tracing::warn!("Watchlist cache read timed out");
+            return fallback_response();
+        }
+    };
+    let g = read_guard;
     let symbols: Vec<WatchlistQuote> = DEFAULT_SYMBOLS
         .iter()
         .map(|s| {
