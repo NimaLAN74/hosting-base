@@ -264,6 +264,7 @@ impl IbkrOAuthClient {
         let resp = client
             .get(&tickle_url)
             .header("Authorization", auth)
+            .header("User-Agent", "Console")
             .send()
             .await
             .context("GET /tickle")?;

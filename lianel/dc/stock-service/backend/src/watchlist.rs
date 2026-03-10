@@ -194,6 +194,7 @@ pub async fn refresh_from_ibkr(
         .get(&url)
         .header("Authorization", auth)
         .header("Cookie", cookie)
+        .header("User-Agent", "Console")
         .send()
         .await
     {
