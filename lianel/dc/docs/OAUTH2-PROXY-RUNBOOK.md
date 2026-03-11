@@ -19,6 +19,19 @@ If users see this on Grafana or Airflow **after** signing in with Keycloak (e.g.
 
 Then reload nginx and have users sign in again (clear site cookies for the affected host if needed).
 
+## Check container logs (root cause)
+
+Always check logs when login fails:
+
+- **oauth2-proxy**: `docker logs oauth2-proxy --tail 50`  
+  - `ERROR: ... failed to discover OIDC configuration: unexpected status "502"` → oauth2-proxy cannot reach the OIDC issuer URL (e.g. https://www.lianel.se/auth/realms/lianel) at startup. Keycloak may be down or slow; nginx returns 502. **Fix**: Start Keycloak first, wait until healthy, then start oauth2-proxy. It will retry and eventually succeed once Keycloak is up.
+- **Grafana**: `docker logs grafana --tail 50`  
+  - `error=invalid_request errorDesc="Missing parameter: code_challenge_method"` → Keycloak client grafana-client requires PKCE; run `scripts/keycloak-setup/update-grafana-client-no-pkce-required.sh` on the server.
+  - `[oauth.login] Login provider denied login request` → same (Keycloak rejected the auth request).
+- **Keycloak**: `docker logs keycloak --tail 80`  
+  - `PKCE enforced Client without code challenge method` → client (e.g. grafana-client) has PKCE required; remove requirement via Keycloak admin or the update script.
+  - `error="cookie_not_found"` → session cookie not sent on login form POST. Use auth_url that matches nginx cookie path (e.g. Grafana auth_url = https://www.lianel.se/auth/...) and/or add `proxy_cookie_path /auth/realms/ /realms/` on auth.lianel.se if login is on auth.lianel.se.
+
 ## Why it was restarting
 
 1. **Compose variable names (fixed in repo)**  
