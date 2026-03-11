@@ -203,14 +203,66 @@ pub async fn refresh_from_ibkr(
     let accounts_req = http_client
         .get(&accounts_url)
         .header("Cookie", &cookie)
-        .header("User-Agent", "Console");
+        .header("User-Agent", "Console")
+        .header("Accept", "application/json");
     let accounts_req = if let Some(ref a) = auth {
         accounts_req.header("Authorization", a.as_str())
     } else {
         accounts_req
     };
-    if let Err(e) = accounts_req.send().await {
-        tracing::warn!("Watchlist IBKR /accounts pre-call failed: {}", e);
+    match accounts_req.send().await {
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            if !status.is_success() {
+                tracing::warn!(
+                    "Watchlist IBKR /accounts pre-call failed ({}): {}",
+                    status,
+                    body.trim_start().chars().take(200).collect::<String>()
+                );
+                let mut next = WatchlistCache::default();
+                next.as_of = as_of.clone();
+                for s in DEFAULT_SYMBOLS {
+                    next.quotes.insert(
+                        (*s).to_string(),
+                        WatchlistQuote {
+                            symbol: (*s).to_string(),
+                            price: None,
+                            currency: Some("USD".to_string()),
+                            updated_at: Some(as_of.clone()),
+                            error: Some(format!(
+                                "IBKR /accounts failed {}: {}",
+                                status,
+                                body.trim_start().chars().take(200).collect::<String>()
+                            )),
+                        },
+                    );
+                }
+                let mut g = cache.write().await;
+                *g = next;
+                return;
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Watchlist IBKR /accounts pre-call request error: {}", e);
+            let mut next = WatchlistCache::default();
+            next.as_of = as_of.clone();
+            for s in DEFAULT_SYMBOLS {
+                next.quotes.insert(
+                    (*s).to_string(),
+                    WatchlistQuote {
+                        symbol: (*s).to_string(),
+                        price: None,
+                        currency: Some("USD".to_string()),
+                        updated_at: Some(as_of.clone()),
+                        error: Some(format!("IBKR /accounts request failed: {}", e)),
+                    },
+                );
+            }
+            let mut g = cache.write().await;
+            *g = next;
+            return;
+        }
     }
     let req = http_client.get(&url).header("Cookie", cookie).header("User-Agent", "Console");
     let req = if let Some(ref a) = auth {
