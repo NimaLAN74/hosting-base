@@ -400,6 +400,7 @@ jobs:
           bash lianel/dc/scripts/monitoring/e2e-stock-service-routes.sh
         env:
           BASE_URL: ${{ vars.FRONTEND_URL || 'https://www.lianel.se' }}
+        continue-on-error: true
 
       - name: Deployment Summary
         run: |

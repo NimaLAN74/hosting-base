@@ -34,9 +34,11 @@ fi
 
 echo "Waiting for Keycloak to be ready..."
 for i in 1 2 3 4 5 6 7 8 9 10; do
-  if docker ps --filter name=keycloak --filter status=running -q | grep -q .; then
+  if docker ps --filter name=keycloak --filter status=running -q 2>/dev/null | grep -q .; then
     echo "Keycloak container is running."
     break
+  else
+    true
   fi
   sleep 5
 done
