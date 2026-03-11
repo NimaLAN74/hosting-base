@@ -278,11 +278,6 @@ impl IbkrOAuthClient {
         }
 
         let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
-        if base_url.contains("api.ibkr.com") {
-            if let Err(e) = self.ensure_ssodh_connected().await {
-                tracing::warn!("SSODH brokerage session step failed (continuing with tickle): {}", e);
-            }
-        }
 
         let tickle_url = format!("{}/tickle", base_url);
         let auth = self.sign_request("GET", &tickle_url, None).await?;
@@ -300,13 +295,18 @@ impl IbkrOAuthClient {
             anyhow::bail!("tickle failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
         }
         let tickle: TickleResponse = serde_json::from_str(&body).context("parse tickle JSON")?;
+        if base_url.contains("api.ibkr.com") {
+            if let Err(e) = self.ensure_ssodh_connected(&tickle.session).await {
+                tracing::warn!("SSODH brokerage session step failed (continuing): {}", e);
+            }
+        }
         Ok(tickle.session)
     }
 
     /// Establish brokerage session for api.ibkr.com via SSODH init/response (required for market data).
-    async fn ensure_ssodh_connected(&self) -> Result<()> {
+    /// Requires the `api=<session>` cookie from /tickle.
+    async fn ensure_ssodh_connected(&self, session: &str) -> Result<()> {
         let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
-        let lst = self.get_live_session_token().await?;
         let init_url = format!("{}/iserver/auth/ssodh/init", base_url);
         let mac = format!(
             "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
@@ -332,6 +332,7 @@ impl IbkrOAuthClient {
         let resp = client
             .post(&init_url)
             .header("Authorization", auth)
+            .header("Cookie", format!("api={}", session))
             .header("User-Agent", "Console")
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(form_body.clone())
@@ -343,13 +344,16 @@ impl IbkrOAuthClient {
         if !status.is_success() {
             anyhow::bail!("ssodh/init failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
         }
-        let init_res: SsodhInitResponse = serde_json::from_str(&body)
-            .with_context(|| format!("parse ssodh init JSON (body starts with): {}", body.trim_start().chars().take(120).collect::<String>()))?;
+        let init_res: SsodhInitResponse = serde_json::from_str(&body).with_context(|| {
+            format!(
+                "parse ssodh init JSON (body starts with): {}",
+                body.trim_start().chars().take(120).collect::<String>()
+            )
+        })?;
         let challenge = init_res.challenge.trim();
-        // SSODH expects verifier as hex bytes; use decoded LST bytes (not ASCII of base64).
-        let lst_bytes = BASE64.decode(lst.as_str()).context("decode LST for ssodh verifier")?;
-        let lst_hex = hex::encode(lst_bytes);
-        let combined_hex = format!("{}{}", challenge, lst_hex);
+        // SSODH verifier: session token from initial auth (/tickle). Treat as bytes and hex-encode.
+        let session_hex = hex::encode(session.as_bytes());
+        let combined_hex = format!("{}{}", challenge, session_hex);
         let combined_bytes = hex::decode(combined_hex.as_str()).context("combined hex decode")?;
         let r_hash = Sha1::digest(&combined_bytes);
         let r_hex = hex::encode(r_hash);
@@ -360,6 +364,7 @@ impl IbkrOAuthClient {
         let resp2 = client
             .post(&response_url)
             .header("Authorization", auth_resp)
+            .header("Cookie", format!("api={}", session))
             .header("User-Agent", "Console")
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(response_body)
