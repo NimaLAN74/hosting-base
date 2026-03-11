@@ -2,7 +2,16 @@
 
 ## Do we still use it?
 
-**Yes.** Nginx uses oauth2-proxy for session-based protection of several routes via `auth_request /oauth2/auth` (e.g. main app, Airflow, Comp-AI). The React app uses Keycloak JWTs for API calls; oauth2-proxy provides the cookie-based session for browser access to those UIs.
+**Yes.** Nginx uses oauth2-proxy for session-based protection of several routes via `auth_request /oauth2/auth` (e.g. main app, Airflow, Comp-AI, Grafana). The React app uses Keycloak JWTs for API calls; oauth2-proxy provides the cookie-based session for browser access to those UIs.
+
+### "Restart login cookie not found" after Keycloak login
+
+If users see this on Grafana or Airflow after signing in with Keycloak, nginx was not passing **X-Forwarded-Host** and **X-Forwarded-Port** to oauth2-proxy. oauth2-proxy needs these to build the correct redirect URI and set cookies for the same host that receives the callback. Ensure every `location /oauth2/` and `location = /oauth2/auth` in `nginx.conf` includes:
+
+- `proxy_set_header X-Forwarded-Host $host;`
+- `proxy_set_header X-Forwarded-Port $server_port;`
+
+Then reload nginx and have users sign in again (clear site cookies for the affected host if needed).
 
 ## Why it was restarting
 

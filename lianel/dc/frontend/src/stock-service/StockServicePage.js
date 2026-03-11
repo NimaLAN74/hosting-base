@@ -11,13 +11,29 @@ const WATCHLIST_REFRESH_MS = 60_000;
 export default function StockServicePage() {
   const [watchlist, setWatchlist] = useState(null);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
+  const [watchlistError, setWatchlistError] = useState(null);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
+    setWatchlistError(null);
     fetch(WATCHLIST_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setWatchlist(data))
-      .catch(() => setWatchlist(null))
+      .then((r) => {
+        if (!r.ok) {
+          setWatchlistError(r.status === 502 ? 'Stock service unavailable. Try again shortly.' : `Request failed (${r.status}).`);
+          return null;
+        }
+        return r.json();
+      })
+      .then((data) => {
+        setWatchlist(data);
+        if (data && data.symbols && data.symbols.length && data.symbols.every((s) => s.error)) {
+          setWatchlistError('Prices not yet available from provider. Check back in a minute.');
+        }
+      })
+      .catch(() => {
+        setWatchlist(null);
+        setWatchlistError('Could not load watchlist. Check your connection and try again.');
+      })
       .finally(() => setWatchlistLoading(false));
   }, []);
 
@@ -39,6 +55,11 @@ export default function StockServicePage() {
             Chosen symbols. Data from IBKR. Updates every 60 seconds.
           </p>
           {watchlistLoading && <p className="stock-service-loading">Loading…</p>}
+          {watchlistError && !watchlistLoading && (
+            <p className="stock-service-error" role="alert">
+              {watchlistError}
+            </p>
+          )}
           {!watchlistLoading && watchlist && watchlist.symbols && watchlist.symbols.length > 0 && (
             <>
               <div className="stock-service-watchlist-meta">
@@ -90,7 +111,7 @@ export default function StockServicePage() {
               </table>
             </>
           )}
-          {!watchlistLoading && (!watchlist || !watchlist.symbols?.length) && (
+          {!watchlistLoading && (!watchlist || !watchlist.symbols?.length) && !watchlistError && (
             <p className="stock-service-explainer">No watchlist data available.</p>
           )}
         </section>
