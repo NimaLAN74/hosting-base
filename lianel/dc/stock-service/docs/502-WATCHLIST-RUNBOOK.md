@@ -40,3 +40,20 @@ it means **Nginx could not get a response from the stock-service backend** (upst
 ## After deploy (CI/CD)
 
 If deploy did not run (e.g. SSH timeout from GitHub Actions), the running server may still have an old or stopped container. Run `ensure-stock-service-up.sh` on the server after fixing deploy/SSH so the new image is deployed and the container is up.
+
+---
+
+## IBKR "Bad Request: no bridge" (status 400)
+
+When the watchlist shows **IBKR (status 400): Bad Request: no bridge**, the Client Portal API is rejecting the market-data request because there is no active “bridge” to market data.
+
+**Typical causes**
+
+- **Client Portal Gateway (or TWS) not running** on the machine that holds the session used for the API (or the session is not the one that has market data).
+- **Account / session** not allowed or not connected for market data (e.g. demo, no data subscription, or gateway not logged in with an account that has data).
+
+**What to do**
+
+1. Ensure **IBKR Client Portal Gateway** (or TWS) is running and logged in with the same account that has market data.
+2. Ensure the **session** used by the backend (e.g. the one obtained via `/tickle` and the same LST/cookies) is the one attached to that Gateway/TWS session.
+3. Check IBKR docs and account settings for **market data subscriptions** and any “bridge” or gateway requirements for the Client Portal API.
