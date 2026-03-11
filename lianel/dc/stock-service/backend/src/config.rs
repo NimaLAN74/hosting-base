@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub ibkr_oauth_private_encryption_key_path: Option<String>,
     pub ibkr_oauth_private_signature_key_path: Option<String>,
     pub ibkr_api_base_url: String,
+    /// When using a local Client Portal Gateway (HTTPS with self-signed cert), set to true to skip TLS verify.
+    pub ibkr_insecure_skip_tls_verify: bool,
     pub ibkr_username: Option<String>,
     pub ibkr_password: Option<String>,
 }
@@ -73,6 +75,11 @@ impl AppConfig {
                 .unwrap_or_else(|_| "https://api.ibkr.com/v1/api".to_string())
                 .trim_end_matches('/')
                 .to_string(),
+            ibkr_insecure_skip_tls_verify: env::var("IBKR_INSECURE_SKIP_TLS_VERIFY")
+                .unwrap_or_else(|_| "false".to_string())
+                .trim()
+                .eq_ignore_ascii_case("true")
+                || env::var("IBKR_INSECURE_SKIP_TLS_VERIFY").unwrap_or_default().trim() == "1",
             ibkr_username: env::var("IBKR_USERNAME").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             ibkr_password: env::var("IBKR_PASSWORD").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
         })

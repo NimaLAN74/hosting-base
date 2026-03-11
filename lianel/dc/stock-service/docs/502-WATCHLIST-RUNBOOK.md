@@ -54,6 +54,10 @@ When the watchlist shows **IBKR (status 400): Bad Request: no bridge**, the Clie
 
 **What to do**
 
-1. Ensure **IBKR Client Portal Gateway** (or TWS) is running and logged in with the same account that has market data.
-2. Ensure the **session** used by the backend (e.g. the one obtained via `/tickle` and the same LST/cookies) is the one attached to that Gateway/TWS session.
-3. Check IBKR docs and account settings for **market data subscriptions** and any “bridge” or gateway requirements for the Client Portal API.
+1. **Option A – Use Client Portal Gateway (Docker)**  
+   Deploy and log in to the Gateway, then point the stock-service at it:
+   - See **[CLIENT-PORTAL-GATEWAY.md](./CLIENT-PORTAL-GATEWAY.md)** for build, run, login, and `IBKR_API_BASE_URL` + `IBKR_INSECURE_SKIP_TLS_VERIFY` setup.
+2. **Option B – TWS / IB Gateway**  
+   Run IBKR Trader Workstation or IB Gateway on a machine, log in with the same account that has market data. If the backend uses **api.ibkr.com** (cloud), the “no bridge” message may still appear; in that case use the Gateway (Option A) or check account/region/subscription.
+3. Ensure the **session** used by the backend (e.g. the one obtained via `/tickle` and the same LST/cookies) is the one attached to that Gateway/TWS session.
+4. Check IBKR docs and account settings for **market data subscriptions** and any “bridge” or gateway requirements for the Client Portal API.

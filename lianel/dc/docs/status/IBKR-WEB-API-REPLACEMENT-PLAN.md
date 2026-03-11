@@ -20,9 +20,9 @@ This document is a clear, end-to-end plan to replace the current stock monitorin
 | **OAuth 2.0 (beta)** | Account management + trading | Yes – our backend can call api.ibkr.com with user tokens |
 | **OAuth 1.0a** | Trading only | Yes – same |
 | **SSO** | FAs/IBs, alternative UIs | No – for advisor/broker setups |
-| **Client Portal Gateway (CPGW)** | Individual accounts, local Java app | No – runs on user’s machine; we cannot host it |
+| **Client Portal Gateway (CPGW)** | Individual accounts, local Java app | Optional – we can run it in Docker and point the backend at it when api.ibkr.com returns “no bridge”; see stock-service/docs/CLIENT-PORTAL-GATEWAY.md |
 
-For a **server-side replacement**, we must use **OAuth 1.0a or OAuth 2.0** so our backend can call `https://api.ibkr.com/v1/api` on behalf of the user. Each app user must **link their IBKR account** (OAuth flow); we store and refresh tokens and call IBKR from our service.
+For a **server-side replacement**, we must use **OAuth 1.0a or OAuth 2.0** so our backend can call `https://api.ibkr.com/v1/api` on behalf of the user. If market data calls return “no bridge”, you can optionally deploy the **Client Portal Gateway** (Docker) and set `IBKR_API_BASE_URL=https://ibkr-gateway:5000/v1/api` (see stock-service docs). Each app user must **link their IBKR account** (OAuth flow); we store and refresh tokens and call IBKR from our service.
 
 ### 1.3 Account & Market Data Requirements
 

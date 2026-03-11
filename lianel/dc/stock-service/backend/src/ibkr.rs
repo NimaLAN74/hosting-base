@@ -251,16 +251,22 @@ impl IbkrOAuthClient {
         Ok(header_value)
     }
 
+    /// Build HTTP client for IBKR API (optionally skips TLS verify for local Client Portal Gateway).
+    pub fn http_client(&self) -> Result<reqwest::Client> {
+        let mut b = reqwest::Client::builder().timeout(Duration::from_secs(15));
+        if self.config.ibkr_insecure_skip_tls_verify {
+            b = b.danger_accept_invalid_certs(true);
+        }
+        b.build().context("reqwest client")
+    }
+
     /// Call GET /tickle to obtain brokerage session token. Required for /iserver/* (e.g. marketdata/snapshot).
     /// Returns the session value to send as cookie: `api={session}`.
     pub async fn get_session_for_cookie(&self) -> Result<String> {
         let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
         let tickle_url = format!("{}/tickle", base_url);
         let auth = self.sign_request("GET", &tickle_url, None).await?;
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .build()
-            .context("reqwest client")?;
+        let client = self.http_client()?;
         let resp = client
             .get(&tickle_url)
             .header("Authorization", auth)

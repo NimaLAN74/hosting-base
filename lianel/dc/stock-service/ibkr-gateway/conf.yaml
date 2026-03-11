@@ -1,0 +1,9 @@
+# IBKR Client Portal Gateway – IP allow list.
+# Allow Docker networks (172.x, 10.x) and localhost so stock-service and host can connect.
+# See: https://www.interactivebrokers.com/en/trading/ib-api.php
+ips:
+  allow:
+    - 127.0.0.1
+    - 10.*
+    - 172.*
+  deny: []

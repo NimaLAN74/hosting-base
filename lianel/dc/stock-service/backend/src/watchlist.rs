@@ -186,10 +186,14 @@ pub async fn refresh_from_ibkr(
         }
     };
 
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .unwrap_or_default();
+    let http_client = client
+        .http_client()
+        .unwrap_or_else(|_| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap_or_default()
+        });
     let resp = match http_client
         .get(&url)
         .header("Authorization", auth)

@@ -1,0 +1,20 @@
+# IBKR Client Portal Gateway – optional. Use for watchlist market data when api.ibkr.com returns "no bridge".
+# 1) Start: docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-gateway.yaml up -d ibkr-gateway
+# 2) Log in: open https://<server>:5000 (or https://localhost:5000 if port forwarded) and sign in with IBKR (same account as OAuth).
+# 3) Point stock-service at the gateway: set IBKR_API_BASE_URL=https://ibkr-gateway:5000/v1/api and IBKR_INSECURE_SKIP_TLS_VERIFY=true in .env, then restart stock-service.
+services:
+  ibkr-gateway:
+    build:
+      context: ./stock-service/ibkr-gateway
+      dockerfile: Dockerfile
+    image: lianel/ibkr-gateway:latest
+    container_name: ibkr-gateway
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+
+networks:
+  lianel-network:
+    external: true
