@@ -246,7 +246,7 @@ pub async fn refresh_from_ibkr(
         }
     };
 
-    let body: Result<Vec<serde_json::Value>, _> = serde_json::from_str(body_text.trim());
+    let body_parsed: Result<serde_json::Value, _> = serde_json::from_str(body_text.trim());
     let mut next = WatchlistCache::default();
     next.as_of = as_of.clone();
 
@@ -255,8 +255,25 @@ pub async fn refresh_from_ibkr(
         .map(|(sym, &c)| (c, sym.clone()))
         .collect();
 
-    match body {
-        Ok(arr) => {
+    /// Extract error message from IBKR error object, e.g. {"error":"...","statusCode":400}
+    fn ibkr_error_from_value(v: &serde_json::Value) -> Option<String> {
+        let obj = v.as_object()?;
+        let msg = obj
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(String::from)
+            .or_else(|| obj.get("message").and_then(|m| m.as_str()).map(String::from));
+        let code = obj.get("statusCode").and_then(|c| c.as_u64());
+        match (msg, code) {
+            (Some(m), Some(c)) => Some(format!("IBKR (status {}): {}", c, m)),
+            (Some(m), None) => Some(format!("IBKR: {}", m)),
+            (None, Some(c)) => Some(format!("IBKR error (status {})", c)),
+            (None, None) => None,
+        }
+    }
+
+    match body_parsed {
+        Ok(serde_json::Value::Array(arr)) => {
             for item in arr {
                 let conid = item.get("conid").and_then(|v| v.as_u64()).or_else(|| {
                     item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
@@ -301,26 +318,11 @@ pub async fn refresh_from_ibkr(
                 }
             }
         }
-        Err(e) => {
-            let preview = body_text.trim();
-            let preview = if preview.len() > 200 {
-                format!("{}...", &preview[..200])
-            } else {
-                preview.to_string()
-            };
-            tracing::warn!(
-                "Watchlist IBKR snapshot parse failed (status {}): {}; body: {:?}",
-                status,
-                e,
-                preview
-            );
-            let hint = if body_text.trim().is_empty() {
-                "empty response (check IBKR session/cookie)"
-            } else if body_text.trim().starts_with('<') {
-                "HTML response (IBKR may require session cookie or login)"
-            } else {
-                "non-JSON response"
-            };
+        Ok(v @ serde_json::Value::Object(_)) => {
+            // 400/4xx/5xx often return JSON object like {"error":"...","statusCode":400}
+            let err_msg = ibkr_error_from_value(&v)
+                .unwrap_or_else(|| format!("IBKR error (status {})", status));
+            tracing::warn!("Watchlist IBKR snapshot error response: {}", err_msg);
             for s in DEFAULT_SYMBOLS {
                 next.quotes.insert(
                     (*s).to_string(),
@@ -329,7 +331,50 @@ pub async fn refresh_from_ibkr(
                         price: None,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
-                        error: Some(format!("IBKR {} (status {}): {}", hint, status, e)),
+                        error: Some(err_msg.clone()),
+                    },
+                );
+            }
+        }
+        Ok(_) => {
+            for s in DEFAULT_SYMBOLS {
+                next.quotes.insert(
+                    (*s).to_string(),
+                    WatchlistQuote {
+                        symbol: (*s).to_string(),
+                        price: None,
+                        currency: Some("USD".to_string()),
+                        updated_at: Some(as_of.clone()),
+                        error: Some(format!("IBKR unexpected response (status {})", status)),
+                    },
+                );
+            }
+        }
+        Err(e) => {
+            // Try to parse as object to get error message even when we expected array
+            let obj_err = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(body_text.trim())
+                .ok()
+                .and_then(|m| ibkr_error_from_value(&serde_json::Value::Object(m)));
+            let err_msg = obj_err.unwrap_or_else(|| {
+                let hint = if body_text.trim().is_empty() {
+                    "empty response (check IBKR session/cookie)"
+                } else if body_text.trim().starts_with('<') {
+                    "HTML response (IBKR may require session cookie or login)"
+                } else {
+                    "unexpected response format"
+                };
+                format!("IBKR {} (status {}): {}", hint, status, e)
+            });
+            tracing::warn!("Watchlist IBKR snapshot parse failed: {}", err_msg);
+            for s in DEFAULT_SYMBOLS {
+                next.quotes.insert(
+                    (*s).to_string(),
+                    WatchlistQuote {
+                        symbol: (*s).to_string(),
+                        price: None,
+                        currency: Some("USD".to_string()),
+                        updated_at: Some(as_of.clone()),
+                        error: Some(err_msg.clone()),
                     },
                 );
             }
