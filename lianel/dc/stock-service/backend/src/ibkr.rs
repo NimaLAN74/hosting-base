@@ -13,13 +13,13 @@ use rand::Rng;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::sha2::Sha256;
 use rsa::signature::Signer;
-use rsa::traits::{Decryptor, PrivateKeyParts, PublicKeyParts};
+use rsa::traits::{Decryptor, PublicKeyParts};
 use rsa::RsaPrivateKey;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 use crate::config::AppConfig;
@@ -388,7 +388,7 @@ impl IbkrOAuthClient {
 
         let mut params: BTreeMap<String, String> = BTreeMap::new();
         params.insert("oauth_consumer_key".to_string(), consumer_key.to_string());
-        params.insert("oauth_nonce".to_string(), nonce);
+        params.insert("oauth_nonce".to_string(), nonce.clone());
         params.insert("oauth_signature_method".to_string(), "HMAC-SHA256".to_string());
         params.insert("oauth_timestamp".to_string(), timestamp.to_string());
         params.insert("oauth_token".to_string(), access_token.to_string());
