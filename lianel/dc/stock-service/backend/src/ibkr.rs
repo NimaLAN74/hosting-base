@@ -343,9 +343,12 @@ impl IbkrOAuthClient {
         if !status.is_success() {
             anyhow::bail!("ssodh/init failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
         }
-        let init_res: SsodhInitResponse = serde_json::from_str(&body).context("parse ssodh init JSON")?;
+        let init_res: SsodhInitResponse = serde_json::from_str(&body)
+            .with_context(|| format!("parse ssodh init JSON (body starts with): {}", body.trim_start().chars().take(120).collect::<String>()))?;
         let challenge = init_res.challenge.trim();
-        let lst_hex = hex::encode(lst.as_bytes());
+        // SSODH expects verifier as hex bytes; use decoded LST bytes (not ASCII of base64).
+        let lst_bytes = BASE64.decode(lst.as_str()).context("decode LST for ssodh verifier")?;
+        let lst_hex = hex::encode(lst_bytes);
         let combined_hex = format!("{}{}", challenge, lst_hex);
         let combined_bytes = hex::decode(combined_hex.as_str()).context("combined hex decode")?;
         let r_hash = Sha1::digest(&combined_bytes);
@@ -386,6 +389,8 @@ impl IbkrOAuthClient {
             .map(char::from)
             .collect();
 
+        // IMPORTANT: keep raw (unescaped) params here; encode only when building params_str.
+        // Double-encoding will break OAuth signature verification.
         let mut params: BTreeMap<String, String> = BTreeMap::new();
         params.insert("oauth_consumer_key".to_string(), consumer_key.to_string());
         params.insert("oauth_nonce".to_string(), nonce.clone());
@@ -394,14 +399,12 @@ impl IbkrOAuthClient {
         params.insert("oauth_token".to_string(), access_token.to_string());
         for pair in form_body.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
-                let k = percent_encode_rfc3986(k);
-                let v = percent_encode_rfc3986(v);
-                params.insert(k, v);
+                params.insert(k.to_string(), v.to_string());
             }
         }
         let params_str = params
             .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{}={}", percent_encode_rfc3986(k), percent_encode_rfc3986(v)))
             .collect::<Vec<_>>()
             .join("&");
         let base_string = format!(
