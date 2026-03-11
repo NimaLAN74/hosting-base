@@ -1,7 +1,29 @@
 //! Configuration from environment. Minimal stock service: Keycloak + IBKR OAuth only.
 
 use std::env;
+use std::path::Path;
 use anyhow::{Context, Result};
+
+fn read_gateway_session_cookie() -> Option<String> {
+    if let Ok(v) = env::var("IBKR_GATEWAY_SESSION_COOKIE") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    if let Ok(path) = env::var("IBKR_GATEWAY_SESSION_COOKIE_FILE") {
+        let path = path.trim();
+        if !path.is_empty() && Path::new(path).exists() {
+            if let Ok(s) = std::fs::read_to_string(path) {
+                let v = s.trim().to_string();
+                if !v.is_empty() {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    None
+}
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -23,6 +45,9 @@ pub struct AppConfig {
     pub ibkr_insecure_skip_tls_verify: bool,
     pub ibkr_username: Option<String>,
     pub ibkr_password: Option<String>,
+    /// When using Client Portal Gateway (base URL points to Gateway), optional session cookie value (the part after "api=").
+    /// If set, we use this instead of OAuth/tickle for session.
+    pub ibkr_gateway_session_cookie: Option<String>,
 }
 
 impl AppConfig {
@@ -82,6 +107,7 @@ impl AppConfig {
                 || env::var("IBKR_INSECURE_SKIP_TLS_VERIFY").unwrap_or_default().trim() == "1",
             ibkr_username: env::var("IBKR_USERNAME").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             ibkr_password: env::var("IBKR_PASSWORD").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
+            ibkr_gateway_session_cookie: read_gateway_session_cookie(),
         })
     }
 
@@ -126,5 +152,12 @@ impl AppConfig {
             && self.ibkr_oauth_dh_param_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
             && self.ibkr_oauth_private_encryption_key_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
             && self.ibkr_oauth_private_signature_key_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    }
+
+    /// True when using Client Portal Gateway with a pre-obtained session cookie (no OAuth).
+    pub fn is_ibkr_gateway_cookie_mode(&self) -> bool {
+        let base = self.ibkr_api_base_url.as_str();
+        let looks_like_gateway = base.contains("ibkr-gateway") || base.contains(":5000");
+        looks_like_gateway && self.ibkr_gateway_session_cookie.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
     }
 }

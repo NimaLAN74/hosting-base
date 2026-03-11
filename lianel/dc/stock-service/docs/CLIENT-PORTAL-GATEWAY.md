@@ -44,7 +44,11 @@ Restart the stock-service:
 docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml up -d stock-service
 ```
 
-### 4. Verify
+### 4. (Optional) Automated session cookie
+
+Run the gateway-login script (from a host that can reach the Gateway) to get a session cookie, then set `IBKR_GATEWAY_SESSION_COOKIE` or `IBKR_GATEWAY_SESSION_COOKIE_FILE` in `.env`. See `stock-service/scripts/gateway-login/`.
+
+### 5. Verify
 
 - Watchlist should refresh (e.g. every 60s) and return prices if the account has market data and the Gateway is logged in.
 - If you still see “no bridge”, ensure the Gateway web UI shows you as logged in and that the account has market data subscriptions.

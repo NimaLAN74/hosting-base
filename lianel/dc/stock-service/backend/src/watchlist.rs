@@ -137,31 +137,35 @@ pub async fn refresh_from_ibkr(
         SNAPSHOT_FIELDS
     );
 
-    let auth = match client.sign_request("GET", &url, None).await {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::warn!("Watchlist IBKR sign_request failed: {}", e);
-            let mut next = WatchlistCache::default();
-            next.as_of = as_of.clone();
-            for s in DEFAULT_SYMBOLS {
-                next.quotes.insert(
-                    (*s).to_string(),
-                    WatchlistQuote {
-                        symbol: (*s).to_string(),
-                        price: None,
-                        currency: Some("USD".to_string()),
-                        updated_at: Some(as_of.clone()),
-                        error: Some(format!("IBKR auth failed: {}", e)),
-                    },
-                );
+    let auth = if client.use_oauth_for_api() {
+        match client.sign_request("GET", &url, None).await {
+            Ok(a) => Some(a),
+            Err(e) => {
+                tracing::warn!("Watchlist IBKR sign_request failed: {}", e);
+                let mut next = WatchlistCache::default();
+                next.as_of = as_of.clone();
+                for s in DEFAULT_SYMBOLS {
+                    next.quotes.insert(
+                        (*s).to_string(),
+                        WatchlistQuote {
+                            symbol: (*s).to_string(),
+                            price: None,
+                            currency: Some("USD".to_string()),
+                            updated_at: Some(as_of.clone()),
+                            error: Some(format!("IBKR auth failed: {}", e)),
+                        },
+                    );
+                }
+                let mut g = cache.write().await;
+                *g = next;
+                return;
             }
-            let mut g = cache.write().await;
-            *g = next;
-            return;
         }
+    } else {
+        None
     };
 
-    // /iserver/* requires brokerage session cookie from /tickle (otherwise 403)
+    // /iserver/* requires brokerage session cookie (from tickle or Gateway cookie mode)
     let cookie = match client.get_session_for_cookie().await {
         Ok(session) => format!("api={}", session),
         Err(e) => {
@@ -194,13 +198,13 @@ pub async fn refresh_from_ibkr(
                 .build()
                 .unwrap_or_default()
         });
-    let resp = match http_client
-        .get(&url)
-        .header("Authorization", auth)
-        .header("Cookie", cookie)
-        .header("User-Agent", "Console")
-        .send()
-        .await
+    let req = http_client.get(&url).header("Cookie", cookie).header("User-Agent", "Console");
+    let req = if let Some(ref a) = auth {
+        req.header("Authorization", a.as_str())
+    } else {
+        req
+    };
+    let resp = match req.send().await
     {
         Ok(r) => r,
         Err(e) => {

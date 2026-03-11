@@ -1,0 +1,12 @@
+{
+  "name": "ibkr-gateway-login",
+  "version": "1.0.0",
+  "description": "Headless login to IBKR Client Portal Gateway to obtain session cookie",
+  "private": true,
+  "scripts": {
+    "login": "node login.js"
+  },
+  "dependencies": {
+    "playwright": "1.49.0"
+  }
+}
