@@ -14,6 +14,7 @@ on:
       - 'lianel/dc/docker-compose.infra.yaml'
       - 'lianel/dc/scripts/deployment/deploy-frontend.sh'
       - 'lianel/dc/nginx/**'
+      - 'lianel/dc/monitoring/grafana/**'
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
 
@@ -226,6 +227,28 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
             "for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/docker-compose.infra.yaml \"\$d/\" && mkdir -p \"\$d/nginx/config\" \"\$d/scripts\" && cp /tmp/nginx.conf \"\$d/nginx/config/\" && cp /tmp/fix-502-keycloak-on-server.sh \"\$d/scripts/\" && chmod +x \"\$d/scripts/fix-502-keycloak-on-server.sh\" && echo \"Updated \$d\"; done; bash /tmp/fix-502-keycloak-on-server.sh 2>&1"
           echo "✅ Keycloak fix applied"
+
+      - name: Sync Grafana config and restart Grafana
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/monitoring/grafana/grafana.ini "${REMOTE_USER}@${REMOTE_HOST}:/tmp/grafana.ini"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            "mkdir -p /root/lianel/dc/monitoring/grafana /root/hosting-base/lianel/dc/monitoring/grafana && for d in /root/lianel/dc /root/hosting-base/lianel/dc; do [ -d \"\$d\" ] && cp /tmp/grafana.ini \"\$d/monitoring/grafana/grafana.ini\" && echo \"Updated \$d/monitoring/grafana/grafana.ini\"; done; docker restart grafana 2>/dev/null && echo '✅ Grafana restarted' || echo '⚠️ Grafana restart skipped (container may not exist)'"
+          echo "✅ Grafana config synced (auth_url=www.lianel.se/auth for cookie path)"
+
+      - name: Run E2E checks on server (logs, login flow, watchlist, Grafana auth_url)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -P "${REMOTE_PORT}" \
+            lianel/dc/scripts/monitoring/e2e-server-full-analysis.sh "${REMOTE_USER}@${REMOTE_HOST}:/tmp/e2e-server-full-analysis.sh"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            "chmod +x /tmp/e2e-server-full-analysis.sh && bash /tmp/e2e-server-full-analysis.sh"
+          echo "✅ E2E server checks passed"
 
       - name: Run Keycloak redirect scripts on remote
         env:
