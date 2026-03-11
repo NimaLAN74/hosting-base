@@ -198,6 +198,20 @@ pub async fn refresh_from_ibkr(
                 .build()
                 .unwrap_or_default()
         });
+    // IBKR requires /iserver/accounts to be queried before market data snapshot.
+    let accounts_url = format!("{}/iserver/accounts", base_url.trim_end_matches('/'));
+    let accounts_req = http_client
+        .get(&accounts_url)
+        .header("Cookie", &cookie)
+        .header("User-Agent", "Console");
+    let accounts_req = if let Some(ref a) = auth {
+        accounts_req.header("Authorization", a.as_str())
+    } else {
+        accounts_req
+    };
+    if let Err(e) = accounts_req.send().await {
+        tracing::warn!("Watchlist IBKR /accounts pre-call failed: {}", e);
+    }
     let req = http_client.get(&url).header("Cookie", cookie).header("User-Agent", "Console");
     let req = if let Some(ref a) = auth {
         req.header("Authorization", a.as_str())
