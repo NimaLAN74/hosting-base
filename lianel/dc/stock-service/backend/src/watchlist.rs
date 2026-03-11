@@ -198,6 +198,47 @@ pub async fn refresh_from_ibkr(
                 .build()
                 .unwrap_or_default()
         });
+
+    // Try to ensure brokerage session is authenticated before /accounts + marketdata.
+    // IBKR suggests: GET /sso/validate then POST /iserver/reauthenticate when auth is false.
+    let validate_url = format!("{}/sso/validate", base_url.trim_end_matches('/'));
+    let validate_req = http_client
+        .get(&validate_url)
+        .header("Cookie", &cookie)
+        .header("User-Agent", "Console");
+    let validate_req = if let Some(ref a) = auth {
+        validate_req.header("Authorization", a.as_str())
+    } else {
+        validate_req
+    };
+    if let Err(e) = validate_req.send().await {
+        tracing::warn!("Watchlist IBKR /sso/validate failed: {}", e);
+    }
+
+    let reauth_url = format!("{}/iserver/reauthenticate", base_url.trim_end_matches('/'));
+    let reauth_req = http_client
+        .post(&reauth_url)
+        .header("Cookie", &cookie)
+        .header("User-Agent", "Console")
+        .header("Content-Length", "0")
+        .body("");
+    let reauth_req = if let Some(ref a) = auth {
+        reauth_req.header("Authorization", a.as_str())
+    } else {
+        reauth_req
+    };
+    if let Ok(r) = reauth_req.send().await {
+        let status = r.status();
+        if !status.is_success() {
+            let body = r.text().await.unwrap_or_default();
+            tracing::warn!(
+                "Watchlist IBKR /iserver/reauthenticate returned {}: {}",
+                status,
+                body.trim_start().chars().take(200).collect::<String>()
+            );
+        }
+    }
+
     // IBKR requires /iserver/accounts to be queried before market data snapshot.
     let accounts_url = format!("{}/iserver/accounts", base_url.trim_end_matches('/'));
     let accounts_req = http_client
