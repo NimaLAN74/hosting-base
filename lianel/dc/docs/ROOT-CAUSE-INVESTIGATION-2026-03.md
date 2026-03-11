@@ -84,8 +84,8 @@ So two different failure points:
 | Issue | Root cause | Fix |
 |-------|------------|-----|
 | **IBKR get price** | IBKR returns 400 “no bridge” – Gateway/TWS or session not bridged to market data | Run Client Portal Gateway (or TWS), same account with market data; see runbook |
-| **Grafana/Airflow login** | Keycloak requires PKCE; oauth2-proxy did not send `code_challenge_method` (env ignored) | Set oauth2-proxy `command: ["--code-challenge-method=S256"]` and restart |
-| **“Restart login cookie not found”** | Same as above: callback returns error because auth request was rejected (no PKCE) | Same oauth2-proxy PKCE fix |
+| **Grafana/Airflow login** | grafana-client/airflow required PKCE; Grafana/FAB may not send it | Run update-grafana-client-no-pkce-required.sh and create-airflow-keycloak-client.sh on server |
+| **“Restart login cookie not found”** | Same as above: callback returns error because auth request was rejected (no PKCE) | Apply Grafana and Airflow client fixes above |
 
 ---
 
