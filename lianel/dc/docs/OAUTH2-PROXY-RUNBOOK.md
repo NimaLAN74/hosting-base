@@ -4,9 +4,15 @@
 
 **Yes.** Nginx uses oauth2-proxy for session-based protection of several routes via `auth_request /oauth2/auth` (e.g. main app, Airflow, Comp-AI, Grafana). The React app uses Keycloak JWTs for API calls; oauth2-proxy provides the cookie-based session for browser access to those UIs.
 
-### "Restart login cookie not found" after Keycloak login
+### "Restart login cookie not found" or never reaching the login form (PKCE)
 
-If users see this on Grafana or Airflow after signing in with Keycloak, nginx was not passing **X-Forwarded-Host** and **X-Forwarded-Port** to oauth2-proxy. oauth2-proxy needs these to build the correct redirect URI and set cookies for the same host that receives the callback. Ensure every `location /oauth2/` and `location = /oauth2/auth` in `nginx.conf` includes:
+If users are sent to Keycloak but then see an error (e.g. "Restart login cookie not found") **without** ever seeing the login form, or the redirect returns immediately with an error, the usual cause is **Keycloak rejecting the auth request** because **PKCE is required** but oauth2-proxy did not send `code_challenge` and `code_challenge_method`. Keycloak logs show: `error="invalid_request"`, `reason="Missing parameter: code_challenge_method"`.
+
+**Fix**: oauth2-proxy must send PKCE. In `docker-compose.oauth2-proxy.yaml` the oauth2-proxy service has `command: ["--code-challenge-method=S256"]` so PKCE is forced via CLI (the env var `OAUTH2_PROXY_CODE_CHALLENGE_METHOD` can be ignored in some versions). Restart oauth2-proxy after changing compose so the new command is used.
+
+### "Restart login cookie not found" after Keycloak login (cookie / redirect)
+
+If users see this on Grafana or Airflow **after** signing in with Keycloak (e.g. after submitting the login form), nginx may not be passing **X-Forwarded-Host** and **X-Forwarded-Port** to oauth2-proxy. oauth2-proxy needs these to build the correct redirect URI and set cookies for the same host that receives the callback. Ensure every `location /oauth2/` and `location = /oauth2/auth` in `nginx.conf` includes:
 
 - `proxy_set_header X-Forwarded-Host $host;`
 - `proxy_set_header X-Forwarded-Port $server_port;`

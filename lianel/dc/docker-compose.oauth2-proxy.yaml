@@ -32,6 +32,8 @@ services:
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:latest
     container_name: oauth2-proxy
+    # Force PKCE via CLI; OAUTH2_PROXY_CODE_CHALLENGE_METHOD env can be ignored in some versions (oauth2-proxy#1852)
+    command: ["--code-challenge-method=S256"]
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID}
