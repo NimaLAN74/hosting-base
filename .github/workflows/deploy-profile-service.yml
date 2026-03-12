@@ -18,25 +18,34 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-and-deploy:
-    name: Build and Deploy Profile Service
+  # ---------------------------------------------------------------------------
+  # Job 1: Build and push image. Re-run only if build/push fails.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "1. Build & push image"
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_tag: ${{ steps.image-tag.outputs.image_tag }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set lowercase image name
+      - name: Set image name
         id: image-name
         run: |
-          # Lowercase the repository name immediately to fix case sensitivity issues
           IMAGE_NAME_LC=$(echo "${{ github.repository }}/lianel-profile-service" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
           echo "image_name=${IMAGE_NAME_LC}" >> $GITHUB_OUTPUT
-          echo "✅ Image name set to: ${IMAGE_NAME_LC}"
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> $GITHUB_ENV
+          echo "✅ Image: ${IMAGE_NAME_LC}:latest"
+
+      - name: Set image tag for downstream jobs
+        id: image-tag
+        run: |
+          echo "image_tag=${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -56,7 +65,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}
           tags: |
-            # Only keep latest tag to save storage (removed branch and sha tags)
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -71,141 +79,62 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Make package public automatically
+      - name: Make package public
         if: success()
         run: |
           PACKAGE_NAME="${{ steps.image-name.outputs.image_name }}"
-          echo "Making package public: $PACKAGE_NAME"
-          
-          # URL encode the package name (replace / with %2F)
           PACKAGE_NAME_ENCODED=$(echo "$PACKAGE_NAME" | sed 's/\//%2F/g')
-          echo "Encoded package name: $PACKAGE_NAME_ENCODED"
-          
-          # Use GitHub API to make package public
-          # Try user endpoint first (for personal accounts)
           if gh api -X PATCH "/user/packages/container/${PACKAGE_NAME_ENCODED}" -f visibility=public 2>&1; then
-            echo "✅ Package made public via user endpoint"
+            echo "✅ Package public (user)"
           else
-            echo "⚠️  User endpoint failed, trying org endpoint..."
-            # Try org endpoint (for organization accounts)
             ORG_NAME=$(echo "$PACKAGE_NAME" | cut -d'/' -f1)
             PACKAGE_PATH=$(echo "$PACKAGE_NAME" | cut -d'/' -f2-)
-            PACKAGE_PATH_ENCODED=$(echo "$PACKAGE_PATH" | sed 's/\//%2F/g')
-            if gh api -X PATCH "/orgs/${ORG_NAME}/packages/container/${PACKAGE_PATH_ENCODED}" -f visibility=public 2>&1; then
-              echo "✅ Package made public via org endpoint"
+            PACKAGE_PATH_ENC=$(echo "$PACKAGE_PATH" | sed 's/\//%2F/g')
+            if gh api -X PATCH "/orgs/${ORG_NAME}/packages/container/${PACKAGE_PATH_ENC}" -f visibility=public 2>&1; then
+              echo "✅ Package public (org)"
             else
-              echo "⚠️  Warning: Failed to make package public automatically"
-              echo "💡 Please make it public manually: https://github.com/NimaLAN74?tab=packages"
-              echo "   Package: $PACKAGE_NAME"
+              echo "⚠️ Make package public manually: https://github.com/NimaLAN74?tab=packages"
             fi
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # REMOVED: Artifact upload to save storage (image is already in registry)
-      # Image will be pulled directly from registry on remote host
+  # ---------------------------------------------------------------------------
+  # Job 2: Deploy to server (validate secrets, SSH, copy script, run deploy).
+  # Re-run if server connection or deploy fails.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: "2. Deploy to server"
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
 
-      - name: Validate Secrets
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
         run: |
-          if [ -z "${{ secrets.REMOTE_HOST }}" ]; then
-            echo "❌ Error: REMOTE_HOST secret is not set"
-            echo "Please add REMOTE_HOST secret in repository settings"
-            exit 1
-          fi
-          if [ -z "${{ secrets.REMOTE_USER }}" ]; then
-            echo "❌ Error: REMOTE_USER secret is not set"
-            echo "Please add REMOTE_USER secret in repository settings"
-            exit 1
-          fi
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "❌ Error: SSH_PRIVATE_KEY secret is not set"
-            echo "Please add SSH_PRIVATE_KEY secret in repository settings"
-            exit 1
-          fi
-          echo "✅ All required secrets are configured"
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets present"
 
-      - name: Setup SSH Key
+      - name: Setup SSH key
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # Write SSH key - handle multiline properly
-          # Use printf to ensure proper newline handling
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          
-          # Verify key file exists and has content
-          if [ ! -s ~/.ssh/deploy_key ]; then
-            echo "❌ Error: SSH key file is empty or missing"
-            echo "Please check that SSH_PRIVATE_KEY secret contains the complete private key"
-            exit 1
-          fi
-          
-          # Check file size (should be at least 100 bytes for a valid key)
-          KEY_SIZE=$(wc -c < ~/.ssh/deploy_key)
-          if [ "$KEY_SIZE" -lt 100 ]; then
-            echo "❌ Error: SSH key file is too small ($KEY_SIZE bytes)"
-            echo "Expected at least 100 bytes for a valid private key"
-            echo "First 100 chars: $(head -c 100 ~/.ssh/deploy_key)"
-            exit 1
-          fi
-          
-          # Verify key format (must start with -----BEGIN)
-          FIRST_LINE=$(head -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
-          if [[ ! "$FIRST_LINE" =~ ^-----BEGIN ]]; then
-            echo "❌ Error: SSH key format is incorrect"
-            echo "First line: '$FIRST_LINE'"
-            echo ""
-            echo "The SSH_PRIVATE_KEY secret should contain:"
-            echo "  - Complete private key starting with: -----BEGIN OPENSSH PRIVATE KEY-----"
-            echo "  - Ending with: -----END OPENSSH PRIVATE KEY-----"
-            echo "  - All lines in between"
-            echo ""
-            echo "Current key file preview (first 5 lines):"
-            head -5 ~/.ssh/deploy_key
-            echo ""
-            echo "If you see 'ssh-ed25519' as text, that's wrong - that's the key type, not the key itself"
-            exit 1
-          fi
-          
-          # Verify key ends with -----END
-          LAST_LINE=$(tail -1 ~/.ssh/deploy_key | tr -d '\r\n' | tr -d '[:space:]')
-          if [[ ! "$LAST_LINE" =~ ^-----END ]]; then
-            echo "⚠️  Warning: SSH key might not end correctly"
-            echo "Last line: '$LAST_LINE'"
-          fi
-          
-          # Check for common mistakes
-          if grep -q "^ssh-ed25519 " ~/.ssh/deploy_key; then
-            echo "❌ Error: SSH key contains 'ssh-ed25519' as text"
-            echo "This looks like a public key, not a private key!"
-            echo "The SSH_PRIVATE_KEY secret should contain the PRIVATE key, not the public key"
-            echo ""
-            echo "To get the private key, run: cat ~/.ssh/id_ed25519_host"
-            echo "The private key starts with: -----BEGIN OPENSSH PRIVATE KEY-----"
-            exit 1
-          fi
-          
-          # Test key format with ssh-keygen (if available)
-          if command -v ssh-keygen >/dev/null 2>&1; then
-            if ! ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null 2>&1; then
-              echo "⚠️  Warning: ssh-keygen validation failed (key might be invalid)"
-              echo "But continuing anyway..."
-            fi
-          fi
-          
-          if [ -n "$REMOTE_HOST" ]; then
-            ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-          fi
-          
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          [ -s ~/.ssh/deploy_key ] || { echo "❌ SSH key empty"; exit 1; }
+          grep -q "^-----BEGIN" ~/.ssh/deploy_key || { echo "❌ SSH key format"; exit 1; }
+          grep -q "^ssh-ed25519 " ~/.ssh/deploy_key && { echo "❌ Use private key, not public"; exit 1; } || true
+          ssh-keyscan -H "$REMOTE_HOST" -p "${REMOTE_PORT}" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo "✅ SSH key ready"
-          echo "Key file size: $KEY_SIZE bytes"
-          echo "Key file lines: $(wc -l < ~/.ssh/deploy_key) lines"
 
-      - name: Copy Deployment Script to Remote Host
+      - name: Copy deployment script to remote
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -230,52 +159,88 @@ jobs:
             "chmod +x /root/deploy-profile-service.sh && test -x /root/deploy-profile-service.sh && echo '✅ Script copied and executable'"
           echo "✅ Deployment script ready on remote"
 
-      - name: Deploy to Remote Host
+      - name: Run deploy on remote
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest"
+          IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
           echo "Deploying: $IMAGE_TAG"
-          
-          # Simple SSH command - just call the deployment script
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-profile-service.sh '$IMAGE_TAG'"
+            -o ConnectTimeout=60 \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-profile-service.sh '${IMAGE_TAG}'"
+          echo "✅ Deploy finished"
 
-      - name: "Sync nginx config (fix login: /auth/ -> Keycloak)"
+  # ---------------------------------------------------------------------------
+  # Job 3: Sync nginx config to remote and reload. Re-run if nginx sync fails.
+  # ---------------------------------------------------------------------------
+  sync-nginx:
+    name: "3. Sync nginx config"
+    runs-on: ubuntu-latest
+    needs: deploy
+    env:
+      REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          [ -n "${{ secrets.REMOTE_HOST }}" ] || { echo "❌ REMOTE_HOST not set"; exit 1; }
+          [ -n "${{ secrets.REMOTE_USER }}" ] || { echo "❌ REMOTE_USER not set"; exit 1; }
+          [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ] || { echo "❌ SSH_PRIVATE_KEY not set"; exit 1; }
+          echo "✅ Secrets present"
+
+      - name: Setup SSH key
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          [ -s ~/.ssh/deploy_key ] || { echo "❌ SSH key empty"; exit 1; }
+          ssh-keyscan -H "$REMOTE_HOST" -p "${REMOTE_PORT}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key ready"
+
+      - name: Sync nginx config and reload
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
-          echo "Syncing nginx config to remote (part of every deploy)..."
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -P ${REMOTE_PORT} \
-            lianel/dc/nginx/config/nginx.conf \
-            ${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -p ${REMOTE_PORT} \
-            ${REMOTE_USER}@${REMOTE_HOST} \
-            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config 2>/dev/null; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped (container or path may differ)'"
-          echo "✅ Nginx config synced (login routes /auth/, /realms/, /resources/ to Keycloak)"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -P "${REMOTE_PORT}" \
+            lianel/dc/nginx/config/nginx.conf "${REMOTE_USER}@${REMOTE_HOST}:/tmp/nginx.conf"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            "mkdir -p /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; for d in /root/lianel/dc/nginx/config /root/hosting-base/lianel/dc/nginx/config; do [ -d \"\$d\" ] && cp /tmp/nginx.conf \"\$d/\" && echo \"Updated \$d\"; done; docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo '✅ Nginx reloaded' || echo '⚠️ Nginx reload skipped'"
+          echo "✅ Nginx config synced"
 
-      - name: Deployment Summary
+  # ---------------------------------------------------------------------------
+  # Job 4: Summary. Runs after build, deploy, sync-nginx; re-run failed jobs from Actions tab.
+  # ---------------------------------------------------------------------------
+  summary:
+    name: "4. Summary"
+    runs-on: ubuntu-latest
+    needs: [build, deploy, sync-nginx]
+    if: always() && !cancelled()
+    steps:
+      - name: Deployment summary
         run: |
-          echo "## 🚀 Profile Service Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Profile Service deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: \`${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
-          echo "- **Language**: Rust" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 1. Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2. Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3. Sync nginx | ${{ needs.sync-nginx.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ needs.build.outputs.image_tag || 'N/A' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: linux/amd64 | **Language**: Rust" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed to**: \`${{ secrets.REMOTE_HOST }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Storage Optimized**: ✅ No artifacts, direct registry pull" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "- Re-run only the **failed job** from the Actions tab to retry without re-running others." >> $GITHUB_STEP_SUMMARY
