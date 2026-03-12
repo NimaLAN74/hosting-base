@@ -144,6 +144,12 @@ jobs:
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
               (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) 2>/dev/null && break || true
             done
+            echo "=== 8. Fix frontend-client PKCE (Keycloak logs: Missing parameter code_challenge_method) ==="
+            for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
+              if [ -f "$dc/scripts/keycloak-setup/update-frontend-client-no-pkce-required.sh" ] && [ -f "$dc/.env" ]; then
+                (cd "$dc" && source .env; export KEYCLOAK_URL=https://auth.lianel.se; bash scripts/keycloak-setup/update-frontend-client-no-pkce-required.sh) 2>/dev/null && echo "  frontend-client PKCE set to not required" && break || echo "  (script failed or skipped)"
+              fi
+            done
             docker ps --filter name=keycloak --format "table {{.Names}}\t{{.Status}}"
             echo "✅ Remote apply done"
           '
