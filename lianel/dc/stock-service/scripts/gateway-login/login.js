@@ -24,21 +24,31 @@ if (!USERNAME || !PASSWORD) {
 (async () => {
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
     });
     const page = await context.newPage();
 
-    await page.goto(GATEWAY_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(GATEWAY_URL, { waitUntil: 'commit', timeout: 30000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => null);
+    await page.waitForSelector('.loginformWrapper', { timeout: 15000 }).catch(() => null);
+    await page.waitForTimeout(35000);
+    const inputCount = await page.evaluate(() => document.querySelectorAll('input').length).catch(() => 0);
+    if (inputCount === 0) {
+      console.error('No inputs found after 35s. Page may require full JS load.');
+      process.exit(1);
+    }
+    await page.waitForSelector('.loginformWrapper input, input[type="text"], input[type="password"]', { timeout: 15000 });
 
-    // IBKR Gateway login form: common selectors
-    const usernameSel = 'input[name="username"], input[id="username"], input[type="text"]';
-    const passwordSel = 'input[name="password"], input[id="password"], input[type="password"]';
-    const submitSel = 'input[type="submit"], button[type="submit"], button:has-text("Log in"), .kc-button';
+    const usernameSel = '.loginformWrapper input[type="text"], input[type="text"]';
+    const passwordSel = '.loginformWrapper input[type="password"], input[type="password"]';
+    const submitSel = '.loginformWrapper button[type="submit"], .loginformWrapper input[type="submit"], button[type="submit"], input[type="submit"]';
 
-    await page.waitForSelector(usernameSel, { timeout: 10000 });
     await page.fill(usernameSel, USERNAME);
     await page.fill(passwordSel, PASSWORD);
     await page.click(submitSel);

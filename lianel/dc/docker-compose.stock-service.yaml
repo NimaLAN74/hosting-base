@@ -20,9 +20,10 @@ services:
       IBKR_OAUTH_DH_PARAM_PATH: ${IBKR_OAUTH_DH_PARAM_PATH:-/app/ibkr-conf/dhparam.pem}
       IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH: ${IBKR_OAUTH_PRIVATE_ENCRYPTION_KEY_PATH:-/app/ibkr-conf/private_encryption.pem}
       IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH: ${IBKR_OAUTH_PRIVATE_SIGNATURE_KEY_PATH:-/app/ibkr-conf/private_signature.pem}
-      # When using Client Portal Gateway container: https://ibkr-gateway:5000/v1/api and set to true (Gateway uses self-signed HTTPS)
+      # When using Client Portal Gateway: set base URL, skip TLS verify, and (after browser login) session cookie
       IBKR_API_BASE_URL: ${IBKR_API_BASE_URL:-https://api.ibkr.com/v1/api}
       IBKR_INSECURE_SKIP_TLS_VERIFY: ${IBKR_INSECURE_SKIP_TLS_VERIFY:-false}
+      IBKR_GATEWAY_SESSION_COOKIE: ${IBKR_GATEWAY_SESSION_COOKIE:-}
       RUST_LOG: info
     volumes:
       - ./stock-service-ibkr:/app/ibkr-conf:ro

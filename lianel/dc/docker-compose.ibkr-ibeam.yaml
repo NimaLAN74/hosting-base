@@ -1,0 +1,30 @@
+# IBKR Client Portal Gateway with IBeam – automated login (SSO-style: no separate browser login each time).
+# IBeam runs the Gateway and authenticates with IBEAM_ACCOUNT/IBEAM_PASSWORD; it maintains the session.
+# Use this instead of docker-compose.ibkr-gateway.yaml when you want credentials-based automated login.
+#
+# 1) Set in .env: IBEAM_ACCOUNT=<ibkr_username> IBEAM_PASSWORD=<ibkr_password>
+#    (or use IBKR_USERNAME/IBKR_PASSWORD and pass them as IBEAM_ACCOUNT/IBEAM_PASSWORD below)
+# 2) Start: docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-ibeam.yaml up -d ibkr-gateway
+# 3) Point stock-service at the gateway: IBKR_API_BASE_URL=https://ibkr-gateway:5000/v1/api, IBKR_INSECURE_SKIP_TLS_VERIFY=true
+# 4) For headless API access, set IBKR_GATEWAY_SESSION_COOKIE after first IBeam login (see CLIENT-PORTAL-GATEWAY.md)
+services:
+  ibkr-gateway:
+    image: voyz/ibeam
+    container_name: ibkr-gateway
+    env_file:
+      - .env
+    environment:
+      IBEAM_ACCOUNT: ${IBKR_USERNAME:-${IBEAM_ACCOUNT}}
+      IBEAM_PASSWORD: ${IBKR_PASSWORD:-${IBEAM_PASSWORD}}
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    networks:
+      - lianel-network
+    # Optional: mount inputs for custom conf.yaml or 2FA handler
+    # volumes:
+    #   - ./stock-service/ibkr-gateway/inputs:/srv/inputs:ro
+
+networks:
+  lianel-network:
+    external: true

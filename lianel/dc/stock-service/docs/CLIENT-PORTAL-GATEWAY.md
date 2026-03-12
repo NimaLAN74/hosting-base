@@ -1,40 +1,70 @@
 # IBKR Client Portal Gateway – Deploy and Config
 
-When the watchlist returns **IBKR (status 400): Bad Request: no bridge**, the API session is not “bridged” to market data. You can either use **api.ibkr.com** (cloud) with the same OAuth credentials, or run the **Client Portal Gateway** locally and point the stock-service at it.
+When the watchlist returns **IBKR (status 400): Bad Request: no bridge**, the API session is not “bridged” to market data. You can use **api.ibkr.com** (cloud) with OAuth, or run the **Client Portal Gateway** and point the stock-service at it.
+
+## SSO / Automated login (recommended)
+
+You do **not** have to log in to the Gateway in a browser each time. Use **IBeam** so the Gateway stays authenticated with your credentials:
+
+1. **Set credentials** in `.env`:
+   ```bash
+   IBEAM_ACCOUNT=<your_ibkr_username>
+   IBEAM_PASSWORD=<your_ibkr_password>
+   ```
+   Or use `IBKR_USERNAME` and `IBKR_PASSWORD`; the IBeam compose maps them to `IBEAM_ACCOUNT` / `IBEAM_PASSWORD`.
+
+2. **Start the Gateway with IBeam** (from repo root, e.g. `/root/hosting-base/lianel/dc`):
+   ```bash
+   docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-ibeam.yaml up -d ibkr-gateway
+   ```
+   IBeam runs the Gateway and logs in automatically; it keeps the session alive (maintenance/tickle).
+
+3. **Point stock-service at the Gateway** (see “Point the stock-service at the Gateway” below).
+
+4. **Session cookie for headless API**: The stock-service backend needs the Gateway session cookie to call the API. With IBeam, the Gateway is already logged in. You only need to provide the cookie **once** (or after it expires, ~24h):
+   - Open **https://www.lianel.se/ibkr-gateway/** – if IBeam is running you may already be logged in, or log in once.
+   - In DevTools → Application → Cookies, copy the **`api`** cookie value.
+   - Set in `.env`: `IBKR_GATEWAY_SESSION_COOKIE=<paste value>`, then restart stock-service.
+
+After that, IBeam maintains the Gateway session; you do not log in to the Gateway separately each time.
 
 ## When to use the Gateway
 
 - **api.ibkr.com**: Default. No local process. If you get “no bridge”, it may be an account/subscription or region limitation.
-- **Client Portal Gateway**: Run the official Gateway in Docker on the same host (or a reachable host). Log in via the Gateway’s web UI with your IBKR account. The stock-service then calls the Gateway instead of api.ibkr.com; the Gateway provides the “bridge” to market data.
+- **Client Portal Gateway**: Run the Gateway in Docker. Use **IBeam** (above) for credential-based “SSO” so you don’t log in to the Gateway in a browser each time.
 
 ## Deploy the Gateway (Docker)
 
-### 1. Start the Gateway container
+### Option A: Gateway with IBeam (automated login – recommended)
 
-From the repo root (e.g. `/root/hosting-base/lianel/dc` or `/root/lianel/dc`):
+```bash
+docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-ibeam.yaml up -d ibkr-gateway
+```
+
+Requires `IBEAM_ACCOUNT` and `IBEAM_PASSWORD` (or `IBKR_USERNAME` / `IBKR_PASSWORD`) in `.env`. See “SSO / Automated login” above.
+
+### Option B: Plain Gateway (manual or one-time login)
 
 ```bash
 docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-gateway.yaml up -d ibkr-gateway
 ```
 
-The Gateway listens on port **5000** (HTTPS with a self-signed certificate).
+Then log in at **https://www.lianel.se/ibkr-gateway/** (see “Gateway web UI” below).
 
-### 2. Log in to the Gateway
+### Gateway web UI (login page)
 
-Open in a browser (use the server’s hostname or port-forward 5000):
+The Gateway is exposed under the main site so that **one** URL works for login and assets (no wrong domain or MIME issues):
 
-- **https://&lt;server-ip-or-host&gt;:5000**
+- **https://www.lianel.se/ibkr-gateway/**
 
-Log in with the **same IBKR account** that is used for the OAuth consumer key and access token. The Gateway must stay logged in for the “bridge” to work.
+All traffic is under `/ibkr-gateway/`: HTML is rewritten so CSS/JS paths and redirects use `/ibkr-gateway/`, and cookies are rewritten so they are valid for the proxy. Use this URL to log in (or to capture the `api` cookie for stock-service). Do **not** use `/sso/` directly; use `/ibkr-gateway/` (or you’ll be redirected there).
 
-### 3. Point the stock-service at the Gateway
+### Point the stock-service at the Gateway
 
 In `.env` on the server:
 
 ```bash
-# Use the Gateway container (same Docker network as stock-service)
 IBKR_API_BASE_URL=https://ibkr-gateway:5000/v1/api
-# Gateway uses self-signed HTTPS; skip TLS verify for this host
 IBKR_INSECURE_SKIP_TLS_VERIFY=true
 ```
 
@@ -44,25 +74,30 @@ Restart the stock-service:
 docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml up -d stock-service
 ```
 
-### 4. (Optional) Automated session cookie
+### Session cookie (required for headless / stock-service)
 
-Run the gateway-login script (from a host that can reach the Gateway) to get a session cookie, then set `IBKR_GATEWAY_SESSION_COOKIE` or `IBKR_GATEWAY_SESSION_COOKIE_FILE` in `.env`. See `stock-service/scripts/gateway-login/`.
+The backend needs the Gateway session cookie to call the API. Either:
 
-### 5. Verify
+- **With IBeam**: Log in once at **https://www.lianel.se/ibkr-gateway/** (or capture the cookie when IBeam has already logged in), copy the **`api`** cookie value, set `IBKR_GATEWAY_SESSION_COOKIE=<value>` in `.env`, restart stock-service.
+- **Without IBeam**: Log in at **https://www.lianel.se/ibkr-gateway/**, copy the **`api`** cookie, set `IBKR_GATEWAY_SESSION_COOKIE`, restart stock-service. Repeat when the session expires (~24h).
+
+### Verify
 
 - Watchlist should refresh (e.g. every 60s) and return prices if the account has market data and the Gateway is logged in.
-- If you still see “no bridge”, ensure the Gateway web UI shows you as logged in and that the account has market data subscriptions.
+- If you still see “no bridge”, ensure the Gateway is running and (with IBeam) authenticated, and that the account has market data subscriptions.
 
 ## Files
 
 | Item | Purpose |
 |------|--------|
-| `stock-service/ibkr-gateway/Dockerfile` | Builds image from official IBKR Client Portal zip. |
-| `stock-service/ibkr-gateway/conf.yaml` | IP allow list (127.0.0.1, 10.*, 172.*) so Docker and host can connect. |
-| `docker-compose.ibkr-gateway.yaml` | Runs the Gateway on `lianel-network` as `ibkr-gateway`. |
+| `docker-compose.ibkr-ibeam.yaml` | Gateway with IBeam – automated login (SSO-style). |
+| `docker-compose.ibkr-gateway.yaml` | Plain Gateway image. |
+| `stock-service/ibkr-gateway/Dockerfile` | Builds image from official IBKR Client Portal zip (Option B). |
+| `stock-service/ibkr-gateway/conf.yaml` | IP allow list for plain Gateway. |
 
 ## References
 
 - [IBKR Client Portal API](https://interactivebrokers.github.io/cpwebapi/)
+- [IBeam](https://github.com/Voyz/ibeam) – authentication and maintenance for the Gateway
 - [502-WATCHLIST-RUNBOOK.md](./502-WATCHLIST-RUNBOOK.md) – “no bridge” and 502 fixes
 - [IBKR-WEB-API-REPLACEMENT-PLAN.md](../../docs/status/IBKR-WEB-API-REPLACEMENT-PLAN.md) – api.ibkr.com vs Gateway
