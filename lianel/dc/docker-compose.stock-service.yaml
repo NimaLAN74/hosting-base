@@ -24,9 +24,11 @@ services:
       IBKR_API_BASE_URL: ${IBKR_API_BASE_URL:-https://api.ibkr.com/v1/api}
       IBKR_INSECURE_SKIP_TLS_VERIFY: ${IBKR_INSECURE_SKIP_TLS_VERIFY:-false}
       IBKR_GATEWAY_SESSION_COOKIE: ${IBKR_GATEWAY_SESSION_COOKIE:-}
+      IBKR_GATEWAY_SESSION_COOKIE_FILE: ${IBKR_GATEWAY_SESSION_COOKIE_FILE:-/app/ibkr-cookie/cookie.txt}
       RUST_LOG: info
     volumes:
       - ./stock-service-ibkr:/app/ibkr-conf:ro
+      - ./stock-service-cookie:/app/ibkr-cookie
     expose:
       - "3003"
     restart: unless-stopped

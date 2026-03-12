@@ -16,6 +16,8 @@ services:
     environment:
       IBEAM_ACCOUNT: ${IBKR_USERNAME:-${IBEAM_ACCOUNT}}
       IBEAM_PASSWORD: ${IBKR_PASSWORD:-${IBEAM_PASSWORD}}
+      IBEAM_PAGE_LOAD_TIMEOUT: ${IBEAM_PAGE_LOAD_TIMEOUT:-90}
+      IBEAM_OAUTH_TIMEOUT: ${IBEAM_OAUTH_TIMEOUT:-60}
     ports:
       - "5000:5000"
     restart: unless-stopped

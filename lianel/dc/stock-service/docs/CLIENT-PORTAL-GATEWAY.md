@@ -76,10 +76,15 @@ docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml
 
 ### Session cookie (required for headless / stock-service)
 
-The backend needs the Gateway session cookie to call the API. Either:
+The backend needs the Gateway session cookie to call the API. **No SSH or server restart needed:**
 
-- **With IBeam**: Log in once at **https://www.lianel.se/ibkr-gateway/** (or capture the cookie when IBeam has already logged in), copy the **`api`** cookie value, set `IBKR_GATEWAY_SESSION_COOKIE=<value>` in `.env`, restart stock-service.
-- **Without IBeam**: Log in at **https://www.lianel.se/ibkr-gateway/**, copy the **`api`** cookie, set `IBKR_GATEWAY_SESSION_COOKIE`, restart stock-service. Repeat when the session expires (~24h).
+1. Log in at **https://www.lianel.se/ibkr-gateway/** (same browser where you use the app).
+2. Open DevTools (F12) → Application → Cookies → select the site → copy the **`api`** cookie value.
+3. In the app, go to **Stock Service** → in the “Gateway session” section paste the value and click **Save**.
+
+The backend writes the cookie to a file and uses it on the next request; no restart. Repeat when the session expires (~24h).
+
+- **Alternative (server .env):** Set `IBKR_GATEWAY_SESSION_COOKIE=<value>` in `.env` and restart stock-service.
 
 ### Verify
 

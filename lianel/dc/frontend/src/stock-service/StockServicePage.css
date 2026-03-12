@@ -231,3 +231,39 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.stock-service-gateway-form {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.stock-service-cookie-input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.stock-service-save-btn {
+  padding: 0.4rem 1rem;
+  font-size: 0.95rem;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #0d6efd;
+  color: #fff;
+  border: none;
+}
+
+.stock-service-save-btn:hover {
+  background: #0b5ed7;
+}
+
+.stock-service-cookie-ok {
+  color: #0f5132;
+  margin: 0.5rem 0 0 0;
+  font-size: 0.9rem;
+}

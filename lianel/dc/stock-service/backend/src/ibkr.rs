@@ -270,11 +270,23 @@ impl IbkrOAuthClient {
     /// Returns the session value to send as cookie: `api={session}`.
     pub async fn get_session_for_cookie(&self) -> Result<String> {
         if self.config.is_ibkr_gateway_cookie_mode() {
-            return self
-                .config
-                .ibkr_gateway_session_cookie
-                .clone()
-                .context("IBKR_GATEWAY_SESSION_COOKIE not set");
+            if let Some(ref path) = self.config.ibkr_gateway_session_cookie_file {
+                if std::path::Path::new(path).exists() {
+                    let cookie = tokio::fs::read_to_string(path)
+                        .await
+                        .context("read IBKR_GATEWAY_SESSION_COOKIE_FILE")?;
+                    let cookie = cookie.trim();
+                    if !cookie.is_empty() {
+                        return Ok(cookie.to_string());
+                    }
+                }
+            }
+            if let Some(ref cookie) = self.config.ibkr_gateway_session_cookie {
+                if !cookie.is_empty() {
+                    return Ok(cookie.clone());
+                }
+            }
+            anyhow::bail!("IBKR_GATEWAY_SESSION_COOKIE or IBKR_GATEWAY_SESSION_COOKIE_FILE not set or empty");
         }
 
         let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');

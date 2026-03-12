@@ -5,7 +5,7 @@ use axum::{
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use std::sync::Arc;
@@ -71,6 +71,7 @@ pub fn create_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/v1/me", get(me))
         .route("/api/v1/ibkr/verify", get(ibkr_verify))
+        .route("/api/v1/ibkr/gateway-cookie", post(set_gateway_cookie))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -163,7 +164,8 @@ async fn health() -> &'static str {
 }
 
 async fn watchlist_handler(State(state): State<AppState>) -> Json<watchlist::WatchlistResponse> {
-    Json(watchlist::get_watchlist_response(&state.watchlist_cache).await)
+    let response = watchlist::get_watchlist_response(&state.watchlist_cache).await;
+    Json(response)
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -252,4 +254,42 @@ async fn me(
         "display_name": resolved_display_name,
         "email": resolved_email
     }))
+}
+
+#[derive(serde::Deserialize)]
+struct SetGatewayCookieBody {
+    cookie: String,
+}
+
+/// POST /api/v1/ibkr/gateway-cookie: set Gateway session cookie from authenticated client (e.g. after logging in at /ibkr-gateway/).
+/// Requires IBKR_GATEWAY_SESSION_COOKIE_FILE to be set and writable.
+async fn set_gateway_cookie(
+    State(state): State<AppState>,
+    Json(body): Json<SetGatewayCookieBody>,
+) -> impl IntoResponse {
+    let cookie = body.cookie.trim();
+    if cookie.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"cookie required"})));
+    }
+    let path = match &state.config {
+        Some(cfg) => cfg.ibkr_gateway_session_cookie_file.as_deref(),
+        None => None,
+    };
+    let path = match path {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error":"IBKR_GATEWAY_SESSION_COOKIE_FILE not configured"})),
+            );
+        }
+    };
+    if let Err(e) = tokio::fs::write(path, cookie).await {
+        tracing::warn!("write gateway cookie file: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error":"failed to write cookie file"})),
+        );
+    }
+    (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }

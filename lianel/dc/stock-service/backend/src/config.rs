@@ -48,6 +48,8 @@ pub struct AppConfig {
     /// When using Client Portal Gateway (base URL points to Gateway), optional session cookie value (the part after "api=").
     /// If set, we use this instead of OAuth/tickle for session.
     pub ibkr_gateway_session_cookie: Option<String>,
+    /// Optional path to file containing the Gateway session cookie; read on each use so an external updater can refresh it without restart.
+    pub ibkr_gateway_session_cookie_file: Option<String>,
 }
 
 impl AppConfig {
@@ -108,6 +110,10 @@ impl AppConfig {
             ibkr_username: env::var("IBKR_USERNAME").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             ibkr_password: env::var("IBKR_PASSWORD").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             ibkr_gateway_session_cookie: read_gateway_session_cookie(),
+            ibkr_gateway_session_cookie_file: env::var("IBKR_GATEWAY_SESSION_COOKIE_FILE")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
         })
     }
 
@@ -158,6 +164,8 @@ impl AppConfig {
     pub fn is_ibkr_gateway_cookie_mode(&self) -> bool {
         let base = self.ibkr_api_base_url.as_str();
         let looks_like_gateway = base.contains("ibkr-gateway") || base.contains(":5000");
-        looks_like_gateway && self.ibkr_gateway_session_cookie.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+        let has_cookie = self.ibkr_gateway_session_cookie.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+            || self.ibkr_gateway_session_cookie_file.is_some();
+        looks_like_gateway && has_cookie
     }
 }

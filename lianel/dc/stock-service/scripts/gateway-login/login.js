@@ -34,16 +34,18 @@ if (!USERNAME || !PASSWORD) {
     });
     const page = await context.newPage();
 
-    await page.goto(GATEWAY_URL, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => null);
-    await page.waitForSelector('.loginformWrapper', { timeout: 15000 }).catch(() => null);
-    await page.waitForTimeout(35000);
-    const inputCount = await page.evaluate(() => document.querySelectorAll('input').length).catch(() => 0);
+    await page.goto(GATEWAY_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForTimeout(25000);
+    let inputCount = await page.evaluate(() => document.querySelectorAll('input').length).catch(() => 0);
     if (inputCount === 0) {
-      console.error('No inputs found after 35s. Page may require full JS load.');
+      await page.waitForTimeout(40000);
+      inputCount = await page.evaluate(() => document.querySelectorAll('input').length).catch(() => 0);
+    }
+    if (inputCount === 0) {
+      console.error('No inputs found. Page may require full JS load or different selectors.');
       process.exit(1);
     }
-    await page.waitForSelector('.loginformWrapper input, input[type="text"], input[type="password"]', { timeout: 15000 });
+    await page.waitForSelector('input[type="text"], input[name="username"], input[name="userId"], .loginformWrapper input', { timeout: 20000 });
 
     const usernameSel = '.loginformWrapper input[type="text"], input[type="text"]';
     const passwordSel = '.loginformWrapper input[type="password"], input[type="password"]';
