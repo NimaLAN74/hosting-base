@@ -71,7 +71,7 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: "Apply on remote (fix 502: sync DB + start Keycloak, KC_HOSTNAME, optional nginx reload)"
+      - name: Apply on remote (fix 502 - sync DB, Keycloak, KC_HOSTNAME, optional nginx reload)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
