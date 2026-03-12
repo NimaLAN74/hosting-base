@@ -1,0 +1,32 @@
+# IBeam Inputs: overwrites Gateway root/conf.yaml.
+# See https://github.com/Voyz/ibeam/wiki/Gateway-Configuration
+# Allow Docker networks (172.x, 10.x) and localhost so nginx and stock-service can connect.
+ip2loc: "US"
+proxyRemoteSsl: true
+proxyRemoteHost: "https://api.ibkr.com"
+listenPort: 5000
+listenSsl: true
+ccp: false
+svcEnvironment: "v1"
+sslCert: "vertx.jks"
+sslPwd: "mywebapi"
+authDelay: 3000
+portalBaseURL: ""
+serverOptions:
+  blockedThreadCheckInterval: 1000000
+  eventLoopPoolSize: 20
+  workerPoolSize: 20
+  maxWorkerExecuteTime: 100
+  internalBlockingPoolSize: 20
+cors:
+  origin.allowed: "*"
+  allowCredentials: false
+webApps:
+  - name: "demo"
+    index: "index.html"
+ips:
+  allow:
+    - 127.0.0.1
+    - 10.*
+    - 172.*
+  deny: []

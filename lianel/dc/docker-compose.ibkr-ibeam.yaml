@@ -23,9 +23,9 @@ services:
     restart: unless-stopped
     networks:
       - lianel-network
-    # Optional: mount inputs for custom conf.yaml or 2FA handler
-    # volumes:
-    #   - ./stock-service/ibkr-gateway/inputs:/srv/inputs:ro
+    # Mount conf.yaml so Gateway allows nginx (172.x) and localhost; otherwise "Access Denied"
+    volumes:
+      - ./stock-service/ibkr-gateway/inputs:/srv/inputs:ro
 
 networks:
   lianel-network:
