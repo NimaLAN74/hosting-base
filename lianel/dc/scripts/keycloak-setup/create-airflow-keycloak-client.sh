@@ -54,6 +54,7 @@ c['attributes'].pop('pkce.code.challenge.required', None)
 c['attributes']['pkce.code.challenge.method'] = ''   # empty = do not require PKCE
 c['clientId'] = 'airflow'
 c['enabled'] = True
+c['consentRequired'] = False
 c['redirectUris'] = ['https://airflow.lianel.se/oauth-authorized/keycloak', 'https://airflow.lianel.se/auth/oauth-authorized/keycloak']
 c['webOrigins'] = ['https://airflow.lianel.se']
 c['standardFlowEnabled'] = True
@@ -79,6 +80,7 @@ else
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
+      "consentRequired": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "standardFlowEnabled": true,
@@ -90,7 +92,7 @@ else
       "webOrigins": [
         "https://airflow.lianel.se"
       ]
-    }' > /dev/null && echo "✓ Airflow client created (PKCE not required - FAB/authlib does not send code_challenge)"
+    }' > /dev/null && echo "✓ Airflow client created (PKCE not required, consent not required)"
   
   CLIENT_ID=$(curl -s "${KEYCLOAK_URL}/admin/realms/lianel/clients?clientId=airflow" \
     -H "Authorization: Bearer ${TOKEN}" | python3 -c 'import sys, json; print(json.load(sys.stdin)[0]["id"])')

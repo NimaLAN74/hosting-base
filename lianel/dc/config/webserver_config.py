@@ -20,6 +20,8 @@ WTF_CSRF_ENABLED = False
 
 # OAuth providers configuration
 # redirect_uri must be https and match Keycloak client; FAB/authlib may build from request (http behind proxy).
+# Use www.lianel.se/auth for Keycloak so login page and cookies are same-origin (avoids cookie_not_found / "sign in was denied").
+KEYCLOAK_BASE = 'https://www.lianel.se/auth/realms/lianel/protocol/openid-connect'
 OAUTH_PROVIDERS = [
     {
         'name': 'keycloak',
@@ -28,27 +30,23 @@ OAUTH_PROVIDERS = [
         'remote_app': {
             'client_id': 'airflow',
             'client_secret': os.getenv('AIRFLOW_OAUTH_CLIENT_SECRET', ''),
-            'api_base_url': 'https://auth.lianel.se/realms/lianel/protocol/openid-connect',
-            # Authlib needs jwks_uri for id_token validation; fetch from OIDC discovery (fixes "Missing jwks_uri in metadata")
-            'server_metadata_url': 'https://auth.lianel.se/realms/lianel/.well-known/openid-configuration',
+            'api_base_url': KEYCLOAK_BASE,
+            'server_metadata_url': 'https://www.lianel.se/auth/realms/lianel/.well-known/openid-configuration',
             'client_kwargs': {
                 'scope': 'openid profile email',
-                # Keycloak accepts both; client_secret_post avoids proxy/header issues with Basic auth
                 'token_endpoint_auth_method': 'client_secret_post',
             },
-            'access_token_url': 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/token',
-            'authorize_url': 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/auth',
+            'access_token_url': f'{KEYCLOAK_BASE}/token',
+            'authorize_url': f'{KEYCLOAK_BASE}/auth',
             'request_token_url': None,
-            # Force https callback so Keycloak accepts (avoids 400 when FAB builds redirect_uri from request as http)
             'redirect_uri': 'https://airflow.lianel.se/auth/oauth-authorized/keycloak',
-            # authlib/FAB: explicit userinfo for Keycloak (OIDC userinfo returns preferred_username, email, etc.)
-            'userinfo_endpoint': 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/userinfo',
+            'userinfo_endpoint': f'{KEYCLOAK_BASE}/userinfo',
         }
     }
 ]
 
 # User info endpoint for retrieving user details
-OAUTH_USER_INFO_ENDPOINT = 'https://auth.lianel.se/realms/lianel/protocol/openid-connect/userinfo'
+OAUTH_USER_INFO_ENDPOINT = f'{KEYCLOAK_BASE}/userinfo'
 
 # FAB auth blueprint uses /auth/ prefix; callback is /auth/oauth-authorized/keycloak (see ROOT-CAUSE-LOGIN-AIRFLOW-KEYCLOAK.md).
 OAUTH_REDIRECT_URI = 'https://airflow.lianel.se/auth/oauth-authorized/keycloak'

@@ -100,7 +100,8 @@ If login still fails after Keycloak (e.g. 500 or “User info” error): check a
 
 1. **Wrong or empty client secret** – Keycloak returns 401/400 on the token endpoint; FAB catches the exception and shows “denied”.
 2. **redirect_uri mismatch** – The `redirect_uri` sent in the token request must match exactly what was used in the authorize request. If the callback request is seen as `http` (e.g. missing `X-Forwarded-Proto` for `/auth/`), the token request would send `redirect_uri=http://...` and Keycloak would reject it.
-3. **Keycloak token endpoint error** – Invalid grant, expired code, or other Keycloak error (see apiserver logs).
+3. **Keycloak login on auth.lianel.se** – If Airflow sent users to auth.lianel.se for login, Keycloak (KC_HOSTNAME=www.lianel.se/auth) sets cookies for www with Path=/auth/realms/. On auth.lianel.se the path is /realms/..., so the session cookie can be missing and Keycloak may reject, surfacing as "denied". **Fix**: Use **www.lianel.se/auth** for all Keycloak URLs in webserver_config.py.
+4. **Keycloak token endpoint error** – Invalid grant, expired code, or other Keycloak error (see apiserver logs).
 
 **Steps to fix**
 
@@ -132,4 +133,6 @@ If login still fails after Keycloak (e.g. 500 or “User info” error): check a
 
 4. **Confirm redirect_uri** – Nginx must send `X-Forwarded-Proto https` for `location /auth/` (see §3). Our nginx.conf already sets this for airflow.lianel.se. If you use a different proxy, ensure it sets the same header for the callback URL.
 
-Once the real exception is visible in the logs (step 1), you can target the fix (wrong secret, redirect_uri, or Keycloak configuration).
+5. **Use www.lianel.se/auth for Keycloak** – In `config/webserver_config.py`, all Keycloak URLs must point to **https://www.lianel.se/auth/realms/lianel/...** so the login page and cookies use the same origin (avoids cookie/session issues that surface as "denied"). Restart Airflow after changing. Re-run **create-airflow-keycloak-client.sh** to ensure the airflow client has PKCE and consent disabled.
+
+Once the real exception is visible in the logs (step 1), you can target the fix (wrong secret, redirect_uri, Keycloak URLs, or Keycloak configuration).

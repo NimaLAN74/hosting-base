@@ -67,3 +67,12 @@ On the server, the compose project may use **`/root/hosting-base/lianel/dc/`** f
 1. Ensure the file that is **actually mounted** on the server has `auth_url = https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth`.
 2. Restart Grafana: `docker restart grafana`.
 3. Verify: `docker exec grafana grep '^auth_url' /etc/grafana/grafana.ini`.
+
+The **Deploy Frontend** workflow now syncs `grafana.ini` to both server paths and restarts Grafana, then runs `e2e-server-full-analysis.sh` on the server.
+
+## 7. Post-deploy verification (after pipeline green)
+
+After the frontend pipeline succeeded:
+
+- **Grafana**: Container restarted by deploy; `auth_url` in container = `https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth`.
+- **E2E server script** (run from server or via SSH): Logs dumped, login flow (GET + POST with cookie) → 200, watchlist API → 200 (body has IBKR "no bridge" until Gateway runs), Grafana auth_url check → OK. Result: **E2E Server: PASSED**.
