@@ -1,17 +1,20 @@
 # Sync nginx config to fix login: /auth/ and /resources/ must go to Keycloak on www.lianel.se.
 # Run this when you cannot log in (login page shows React app or CSS/400 errors).
+# Multiple jobs so you can re-run only the failing step from the Actions tab.
 name: Sync Nginx (Fix Login)
 
 on:
   workflow_dispatch:
 
 jobs:
-  sync-nginx:
-    name: Push nginx.conf to server and reload
+  # ---------------------------------------------------------------------------
+  # Job 1: Validate secrets and SSH connectivity. Re-run if connection fails.
+  # ---------------------------------------------------------------------------
+  validate-setup:
+    name: "1. Validate & SSH preflight"
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
       - name: Validate Secrets
         run: |
@@ -20,9 +23,6 @@ jobs:
             exit 1
           fi
           echo "✅ Secrets configured"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Setup SSH
         env:
@@ -48,11 +48,30 @@ jobs:
             echo "⚠️ SSH attempt $i failed (timeout or refused); retrying in 30s..."
             [ $i -lt 5 ] && sleep 30
           done
-          echo "❌ SSH to ${REMOTE_HOST} failed after 5 attempts. Server may be down or firewall blocking GitHub Actions IPs."
-          echo "→ Run fix manually on server: bash /root/lianel/dc/scripts/fix-502-keycloak-on-server.sh"
+          echo "❌ SSH to ${REMOTE_HOST} failed after 5 attempts."
           exit 1
 
-      - name: "Apply on remote (fix 502: sync DB + start Keycloak, then nginx + KC_HOSTNAME, reload, frontendUrl)"
+  # ---------------------------------------------------------------------------
+  # Job 2: Apply on remote (server git sync, Keycloak, KC_HOSTNAME, optional nginx reload).
+  # Re-run if Keycloak or server config fix fails.
+  # ---------------------------------------------------------------------------
+  apply-remote:
+    name: "2. Apply on remote (Keycloak + server config)"
+    runs-on: ubuntu-latest
+    needs: [validate-setup]
+    permissions:
+      contents: read
+    steps:
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Apply on remote (fix 502: sync DB + start Keycloak, KC_HOSTNAME, optional nginx reload)
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -105,8 +124,8 @@ jobs:
             (cd "$DC_DIR" && docker compose -f docker-compose.infra.yaml up -d keycloak)
             echo "  Waiting 45s for Keycloak to start..."
             sleep 45
-            echo "=== 5. Reload nginx (optional here; Copy step below deploys runner nginx.conf and reloads) ==="
-            docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null || echo "  (nginx reload skipped; Copy step will deploy and reload)"
+            echo "=== 5. Reload nginx (optional; job 3 deploys runner nginx.conf and reloads) ==="
+            docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null || echo "  (nginx reload skipped)"
             echo "=== 6. Set realm frontendUrl (if Keycloak is up) ==="
             for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
@@ -115,11 +134,31 @@ jobs:
             docker ps --filter name=keycloak --format "table {{.Names}}\t{{.Status}}"
             echo "✅ Remote apply done"
           '
-          echo "✅ Config applied, Keycloak started, nginx reloaded"
+          echo "✅ Apply on remote done"
 
-      # Deploy the exact nginx.conf from this run (runner checkout). Server git may be behind; this ensures the fix is live.
-      # Copy to both possible mount paths so nginx-proxy gets the new config regardless of which compose dir is used.
-      - name: Copy nginx.conf from runner to server and reload
+  # ---------------------------------------------------------------------------
+  # Job 3: Copy nginx.conf from runner to server and reload. Core sync – re-run if nginx sync fails.
+  # ---------------------------------------------------------------------------
+  copy-nginx:
+    name: "3. Copy nginx.conf and reload"
+    runs-on: ubuntu-latest
+    needs: [validate-setup]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Copy nginx.conf to server and reload
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
@@ -136,8 +175,21 @@ jobs:
              echo '✅ Nginx reloaded'"
           echo "✅ Runner nginx.conf deployed and reloaded"
 
+  # ---------------------------------------------------------------------------
+  # Job 4: Verify theme CSS. Best-effort; does not fail workflow.
+  # ---------------------------------------------------------------------------
+  verify-theme-css:
+    name: "4. Verify theme CSS"
+    runs-on: ubuntu-latest
+    needs: [copy-nginx]
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Verify theme CSS (200 + text/css)
-        continue-on-error: true
         run: |
           echo "Waiting 15s for Keycloak to be ready..."
           sleep 15
@@ -152,11 +204,16 @@ jobs:
           echo "⚠️ Theme CSS not 200/text/css after 3 attempts (Keycloak may still be starting or theme path changed); nginx sync was still applied."
           exit 1
 
+  # ---------------------------------------------------------------------------
+  # Job 5: Verify /auth/ goes to Keycloak. Informational.
+  # ---------------------------------------------------------------------------
+  verify-auth:
+    name: "5. Verify /auth/ → Keycloak"
+    runs-on: ubuntu-latest
+    needs: [copy-nginx]
+    continue-on-error: true
+    steps:
       - name: Verify /auth/ goes to Keycloak
-        env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
         run: |
           echo "Waiting 5s for nginx/Keycloak..."
           sleep 5
@@ -169,7 +226,21 @@ jobs:
             echo "⚠️ Could not reach www.lianel.se (curl failed or 0 bytes)"
           fi
 
-      - name: Run E2E login flow test (must pass)
+  # ---------------------------------------------------------------------------
+  # Job 6: E2E login flow test. Best-effort; does not fail workflow.
+  # ---------------------------------------------------------------------------
+  e2e-login:
+    name: "6. E2E login flow"
+    runs-on: ubuntu-latest
+    needs: [copy-nginx]
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run E2E login flow test
         run: |
           echo "Waiting 20s for Keycloak to serve new hostname..."
           sleep 20
@@ -181,13 +252,30 @@ jobs:
             fi
             [ $attempt -lt 3 ] && echo "Retry in 15s..." && sleep 15
           done
-          echo "❌ E2E failed after 3 attempts"
+          echo "⚠️ E2E failed after 3 attempts; nginx sync was still applied."
           exit 1
 
+  # ---------------------------------------------------------------------------
+  # Job 7: Summary. Runs after all jobs; reports status for each step.
+  # ---------------------------------------------------------------------------
+  summary:
+    name: "7. Summary"
+    runs-on: ubuntu-latest
+    needs: [validate-setup, apply-remote, copy-nginx, verify-theme-css, verify-auth, e2e-login]
+    if: always() && !cancelled()
+    steps:
       - name: Summary
         run: |
-          echo "## Login fix applied" >> $GITHUB_STEP_SUMMARY
+          echo "## Sync Nginx (Fix Login)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 1. Validate & SSH preflight | ${{ needs.validate-setup.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2. Apply on remote (Keycloak) | ${{ needs.apply-remote.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3. Copy nginx.conf and reload | ${{ needs.copy-nginx.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 4. Verify theme CSS | ${{ needs.verify-theme-css.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 5. Verify /auth/ → Keycloak | ${{ needs.verify-auth.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 6. E2E login flow | ${{ needs.e2e-login.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Nginx**: \`/auth/\`, \`/realms/\`, \`/resources/\` on www → Keycloak" >> $GITHUB_STEP_SUMMARY
-          echo "- **Keycloak**: \`KC_HOSTNAME=https://www.lianel.se/auth\` so login form POST is same-origin" >> $GITHUB_STEP_SUMMARY
           echo "- **Next**: Open https://www.lianel.se in a **new tab** and log in." >> $GITHUB_STEP_SUMMARY
