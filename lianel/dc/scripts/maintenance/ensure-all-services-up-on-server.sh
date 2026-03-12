@@ -98,6 +98,14 @@ docker restart nginx-proxy 2>/dev/null && sleep 3 && echo "  Nginx restarted" ||
 docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -s reload 2>/dev/null && echo "  Nginx config OK" || true
 
 echo ""
+echo "=== 11. Full stack up (avoids orphan containers: profile-service, comp-ai, energy in same project) ==="
+FULL_FILES="-f docker-compose.infra.yaml"
+for f in docker-compose.backend.yaml docker-compose.comp-ai.yaml docker-compose.frontend.yaml docker-compose.stock-service.yaml docker-compose.ibkr-ibeam.yaml docker-compose.oauth2-proxy.yaml docker-compose.monitoring.yaml docker-compose.airflow.yaml; do
+  [ -f "$f" ] && FULL_FILES="$FULL_FILES -f $f"
+done
+$COMPOSE $FULL_FILES up -d 2>/dev/null && echo "  Full stack up (no orphans)" || true
+
+echo ""
 echo "=== Container status (expected: stock, comp-ai, monitoring, airflow, infra) ==="
 docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -60
 
