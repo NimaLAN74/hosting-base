@@ -112,21 +112,34 @@ jobs:
               sed -i "s|KC_HOSTNAME_ADMIN:.*|KC_HOSTNAME_ADMIN: https://auth.lianel.se|" "$d/docker-compose.infra.yaml"
               grep -E "KC_HOSTNAME" "$d/docker-compose.infra.yaml" | head -2
             done
-            echo "=== 4. Fix 502: sync Keycloak DB password and start Keycloak ==="
+            echo "=== 4. Fix 502: sync Keycloak DB password (must match .env) and start Keycloak ==="
+            RAN_DB_FIX=
             for repo in /root/hosting-base/lianel/dc /root/lianel/dc; do
-              [ -f "$repo/scripts/maintenance/set-keycloak-db-password-on-server.sh" ] && bash "$repo/scripts/maintenance/set-keycloak-db-password-on-server.sh" 2>/dev/null && break || true
+              if [ -f "$repo/scripts/maintenance/set-keycloak-db-password-on-server.sh" ]; then
+                echo "  Running set-keycloak-db-password from $repo ..."
+                (cd "$repo" && bash scripts/maintenance/set-keycloak-db-password-on-server.sh) && RAN_DB_FIX=1 && break || echo "  (script failed or skipped; Keycloak may still fail to start)"
+              fi
             done
+            [ -z "$RAN_DB_FIX" ] && echo "  (set-keycloak-db-password script not found on server)"
             DC_DIR="/root/hosting-base/lianel/dc"
             [ -f /root/lianel/dc/docker-compose.infra.yaml ] && DC_DIR="/root/lianel/dc"
             KEYCOWNER=$(docker inspect keycloak --format "{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}" 2>/dev/null) || true
             [ -n "$KEYCOWNER" ] && [ -f "$KEYCOWNER/docker-compose.infra.yaml" ] && DC_DIR="$KEYCOWNER" || true
             echo "  Using compose dir: $DC_DIR"
             (cd "$DC_DIR" && docker compose -f docker-compose.infra.yaml up -d keycloak)
-            echo "  Waiting 45s for Keycloak to start..."
-            sleep 45
-            echo "=== 5. Reload nginx (optional; job 3 deploys runner nginx.conf and reloads) ==="
+            echo "  Waiting 60s for Keycloak to start..."
+            sleep 60
+            echo "=== 5. Verify Keycloak is responding (fail job if not – root cause of 502) ==="
+            KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/health/ready 2>/dev/null || echo "000")
+            if [ "$KC_CODE" != "200" ]; then
+              echo "  Keycloak health returned HTTP $KC_CODE (expected 200). Keycloak is down – login will return 502."
+              echo "  Check: docker logs keycloak (often 'password authentication failed' → run set-keycloak-db-password-on-server.sh). See ROOT-CAUSE-LOGIN-AIRFLOW-KEYCLOAK.md"
+              exit 1
+            fi
+            echo "  Keycloak is up (HTTP $KC_CODE)."
+            echo "=== 6. Reload nginx (optional; job 3 deploys runner nginx.conf and reloads) ==="
             docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null || echo "  (nginx reload skipped)"
-            echo "=== 6. Set realm frontendUrl (if Keycloak is up) ==="
+            echo "=== 7. Set realm frontendUrl (if Keycloak is up) ==="
             for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
               (cd "$dc" && [ -f .env ] && source .env; export KEYCLOAK_URL=https://auth.lianel.se; export KEYCLOAK_FRONTEND_URL=https://www.lianel.se/auth; bash scripts/keycloak-setup/fix-keycloak-https.sh) 2>/dev/null && break || true
@@ -137,12 +150,12 @@ jobs:
           echo "✅ Apply on remote done"
 
   # ---------------------------------------------------------------------------
-  # Job 3: Copy nginx.conf from runner to server and reload. Core sync – re-run if nginx sync fails.
+  # Job 3: Copy nginx.conf from runner to server and reload. Runs AFTER apply-remote so Keycloak is up first.
   # ---------------------------------------------------------------------------
   copy-nginx:
     name: "3. Copy nginx.conf and reload"
     runs-on: ubuntu-latest
-    needs: [validate-setup]
+    needs: [validate-setup, apply-remote]
     permissions:
       contents: read
     steps:
@@ -176,10 +189,30 @@ jobs:
           echo "✅ Runner nginx.conf deployed and reloaded"
 
   # ---------------------------------------------------------------------------
-  # Job 4: Verify theme CSS. Best-effort; does not fail workflow.
+  # Job 4: Assert login page is not 502. FAIL workflow if auth still returns 502 (so we never report success when login is broken).
+  # ---------------------------------------------------------------------------
+  assert-login-not-502:
+    name: "4. Assert login not 502"
+    runs-on: ubuntu-latest
+    needs: [copy-nginx]
+    steps:
+      - name: Fail if login returns 502
+        run: |
+          echo "Checking https://www.lianel.se/auth/ ..."
+          sleep 10
+          CODE=$(curl -s -k -o /dev/null -w "%{http_code}" "https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=https%3A%2F%2Fwww.lianel.se%2F&response_type=code&scope=openid" -L 2>/dev/null || echo "000")
+          if [ "$CODE" = "502" ]; then
+            echo "Login page returns 502 – auth is still broken. Keycloak may be down or nginx cannot reach it."
+            echo "On server: docker logs keycloak; see ROOT-CAUSE-LOGIN-AIRFLOW-KEYCLOAK.md"
+            exit 1
+          fi
+          echo "Login page returned HTTP $CODE (502 would fail the job)."
+
+  # ---------------------------------------------------------------------------
+  # Job 5: Verify theme CSS. Best-effort; does not fail workflow.
   # ---------------------------------------------------------------------------
   verify-theme-css:
-    name: "4. Verify theme CSS"
+    name: "5. Verify theme CSS"
     runs-on: ubuntu-latest
     needs: [copy-nginx]
     continue-on-error: true
@@ -205,10 +238,10 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------
-  # Job 5: Verify /auth/ goes to Keycloak. Informational.
+  # Job 6: Verify /auth/ goes to Keycloak. Informational.
   # ---------------------------------------------------------------------------
   verify-auth:
-    name: "5. Verify /auth/ → Keycloak"
+    name: "6. Verify /auth/ → Keycloak"
     runs-on: ubuntu-latest
     needs: [copy-nginx]
     continue-on-error: true
@@ -227,10 +260,10 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Job 6: E2E login flow test. Best-effort; does not fail workflow.
+  # Job 7: E2E login flow test. Best-effort; does not fail workflow.
   # ---------------------------------------------------------------------------
   e2e-login:
-    name: "6. E2E login flow"
+    name: "7. E2E login flow"
     runs-on: ubuntu-latest
     needs: [copy-nginx]
     continue-on-error: true
@@ -256,12 +289,12 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------
-  # Job 7: Summary. Runs after all jobs; reports status for each step.
+  # Job 8: Summary. Runs after all jobs; reports status for each step.
   # ---------------------------------------------------------------------------
   summary:
-    name: "7. Summary"
+    name: "8. Summary"
     runs-on: ubuntu-latest
-    needs: [validate-setup, apply-remote, copy-nginx, verify-theme-css, verify-auth, e2e-login]
+    needs: [validate-setup, apply-remote, copy-nginx, assert-login-not-502, verify-theme-css, verify-auth, e2e-login]
     if: always() && !cancelled()
     steps:
       - name: Summary
@@ -273,9 +306,10 @@ jobs:
           echo "| 1. Validate & SSH preflight | ${{ needs.validate-setup.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 2. Apply on remote (Keycloak) | ${{ needs.apply-remote.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 3. Copy nginx.conf and reload | ${{ needs.copy-nginx.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 4. Verify theme CSS | ${{ needs.verify-theme-css.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 5. Verify /auth/ → Keycloak | ${{ needs.verify-auth.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 6. E2E login flow | ${{ needs.e2e-login.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 4. Assert login not 502 | ${{ needs.assert-login-not-502.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 5. Verify theme CSS | ${{ needs.verify-theme-css.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 6. Verify /auth/ → Keycloak | ${{ needs.verify-auth.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 7. E2E login flow | ${{ needs.e2e-login.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Nginx**: \`/auth/\`, \`/realms/\`, \`/resources/\` on www → Keycloak" >> $GITHUB_STEP_SUMMARY
           echo "- **Next**: Open https://www.lianel.se in a **new tab** and log in." >> $GITHUB_STEP_SUMMARY
