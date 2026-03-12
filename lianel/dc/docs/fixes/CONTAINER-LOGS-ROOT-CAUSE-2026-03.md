@@ -39,7 +39,10 @@ Consider increasing IBEAM_PAGE_LOAD_TIMEOUT.
 
 **Fixes:**
 - Ensure `IBEAM_ACCOUNT` / `IBEAM_PASSWORD` (or `IBKR_*` mapped to them) in `.env` are correct and that the account does not require 2FA for this login.
-- Increase `IBEAM_PAGE_LOAD_TIMEOUT` in the IBeam compose (e.g. 120 or 180 seconds).
+- Increase `IBEAM_PAGE_LOAD_TIMEOUT` (e.g. 150) and `IBEAM_OAUTH_TIMEOUT` (e.g. 90) in server `.env`, then **recreate the container**:  
+  `docker compose -f docker-compose.infra.yaml -f docker-compose.ibkr-ibeam.yaml up -d --force-recreate ibkr-gateway`  
+  (Compose defaults are 150/90; if server `.env` sets lower values, they override.)
+- If login still fails after "Submitting the form", the post-login page is not what IBeam expects (often 2FA or wrong credentials). Use the **cookie workaround**: log in at https://www.lianel.se/ibkr-gateway/, copy the `api` cookie, set `IBKR_GATEWAY_SESSION_COOKIE` on the server and restart stock-service.
 - If the Gateway shows an error after submit (e.g. “Invalid credentials”), fix credentials; IBeam cannot complete 2FA or captcha in headless mode.
 
 ---
