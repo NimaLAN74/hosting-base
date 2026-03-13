@@ -1,34 +1,5 @@
 services:
-  keycloak:
-    image: quay.io/keycloak/keycloak:latest
-    container_name: keycloak
-    environment:
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://host.docker.internal:5432/keycloak
-      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
-      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-      KC_HOSTNAME: auth.lianel.se
-      KC_HOSTNAME_STRICT: "false"
-      KC_PROXY_HEADERS: xforwarded
-      KC_HTTP_ENABLED: "true"
-      KC_HEALTH_ENABLED: "true"
-    command: start --spi-login-protocol-openid-connect-legacy-logout-redirect-uri=true
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    expose:
-      - "8080"
-    networks:
-      - lianel-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
+  # Keycloak is defined in docker-compose.infra.yaml - do not duplicate here
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:latest
     container_name: oauth2-proxy
@@ -64,8 +35,6 @@ services:
       # Keycloak handles logout via browser redirect (front-channel logout)
     expose:
       - "4180"
-    depends_on:
-      - keycloak
     restart: unless-stopped
     networks:
       - lianel-network
