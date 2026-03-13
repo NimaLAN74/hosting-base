@@ -10,8 +10,8 @@ services:
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID}
       OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH2_PROXY_CLIENT_SECRET}
       # OAUTH2_PROXY_REDIRECT_URL not set - will use request host dynamically
-      # Must match Keycloak discovery issuer (www proxy); auth.lianel.se redirects to www.lianel.se/auth
-      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OAUTH2_PROXY_OIDC_ISSUER_URL:-https://www.lianel.se/auth/realms/lianel}
+      # Must match Keycloak discovery issuer exactly (KC_HOSTNAME_ADMIN without KC_HTTP_RELATIVE_PATH in issuer)
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OAUTH2_PROXY_OIDC_ISSUER_URL:-https://auth.lianel.se/realms/lianel}
       OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET}
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       OAUTH2_PROXY_COOKIE_DOMAIN: .lianel.se
