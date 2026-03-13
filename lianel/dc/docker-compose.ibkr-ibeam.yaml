@@ -16,6 +16,10 @@ services:
     environment:
       IBEAM_ACCOUNT: ${IBKR_USERNAME:-${IBEAM_ACCOUNT}}
       IBEAM_PASSWORD: ${IBKR_PASSWORD:-${IBEAM_PASSWORD}}
+      # 2FA TOTP: provide the secret from your authenticator app setup
+      # Get this from IBKR when you scan the QR code for Mobile Authenticator
+      IBEAM_TWO_FA_HANDLER: ${IBEAM_TWO_FA_HANDLER:-TWO_FA_CODE}
+      IBEAM_TWO_FA_SECRET: ${IBEAM_TWO_FA_SECRET:-}
       # Increase if IBeam logs "Timeout reached when waiting for authentication" after "Submitting the form"
       IBEAM_PAGE_LOAD_TIMEOUT: ${IBEAM_PAGE_LOAD_TIMEOUT:-150}
       IBEAM_OAUTH_TIMEOUT: ${IBEAM_OAUTH_TIMEOUT:-90}
