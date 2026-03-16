@@ -33,6 +33,11 @@ fn default_symbol_conids() -> HashMap<String, u64> {
     m
 }
 
+/// Conid for a watchlist symbol (for history endpoint). Returns None if symbol not in default list.
+pub fn get_conid_for_symbol(symbol: &str) -> Option<u64> {
+    default_symbol_conids().get(symbol).copied()
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WatchlistQuote {
     pub symbol: String,

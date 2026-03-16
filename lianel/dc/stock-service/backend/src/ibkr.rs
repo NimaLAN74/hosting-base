@@ -15,7 +15,7 @@ use rsa::sha2::Sha256;
 use rsa::signature::Signer;
 use rsa::traits::{Decryptor, PublicKeyParts};
 use rsa::RsaPrivateKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -449,6 +449,78 @@ impl IbkrOAuthClient {
         );
         Ok(header_value)
     }
+
+    /// Fetch historical bars from IBKR GET /iserver/marketdata/history. Uses same session as snapshot.
+    /// period e.g. "7d", bar e.g. "1d" for 7-day daily bars. Max 5 concurrent history requests per IBKR.
+    pub async fn fetch_history(&self, conid: u64, period: &str, bar: &str) -> Result<Vec<HistoryBar>> {
+        let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
+        let url = format!(
+            "{}/iserver/marketdata/history?conid={}&exchange=SMART&period={}&bar={}",
+            base_url, conid, period, bar
+        );
+        let session = self.get_session_for_cookie().await?;
+        let auth = self.sign_request("GET", &url, None).await?;
+        let client = self.http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", auth)
+            .header("Cookie", format!("api={}", session))
+            .header("User-Agent", "Console")
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .context("GET /iserver/marketdata/history")?;
+        let status = resp.status();
+        let body = resp.text().await.context("history body")?;
+        if !status.is_success() {
+            anyhow::bail!("history failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
+        }
+        let raw: IbkrHistoryResponse = serde_json::from_str(&body).with_context(|| {
+            format!(
+                "parse history JSON: {}",
+                body.trim_start().chars().take(120).collect::<String>()
+            )
+        })?;
+        let factor = raw.price_factor.unwrap_or(1.0);
+        let bars: Vec<HistoryBar> = raw
+            .data
+            .into_iter()
+            .map(|b| HistoryBar {
+                t: b.t,
+                open: b.o / factor,
+                high: b.h / factor,
+                low: b.l / factor,
+                close: b.c / factor,
+            })
+            .collect();
+        Ok(bars)
+    }
+}
+
+/// One bar of historical data (for API response).
+#[derive(Clone, Debug, Serialize)]
+pub struct HistoryBar {
+    pub t: u64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+}
+
+#[derive(Deserialize)]
+struct IbkrHistoryBar {
+    o: f64,
+    c: f64,
+    h: f64,
+    l: f64,
+    t: u64,
+}
+
+#[derive(Deserialize)]
+struct IbkrHistoryResponse {
+    data: Vec<IbkrHistoryBar>,
+    #[serde(rename = "priceFactor")]
+    price_factor: Option<f64>,
 }
 
 #[derive(Deserialize)]

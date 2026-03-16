@@ -1,7 +1,7 @@
 //! Stock service: minimal API for SSO verification and IBKR authentication. Health, status, /me, /api/v1/ibkr/verify.
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware,
     response::IntoResponse,
@@ -66,7 +66,8 @@ pub fn create_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
-        .route("/api/v1/watchlist", get(watchlist_handler));
+        .route("/api/v1/watchlist", get(watchlist_handler))
+        .route("/api/v1/history", get(history_handler));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -166,6 +167,60 @@ async fn health() -> &'static str {
 async fn watchlist_handler(State(state): State<AppState>) -> Json<watchlist::WatchlistResponse> {
     let response = watchlist::get_watchlist_response(&state.watchlist_cache).await;
     Json(response)
+}
+
+#[derive(serde::Deserialize)]
+struct HistoryQuery {
+    symbol: String,
+    #[serde(default)]
+    days: Option<u32>,
+}
+
+async fn history_handler(
+    State(state): State<AppState>,
+    Query(q): Query<HistoryQuery>,
+) -> impl IntoResponse {
+    let symbol = q.symbol.trim();
+    if symbol.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "symbol required"})),
+        )
+            .into_response();
+    }
+    let conid = match watchlist::get_conid_for_symbol(symbol) {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "symbol not in watchlist"})),
+            )
+                .into_response()
+        }
+    };
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response()
+        }
+    };
+    let days = q.days.unwrap_or(7).min(365);
+    let period = format!("{}d", days);
+    match client.fetch_history(conid, &period, "1d").await {
+        Ok(bars) => (StatusCode::OK, Json(serde_json::json!({ "symbol": symbol, "data": bars }))).into_response(),
+        Err(e) => {
+            tracing::warn!("IBKR history failed for {}: {}", symbol, e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
