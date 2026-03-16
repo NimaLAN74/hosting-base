@@ -49,6 +49,7 @@ export default function StockServicePage() {
   const [historyBySymbol, setHistoryBySymbol] = useState({});
   const [historyLoading, setHistoryLoading] = useState(null);
   const [historyError, setHistoryError] = useState(null);
+  const [historyRange, setHistoryRange] = useState('7d'); // '7d' | '1m' | '3m' | '1y'
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -108,18 +109,35 @@ export default function StockServicePage() {
   // When a row is expanded, fetch IBKR history for that symbol (once per symbol).
   useEffect(() => {
     if (!expandedSymbol) return;
-    if (historyBySymbol[expandedSymbol] !== undefined) return; // already loaded or failed
+    const existing = historyBySymbol[expandedSymbol];
+    if (existing && existing.range === historyRange) return; // already loaded for this range
     const sym = expandedSymbol;
+    const range = historyRange;
+    const rangeToDays = (r) => {
+      switch (r) {
+        case '1m':
+          return 30;
+        case '3m':
+          return 90;
+        case '1y':
+          return 365;
+        case '7d':
+        default:
+          return 7;
+      }
+    };
+    const days = rangeToDays(range);
     setHistoryLoading(sym);
     setHistoryError(null);
-    const url = `${HISTORY_URL}?symbol=${encodeURIComponent(sym)}&days=7`;
+    const url = `${HISTORY_URL}?symbol=${encodeURIComponent(sym)}&days=${encodeURIComponent(days)}`;
     fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } })
       .then((r) => {
         if (!r.ok) return r.json().then((b) => Promise.reject(new Error(b.error || r.statusText)));
         return r.json();
       })
       .then((res) => {
-        setHistoryBySymbol((prev) => ({ ...prev, [sym]: res }));
+        const data = Array.isArray(res?.data) ? res.data : [];
+        setHistoryBySymbol((prev) => ({ ...prev, [sym]: { range, data } }));
         setHistoryError(null);
       })
       .catch((err) => {
@@ -127,7 +145,7 @@ export default function StockServicePage() {
         setHistoryError(err.message || 'Failed to load history');
       })
       .finally(() => setHistoryLoading((prev) => (prev === sym ? null : prev)));
-  }, [expandedSymbol]);
+  }, [expandedSymbol, historyRange, historyBySymbol]);
 
   const getChangeIndicator = (symbol, currentPrice) => {
     if (currentPrice == null) return null;
@@ -262,6 +280,7 @@ export default function StockServicePage() {
                     {watchlist.symbols.map((row) => {
                       const change = getChangeIndicator(row.symbol, row.price);
                       const isExpanded = expandedSymbol === row.symbol;
+                      const historyEntry = historyBySymbol[row.symbol];
                       return (
                         <React.Fragment key={row.symbol}>
                           <tr
@@ -313,25 +332,58 @@ export default function StockServicePage() {
                                   <span className="stock-service-history-title">
                                     Historical data – {row.symbol}
                                   </span>
+                                  <div
+                                    className="stock-service-history-range-toggle"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {[
+                                      { key: '7d', label: '7d' },
+                                      { key: '1m', label: '1m' },
+                                      { key: '3m', label: '3m' },
+                                      { key: '1y', label: '1y' },
+                                    ].map((opt) => (
+                                      <button
+                                        key={opt.key}
+                                        type="button"
+                                        className={
+                                          historyRange === opt.key
+                                            ? 'stock-service-history-range-btn active'
+                                            : 'stock-service-history-range-btn'
+                                        }
+                                        aria-pressed={historyRange === opt.key}
+                                        onClick={() => setHistoryRange(opt.key)}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="stock-service-history-today">
+                                  <div className="stock-service-history-metric">
+                                    <span className="label">Today</span>
+                                  </div>
+                                  <div className="stock-service-history-chart-wrap today">
+                                    {renderSparkline(row.symbol)}
+                                  </div>
                                 </div>
                                 {historyLoading === row.symbol && (
                                   <p className="stock-service-history-empty">Loading from IBKR…</p>
                                 )}
-                                {!historyLoading && historyError && historyBySymbol[row.symbol] === null && (
+                                {!historyLoading && historyError && historyEntry === null && (
                                   <p className="stock-service-history-empty stock-service-wl-error">{historyError}</p>
                                 )}
-                                {!historyLoading && historyBySymbol[row.symbol]?.data?.length > 0 && (
+                                {!historyLoading && historyEntry?.data?.length > 0 && (
                                   <div className="stock-service-history-layout">
                                     {(() => {
-                                      const bars = historyBySymbol[row.symbol].data;
+                                      const bars = historyEntry.data;
                                       const first = bars[0];
                                       const last = bars[bars.length - 1];
                                       const start = Number(first.close ?? first.c ?? 0);
                                       const end = Number(last.close ?? last.c ?? 0);
                                       const abs = end - start;
                                       const pct = start ? (abs / start) * 100 : 0;
-                                      const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? 0)));
-                                      const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? 0)));
+                                      const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? b.o ?? b.close ?? b.c ?? 0)));
+                                      const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? b.o ?? b.close ?? b.c ?? 0)));
                                       const startDate = new Date(Number(first.t) * 1000);
                                       const endDate = new Date(Number(last.t) * 1000);
                                       const fmtDate = (d) =>
