@@ -127,61 +127,63 @@ export default function StockServicePage() {
                   <span className="stock-service-watchlist-provider">{watchlist.provider}</span>
                 )}
               </div>
-              <table className="stock-service-watchlist-table" aria-label="Watchlist prices">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Name</th>
-                    <th>Price</th>
-                    <th>Change</th>
-                    <th>Currency</th>
-                    <th>Updated</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {watchlist.symbols.map((row) => {
-                    const change = getChangeIndicator(row.symbol, row.price);
-                    return (
-                      <tr key={row.symbol}>
-                        <td className="stock-service-wl-symbol">{row.symbol}</td>
-                        <td className="stock-service-wl-name">{SYMBOL_SHORT_NAMES[row.symbol] || row.symbol}</td>
-                        <td className="stock-service-wl-price">
-                          {row.price != null
-                            ? Number(row.price).toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 4,
-                              })
-                            : '—'}
-                        </td>
-                        <td className="stock-service-wl-change">
-                          {change === 'up' && <span className="stock-service-change-up" title="Up since last run">↑</span>}
-                          {change === 'down' && <span className="stock-service-change-down" title="Down since last run">↓</span>}
-                          {change === 'unchanged' && <span className="stock-service-change-unchanged" title="Unchanged">—</span>}
-                          {change === null && <span>—</span>}
-                        </td>
-                        <td>{row.currency || '—'}</td>
-                        <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
-                        <td>
-                          {row.error ? (
-                            row.error.includes('pre-flight or stream not ready') ? (
-                              <span className="stock-service-wl-pending" title={row.error}>
-                                Pending
-                              </span>
+              <div className="stock-service-table-wrap">
+                <table className="stock-service-watchlist-table" aria-label="Watchlist prices">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Name</th>
+                      <th className="stock-service-th-number">Price</th>
+                      <th className="stock-service-th-center">Change</th>
+                      <th>Currency</th>
+                      <th>Updated</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {watchlist.symbols.map((row) => {
+                      const change = getChangeIndicator(row.symbol, row.price);
+                      return (
+                        <tr key={row.symbol}>
+                          <td className="stock-service-wl-symbol">{row.symbol}</td>
+                          <td className="stock-service-wl-name">{SYMBOL_SHORT_NAMES[row.symbol] || row.symbol}</td>
+                          <td className="stock-service-wl-price stock-service-td-number">
+                            {row.price != null
+                              ? Number(row.price).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 4,
+                                })
+                              : '—'}
+                          </td>
+                          <td className="stock-service-wl-change stock-service-td-center">
+                            {change === 'up' && <span className="stock-service-change-up" title="Up since last run">↑</span>}
+                            {change === 'down' && <span className="stock-service-change-down" title="Down since last run">↓</span>}
+                            {change === 'unchanged' && <span className="stock-service-change-unchanged" title="Unchanged">—</span>}
+                            {change === null && <span>—</span>}
+                          </td>
+                          <td>{row.currency || '—'}</td>
+                          <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
+                          <td>
+                            {row.error ? (
+                              row.error.includes('pre-flight or stream not ready') ? (
+                                <span className="stock-service-wl-pending" title={row.error}>
+                                  Pending
+                                </span>
+                              ) : (
+                                <span className="stock-service-wl-error" title={row.error}>
+                                  {row.error}
+                                </span>
+                              )
                             ) : (
-                              <span className="stock-service-wl-error" title={row.error}>
-                                {row.error}
-                              </span>
-                            )
-                          ) : (
-                            <span className="stock-service-wl-ok">OK</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                              <span className="stock-service-wl-ok">OK</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
           {!watchlistLoading && (!watchlist || !watchlist.symbols?.length) && !watchlistError && (
