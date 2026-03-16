@@ -37,10 +37,17 @@ trap "rm -f $COOKIE_JAR" EXIT
 AUTH_URL="https://www.lianel.se/auth/realms/lianel/protocol/openid-connect/auth?client_id=grafana-client&redirect_uri=https%3A%2F%2Fmonitoring.lianel.se%2Flogin%2Fgeneric_oauth&response_type=code&scope=openid"
 
 echo "2.1 GET login page (save cookies)..."
-GET_CODE=$(curl -s -k -o /tmp/e2e_login.html -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "$AUTH_URL" -L)
-echo "    HTTP $GET_CODE"
+GET_CODE=""
+for i in $(seq 1 12); do
+  GET_CODE=$(curl -s -k -o /tmp/e2e_login.html -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "$AUTH_URL" -L)
+  echo "    attempt $i: HTTP $GET_CODE"
+  if [ "$GET_CODE" = "200" ]; then
+    break
+  fi
+  sleep 5
+done
 if [ "$GET_CODE" != "200" ]; then
-  echo -e "    ${RED}FAIL: expected 200${NC}"
+  echo -e "    ${RED}FAIL: expected 200 (Keycloak/oauth2-proxy/nginx may be restarting)${NC}"
   FAILED=1
 else
   echo -e "    ${GREEN}OK${NC}"
