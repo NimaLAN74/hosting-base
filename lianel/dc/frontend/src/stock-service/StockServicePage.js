@@ -142,7 +142,7 @@ export default function StockServicePage() {
   const getSessionPoints = (symbol) => sessionChartPointsRef.current[symbol] || [];
 
   /** Render chart from IBKR history bars (array of { t, open, high, low, close }). */
-  const renderHistoryChart = (bars) => {
+  const renderHistoryChart = (bars, isUp) => {
     if (!bars?.length) return <p className="stock-service-history-empty">No historical data.</p>;
     const pts = bars.map((b) => ({ ts: Number(b.t) * 1000, price: Number(b.close) }));
     if (pts.length === 1) {
@@ -156,19 +156,32 @@ export default function StockServicePage() {
     const min = Math.min(...values);
     const max = Math.max(...values);
     const range = max - min || 1;
-    const width = 260;
-    const height = 80;
+    const width = 320;
+    const height = 120;
     const stepX = pts.length > 1 ? width / (pts.length - 1) : width;
     const path = pts
       .map((p, idx) => {
         const x = idx * stepX;
-        const y = height - ((p.price - min) / range) * (height - 10) - 5;
+        const y = height - ((p.price - min) / range) * (height - 20) - 10;
         return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
       })
       .join(' ');
+    const color = isUp ? '#198754' : '#dc3545';
     return (
       <svg className="stock-service-history-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="7-day history">
-        <path d={path} fill="none" stroke="#0d6efd" strokeWidth="2" />
+        <defs>
+          <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width={width} height={height} fill="#f8f9fa" />
+        <path d={path} fill="none" stroke={color} strokeWidth="2" />
+        <path
+          d={`${path} L${width},${height} L0,${height} Z`}
+          fill="url(#historyGradient)"
+          stroke="none"
+        />
       </svg>
     );
   };
@@ -307,7 +320,60 @@ export default function StockServicePage() {
                                 {!historyLoading && historyError && historyBySymbol[row.symbol] === null && (
                                   <p className="stock-service-history-empty stock-service-wl-error">{historyError}</p>
                                 )}
-                                {!historyLoading && historyBySymbol[row.symbol]?.data?.length > 0 && renderHistoryChart(historyBySymbol[row.symbol].data)}
+                                {!historyLoading && historyBySymbol[row.symbol]?.data?.length > 0 && (
+                                  <div className="stock-service-history-layout">
+                                    {(() => {
+                                      const bars = historyBySymbol[row.symbol].data;
+                                      const first = bars[0];
+                                      const last = bars[bars.length - 1];
+                                      const start = Number(first.close ?? first.c ?? 0);
+                                      const end = Number(last.close ?? last.c ?? 0);
+                                      const abs = end - start;
+                                      const pct = start ? (abs / start) * 100 : 0;
+                                      const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? 0)));
+                                      const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? 0)));
+                                      const startDate = new Date(Number(first.t) * 1000);
+                                      const endDate = new Date(Number(last.t) * 1000);
+                                      const fmtDate = (d) =>
+                                        Number.isNaN(d.getTime())
+                                          ? '—'
+                                          : new Intl.DateTimeFormat('sv-SE', {
+                                              month: '2-digit',
+                                              day: '2-digit',
+                                            }).format(d);
+                                      const up = abs >= 0;
+                                      return (
+                                        <>
+                                          <div className="stock-service-history-summary">
+                                            <div className="stock-service-history-metric">
+                                              <span className="label">7d change</span>
+                                              <span className={up ? 'value up' : 'value down'}>
+                                                {abs >= 0 ? '+' : ''}
+                                                {abs.toFixed(2)} ({abs >= 0 ? '+' : ''}
+                                                {pct.toFixed(1)}%)
+                                              </span>
+                                            </div>
+                                            <div className="stock-service-history-metric">
+                                              <span className="label">High / Low</span>
+                                              <span className="value">
+                                                {high.toFixed(2)} / {low.toFixed(2)}
+                                              </span>
+                                            </div>
+                                            <div className="stock-service-history-metric">
+                                              <span className="label">Period</span>
+                                              <span className="value">
+                                                {fmtDate(startDate)} – {fmtDate(endDate)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div className="stock-service-history-chart-wrap">
+                                            {renderHistoryChart(bars, up)}
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                )}
                                 {!historyLoading && (!historyBySymbol[row.symbol]?.data?.length) && historyBySymbol[row.symbol] !== null && (
                                   <p className="stock-service-history-empty">No bars returned.</p>
                                 )}

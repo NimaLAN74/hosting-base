@@ -348,7 +348,7 @@
 
 .stock-service-history-chart {
   width: 100%;
-  max-width: 360px;
+  max-width: 420px;
   height: auto;
   display: block;
 }
@@ -357,4 +357,46 @@
 .stock-service-history-single {
   font-size: 0.9rem;
   color: #555;
+}
+
+.stock-service-history-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.stock-service-history-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 200px;
+}
+
+.stock-service-history-metric .label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stock-service-history-metric .value {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-service-history-metric .value.up {
+  color: #198754;
+  font-weight: 600;
+}
+
+.stock-service-history-metric .value.down {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.stock-service-history-chart-wrap {
+  flex: 1;
+  min-width: 260px;
 }
