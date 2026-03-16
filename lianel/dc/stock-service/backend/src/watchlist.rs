@@ -375,7 +375,12 @@ pub async fn refresh_from_ibkr(
                     .is_some()
             });
             if !has_any_price && !arr.is_empty() {
-                tracing::debug!("Watchlist snapshot pre-flight (no prices yet); retrying after 3s");
+                if let Some(first) = arr.first().and_then(|o| o.as_object()) {
+                    let keys: Vec<String> = first.keys().cloned().collect();
+                    tracing::info!("Watchlist snapshot pre-flight (no field 31); first item keys: {:?}; retrying after 3s", keys);
+                } else {
+                    tracing::info!("Watchlist snapshot pre-flight (no prices yet); retrying after 3s");
+                }
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 if let Ok(r2) = do_snapshot().await {
                     if r2.status().is_success() {
