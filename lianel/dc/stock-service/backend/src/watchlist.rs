@@ -305,14 +305,17 @@ pub async fn refresh_from_ibkr(
             return;
         }
     }
-    let req = http_client.get(&url).header("Cookie", cookie).header("User-Agent", "Console");
-    let req = if let Some(ref a) = auth {
-        req.header("Authorization", a.as_str())
-    } else {
-        req
+    let do_snapshot = || {
+        let req = http_client.get(&url).header("Cookie", cookie.clone()).header("User-Agent", "Console");
+        let req = if let Some(ref a) = auth {
+            req.header("Authorization", a.as_str())
+        } else {
+            req
+        };
+        req.send()
     };
-    let resp = match req.send().await
-    {
+
+    let resp = match do_snapshot().await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Watchlist IBKR snapshot request failed: {}", e);
@@ -337,7 +340,7 @@ pub async fn refresh_from_ibkr(
     };
 
     let status = resp.status();
-    let body_text = match resp.text().await {
+    let mut body_text = match resp.text().await {
         Ok(t) => t,
         Err(e) => {
             tracing::warn!("Watchlist IBKR snapshot body read failed (status {}): {}", status, e);
@@ -360,6 +363,30 @@ pub async fn refresh_from_ibkr(
             return;
         }
     };
+
+    // IBKR: "A pre-flight request must be made prior to ever receiving data. For some fields, it may take more than a few moments."
+    // If first snapshot returned 200 and array but no prices (31), retry once after short delay.
+    if status.is_success() {
+        if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(body_text.trim()) {
+            let has_any_price = arr.iter().any(|item| {
+                item.get("31")
+                    .and_then(|v| v.as_f64())
+                    .or_else(|| item.get("31").and_then(|v| v.as_str()).and_then(|s| s.replace(',', "").parse::<f64>().ok()))
+                    .is_some()
+            });
+            if !has_any_price && !arr.is_empty() {
+                tracing::debug!("Watchlist snapshot pre-flight (no prices yet); retrying after 3s");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                if let Ok(r2) = do_snapshot().await {
+                    if r2.status().is_success() {
+                        if let Ok(t2) = r2.text().await {
+                            body_text = t2;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let body_parsed: Result<serde_json::Value, _> = serde_json::from_str(body_text.trim());
     let mut next = WatchlistCache::default();
