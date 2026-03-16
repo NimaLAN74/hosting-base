@@ -346,9 +346,62 @@
   color: #222;
 }
 
+.stock-service-chart-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  margin: 0.25rem 0;
+}
+
+.stock-service-chart-svg {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  display: block;
+}
+
+.stock-service-chart-bg {
+  fill: #fafafa;
+}
+
+.stock-service-chart-grid {
+  stroke: #e5e7eb;
+  stroke-width: 0.5;
+}
+
+.stock-service-chart-axis {
+  font-size: 11px;
+  fill: #6b7280;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.stock-service-chart-area {
+  stroke: none;
+}
+
+.stock-service-chart-line {
+  vector-effect: non-scaling-stroke;
+}
+
+.stock-service-chart-legend {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin: 0 0 0.25rem 0;
+}
+
+.stock-service-chart-bar {
+  cursor: pointer;
+}
+
+.stock-service-chart-tooltip text {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
 .stock-service-history-chart {
   width: 100%;
-  max-width: 420px;
+  max-width: 560px;
   height: auto;
   display: block;
 }

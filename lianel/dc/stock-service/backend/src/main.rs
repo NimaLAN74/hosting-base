@@ -31,10 +31,16 @@ async fn main() -> anyhow::Result<()> {
     let watchlist_cache = std::sync::Arc::new(tokio::sync::RwLock::new(
         watchlist::WatchlistCache::default(),
     ));
+    let redis = if let Some(ref url) = config.redis_url {
+        lianel_stock_service::today_cache::connect_redis(url).await
+    } else {
+        None
+    };
     watchlist::spawn_watchlist_ticker(
         watchlist_cache.clone(),
         ibkr_client.clone(),
         config.ibkr_api_base_url.clone(),
+        redis.clone(),
     );
 
     let state = AppState {
@@ -42,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         config: Some(config),
         ibkr_client,
         watchlist_cache,
+        redis,
     };
 
     let app = create_router(state);

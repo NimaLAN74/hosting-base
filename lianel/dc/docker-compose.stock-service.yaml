@@ -25,6 +25,8 @@ services:
       IBKR_INSECURE_SKIP_TLS_VERIFY: ${IBKR_INSECURE_SKIP_TLS_VERIFY:-false}
       IBKR_GATEWAY_SESSION_COOKIE: ${IBKR_GATEWAY_SESSION_COOKIE:-}
       IBKR_GATEWAY_SESSION_COOKIE_FILE: ${IBKR_GATEWAY_SESSION_COOKIE_FILE:-/app/ibkr-cookie/cookie.txt}
+      # Optional: cache today's intraday points (set REDIS_URL so restarts don't lose today's chart)
+      REDIS_URL: ${REDIS_URL:-}
       RUST_LOG: info
     volumes:
       - ./stock-service-ibkr:/app/ibkr-conf:ro

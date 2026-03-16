@@ -8,7 +8,17 @@ import './StockServicePage.css';
 
 const WATCHLIST_URL = '/api/v1/stock-service/watchlist';
 const HISTORY_URL = '/api/v1/stock-service/history';
+const TODAY_URL = '/api/v1/stock-service/today';
 const WATCHLIST_REFRESH_MS = 60_000;
+
+const CHART_WIDTH = 520;
+const CHART_HEIGHT = 200;
+const PAD_LEFT = 44;
+const PAD_RIGHT = 12;
+const PAD_TOP = 12;
+const PAD_BOTTOM = 28;
+const PLOT_W = CHART_WIDTH - PAD_LEFT - PAD_RIGHT;
+const PLOT_H = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM;
 
 const SYMBOL_SHORT_NAMES = {
   AAPL: 'Apple',
@@ -50,6 +60,8 @@ export default function StockServicePage() {
   const [historyLoading, setHistoryLoading] = useState(null);
   const [historyError, setHistoryError] = useState(null);
   const [historyRange, setHistoryRange] = useState('7d'); // '7d' | '1m' | '3m' | '1y'
+  const [todayBySymbol, setTodayBySymbol] = useState({});
+  const [chartHover, setChartHover] = useState({ symbol: null, barIndex: null });
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -149,6 +161,19 @@ export default function StockServicePage() {
       .finally(() => setHistoryLoading((prev) => (prev === sym ? null : prev)));
   }, [expandedSymbol, historyRange, historyBySymbol]);
 
+  // When a row is expanded, fetch today's cached points from backend (Redis) for that symbol.
+  useEffect(() => {
+    if (!expandedSymbol) return;
+    const sym = expandedSymbol;
+    fetch(`${TODAY_URL}?symbol=${encodeURIComponent(sym)}`, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((res) => {
+        const data = Array.isArray(res?.data) ? res.data : [];
+        setTodayBySymbol((prev) => ({ ...prev, [sym]: data }));
+      })
+      .catch(() => setTodayBySymbol((prev) => ({ ...prev, [sym]: [] })));
+  }, [expandedSymbol]);
+
   const getChangeIndicator = (symbol, currentPrice) => {
     if (currentPrice == null) return null;
     const prev = previousPricesRef.current[symbol];
@@ -161,54 +186,123 @@ export default function StockServicePage() {
 
   const getSessionPoints = (symbol) => sessionChartPointsRef.current[symbol] || [];
 
-  /** Render chart from IBKR history bars (array of { t, open, high, low, close }). */
-  const renderHistoryChart = (bars, isUp) => {
+  /** Merged today points: Redis/cached (todayBySymbol) + current session (sessionChartPointsRef), sorted by ts. */
+  const getMergedTodayPoints = (symbol) => {
+    const cached = todayBySymbol[symbol] || [];
+    const session = getSessionPoints(symbol);
+    const cachedPts = cached.map((p) => ({ ts: Number(p.t) * 1000, price: Number(p.price) }));
+    const sessionPts = session.map((p) => ({ ts: p.ts, price: p.price }));
+    const byTs = {};
+    [...cachedPts, ...sessionPts].forEach((p) => {
+      if (!byTs[p.ts] || byTs[p.ts].price !== p.price) byTs[p.ts] = p;
+    });
+    return Object.values(byTs).sort((a, b) => a.ts - b.ts);
+  };
+
+  /** Long-period chart: one vertical bar per day (low→high), filled rect, green/red by close vs open. Tooltip shows O H L C. */
+  const renderHistoryChart = (bars, isUp, symbol) => {
     if (!bars?.length) return <p className="stock-service-history-empty">No historical data.</p>;
-    const pts = bars.map((b) => ({ ts: Number(b.t) * 1000, price: Number(b.close) }));
-    if (pts.length === 1) {
-      return (
-        <div className="stock-service-history-single">
-          <span>Close: {pts[0].price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
-        </div>
-      );
-    }
-    const values = pts.map((p) => p.price);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    const barsNorm = bars.map((b) => ({
+      t: Number(b.t) * 1000,
+      o: Number(b.open ?? b.o ?? b.close ?? b.c ?? 0),
+      h: Number(b.high ?? b.h ?? b.close ?? b.c ?? 0),
+      l: Number(b.low ?? b.l ?? b.open ?? b.o ?? b.close ?? b.c ?? 0),
+      c: Number(b.close ?? b.c ?? 0),
+    }));
+    const allPrices = barsNorm.flatMap((b) => [b.l, b.h]);
+    const min = Math.min(...allPrices);
+    const max = Math.max(...allPrices);
     const range = max - min || 1;
-    const width = 320;
-    const height = 120;
-    const stepX = pts.length > 1 ? width / (pts.length - 1) : width;
-    const path = pts
-      .map((p, idx) => {
-        const x = idx * stepX;
-        const y = height - ((p.price - min) / range) * (height - 20) - 10;
-        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
-      })
-      .join(' ');
-    const color = isUp ? '#198754' : '#dc3545';
+    const n = barsNorm.length;
+    const stepX = n > 1 ? PLOT_W / (n - 1) : PLOT_W;
+    const barW = Math.max(2, stepX * 0.6);
+    const toY = (price) => PAD_TOP + PLOT_H - ((price - min) / range) * PLOT_H;
+
+    const gridLines = [];
+    for (let i = 0; i <= 4; i++) {
+      const y = PAD_TOP + (PLOT_H * i) / 4;
+      gridLines.push(<line key={`h${i}`} x1={PAD_LEFT} y1={y} x2={PAD_LEFT + PLOT_W} y2={y} className="stock-service-chart-grid" />);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const x = PAD_LEFT + (PLOT_W * i) / 4;
+      gridLines.push(<line key={`v${i}`} x1={x} y1={PAD_TOP} x2={x} y2={PAD_TOP + PLOT_H} className="stock-service-chart-grid" />);
+    }
+    const yLabels = [max, min + range * 0.75, min + range * 0.5, min + range * 0.25, min].map((v, i) => (
+      <text key={i} x={PAD_LEFT - 6} y={PAD_TOP + (PLOT_H * i) / 4 + 4} className="stock-service-chart-axis" textAnchor="end">{v.toFixed(2)}</text>
+    ));
+    const stepLabel = Math.max(1, Math.floor(n / 5));
+    const xLabels = barsNorm
+      .map((b, idx) => (idx % stepLabel === 0 || idx === n - 1 ? { b, idx } : null))
+      .filter(Boolean)
+      .map(({ b, idx }) => (
+        <text key={idx} x={PAD_LEFT + idx * stepX} y={CHART_HEIGHT - 6} className="stock-service-chart-axis" textAnchor="middle">
+          {new Date(b.t).toLocaleDateString('sv-SE', { month: 'short', day: 'numeric' })}
+        </text>
+      ));
+
+    const barRects = barsNorm.map((b, idx) => {
+      const x = PAD_LEFT + idx * stepX - barW / 2;
+      const yH = toY(b.h);
+      const yL = toY(b.l);
+      const up = b.c >= b.o;
+      const color = up ? '#0d9488' : '#dc2626';
+      const dateStr = new Date(b.t).toLocaleDateString('sv-SE', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      const isHover = chartHover.symbol === symbol && chartHover.barIndex === idx;
+      return (
+        <g
+          key={idx}
+          onMouseEnter={() => setChartHover({ symbol, barIndex: idx })}
+          onMouseLeave={() => setChartHover({ symbol: null, barIndex: null })}
+        >
+          <rect
+            x={x}
+            y={yH}
+            width={barW}
+            height={Math.max(1, yL - yH)}
+            fill={color}
+            stroke={isHover ? '#111' : 'none'}
+            strokeWidth={1}
+            className="stock-service-chart-bar"
+          />
+          {isHover && (
+            <g className="stock-service-chart-tooltip">
+              <rect x={PAD_LEFT + idx * stepX - 52} y={PAD_TOP} width={104} height={56} rx={4} fill="#1f2937" fillOpacity={0.95} />
+              <text x={PAD_LEFT + idx * stepX} y={PAD_TOP + 14} textAnchor="middle" fill="#fff" fontSize={10}>{dateStr}</text>
+              <text x={PAD_LEFT + idx * stepX} y={PAD_TOP + 28} textAnchor="middle" fill="#9ca3af" fontSize={9}>O {b.o.toFixed(2)}  H {b.h.toFixed(2)}</text>
+              <text x={PAD_LEFT + idx * stepX} y={PAD_TOP + 42} textAnchor="middle" fill="#9ca3af" fontSize={9}>L {b.l.toFixed(2)}  C {b.c.toFixed(2)}</text>
+            </g>
+          )}
+        </g>
+      );
+    });
+
     return (
-      <svg className="stock-service-history-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="7-day history">
-        <defs>
-          <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <rect x="0" y="0" width={width} height={height} fill="#f8f9fa" />
-        <path d={path} fill="none" stroke={color} strokeWidth="2" />
-        <path
-          d={`${path} L${width},${height} L0,${height} Z`}
-          fill="url(#historyGradient)"
-          stroke="none"
-        />
-      </svg>
+      <div className="stock-service-chart-card">
+        <p className="stock-service-chart-legend">Each bar = day range (low → high). Hover for O/H/L/C.</p>
+        <svg className="stock-service-chart-svg" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label="OHLC by day">
+          <rect x={0} y={0} width={CHART_WIDTH} height={CHART_HEIGHT} className="stock-service-chart-bg" />
+          {gridLines}
+          {yLabels}
+          {xLabels}
+          {barRects}
+        </svg>
+      </div>
     );
   };
 
-  const renderSparkline = (symbol) => {
-    const pts = getSessionPoints(symbol);
-    if (!pts.length) return <p className="stock-service-history-empty">No session history yet.</p>;
+  /** Today chart: merged Redis + session points, line + area, grid, axes. */
+  const renderTodayChart = (symbol) => {
+    const pts = getMergedTodayPoints(symbol);
+    const cached = todayBySymbol[symbol] || [];
+    const sessionOnly = cached.length === 0 && pts.length > 0;
+    if (!pts.length) {
+      return (
+        <p className="stock-service-history-empty">
+          No data for today yet. Live prices appear here after the next 60s refresh.
+          Set <code>REDIS_URL</code> on the server to cache today&apos;s prices across restarts.
+        </p>
+      );
+    }
     if (pts.length === 1) {
       return (
         <div className="stock-service-history-single">
@@ -220,20 +314,51 @@ export default function StockServicePage() {
     const min = Math.min(...values);
     const max = Math.max(...values);
     const range = max - min || 1;
-    const width = 260;
-    const height = 80;
-    const stepX = pts.length > 1 ? width / (pts.length - 1) : width;
-    const path = pts
-      .map((p, idx) => {
-        const x = idx * stepX;
-        const y = height - ((p.price - min) / range) * (height - 10) - 5;
-        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
-      })
-      .join(' ');
+    const n = pts.length;
+    const stepX = n > 1 ? PLOT_W / (n - 1) : PLOT_W;
+    const toY = (price) => PAD_TOP + PLOT_H - ((price - min) / range) * PLOT_H;
+    const pathLine = pts.map((p, idx) => `${idx === 0 ? 'M' : 'L'}${PAD_LEFT + idx * stepX},${toY(p.price)}`).join(' ');
+    const pathArea = `${pathLine} L${PAD_LEFT + (n - 1) * stepX},${PAD_TOP + PLOT_H} L${PAD_LEFT},${PAD_TOP + PLOT_H} Z`;
+
+    const gridLines = [];
+    for (let i = 0; i <= 4; i++) {
+      const y = PAD_TOP + (PLOT_H * i) / 4;
+      gridLines.push(<line key={`h${i}`} x1={PAD_LEFT} y1={y} x2={PAD_LEFT + PLOT_W} y2={y} className="stock-service-chart-grid" />);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const x = PAD_LEFT + (PLOT_W * i) / 4;
+      gridLines.push(<line key={`v${i}`} x1={x} y1={PAD_TOP} x2={x} y2={PAD_TOP + PLOT_H} className="stock-service-chart-grid" />);
+    }
+    const yLabels = [max, min + range * 0.75, min + range * 0.5, min + range * 0.25, min].map((v, i) => (
+      <text key={i} x={PAD_LEFT - 6} y={PAD_TOP + (PLOT_H * i) / 4 + 4} className="stock-service-chart-axis" textAnchor="end">{v.toFixed(2)}</text>
+    ));
+    const timeLabels = [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1].filter((i) => i >= 0 && i < n).map((i) => (
+      <text key={i} x={PAD_LEFT + i * stepX} y={CHART_HEIGHT - 6} className="stock-service-chart-axis" textAnchor="middle">
+        {new Date(pts[i].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', hour12: false })}
+      </text>
+    ));
+
+    const gradId = `todayGradient-${symbol}`;
     return (
-      <svg className="stock-service-history-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Session history for ${symbol}`}>
-        <path d={path} fill="none" stroke="#0d6efd" strokeWidth="2" />
-      </svg>
+      <div className="stock-service-chart-card">
+        <p className="stock-service-chart-legend">
+          {sessionOnly ? 'Today (live only; set REDIS_URL on server to cache across restarts)' : 'Today (cached + live)'}
+        </p>
+        <svg className="stock-service-chart-svg" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label="Today intraday">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0d9488" stopOpacity="0.2" />
+              <stop offset="100%" stopColor="#0d9488" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <rect x={0} y={0} width={CHART_WIDTH} height={CHART_HEIGHT} className="stock-service-chart-bg" />
+          {gridLines}
+          {yLabels}
+          {timeLabels}
+          <path d={pathArea} fill={`url(#${gradId})`} className="stock-service-chart-area" />
+          <path d={pathLine} fill="none" stroke="#0d9488" strokeWidth="2" className="stock-service-chart-line" />
+        </svg>
+      </div>
     );
   };
 
@@ -365,7 +490,7 @@ export default function StockServicePage() {
                                     <span className="label">Today</span>
                                   </div>
                                   <div className="stock-service-history-chart-wrap today">
-                                    {renderSparkline(row.symbol)}
+                                    {renderTodayChart(row.symbol)}
                                   </div>
                                 </div>
                                 {historyLoading === row.symbol && (
@@ -421,7 +546,7 @@ export default function StockServicePage() {
                                             </div>
                                           </div>
                                           <div className="stock-service-history-chart-wrap">
-                                            {renderHistoryChart(bars, up)}
+                                            {renderHistoryChart(bars, up, row.symbol)}
                                           </div>
                                         </>
                                       );
@@ -431,7 +556,7 @@ export default function StockServicePage() {
                                 {!historyLoading && (!historyBySymbol[row.symbol]?.data?.length) && historyBySymbol[row.symbol] !== null && (
                                   <p className="stock-service-history-empty">No bars returned.</p>
                                 )}
-                                {!historyLoading && historyBySymbol[row.symbol] === undefined && !historyError && renderSparkline(row.symbol)}
+                                {!historyLoading && historyBySymbol[row.symbol] === undefined && !historyError && renderTodayChart(row.symbol)}
                               </td>
                             </tr>
                           )}

@@ -22,6 +22,7 @@ pub struct AppState {
     pub config: Option<Arc<crate::config::AppConfig>>,
     pub ibkr_client: Option<Arc<IbkrOAuthClient>>,
     pub watchlist_cache: Arc<RwLock<watchlist::WatchlistCache>>,
+    pub redis: Option<redis::aio::ConnectionManager>,
 }
 
 #[derive(Clone)]
@@ -67,7 +68,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
         .route("/api/v1/watchlist", get(watchlist_handler))
-        .route("/api/v1/history", get(history_handler));
+        .route("/api/v1/history", get(history_handler))
+        .route("/api/v1/today", get(today_handler));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -174,6 +176,42 @@ struct HistoryQuery {
     symbol: String,
     #[serde(default)]
     days: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+struct TodayQuery {
+    symbol: String,
+}
+
+async fn today_handler(
+    State(state): State<AppState>,
+    Query(q): Query<TodayQuery>,
+) -> impl IntoResponse {
+    let symbol = q.symbol.trim();
+    if symbol.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "symbol required"})),
+        )
+            .into_response();
+    }
+    if watchlist::get_conid_for_symbol(symbol).is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "symbol not in watchlist"})),
+        )
+            .into_response();
+    }
+    let points = crate::today_cache::get_today(state.redis.as_ref(), symbol).await;
+    let data: Vec<serde_json::Value> = points
+        .into_iter()
+        .map(|(t, price)| serde_json::json!({ "t": t, "price": price }))
+        .collect();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "symbol": symbol, "data": data })),
+    )
+        .into_response()
 }
 
 async fn history_handler(

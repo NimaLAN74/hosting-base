@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub ibkr_gateway_session_cookie: Option<String>,
     /// Optional path to file containing the Gateway session cookie; read on each use so an external updater can refresh it without restart.
     pub ibkr_gateway_session_cookie_file: Option<String>,
+    /// Optional Redis URL for caching today's intraday points (e.g. redis://redis:6379/1). When set, watchlist prices are pushed and GET /today returns cached points.
+    pub redis_url: Option<String>,
 }
 
 impl AppConfig {
@@ -111,6 +113,10 @@ impl AppConfig {
             ibkr_password: env::var("IBKR_PASSWORD").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             ibkr_gateway_session_cookie: read_gateway_session_cookie(),
             ibkr_gateway_session_cookie_file: env::var("IBKR_GATEWAY_SESSION_COOKIE_FILE")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            redis_url: env::var("REDIS_URL")
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),

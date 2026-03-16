@@ -27,6 +27,9 @@ sha2 = "0.10"
 percent-encoding = "2.3"
 hex = "0.4"
 openssl = "0.10"
+urlencoding = "2.0"
+# Optional: cache today's intraday points so restarts don't lose them (set REDIS_URL to enable)
+redis = { version = "0.27", features = ["connection-manager", "tokio-comp"] }
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

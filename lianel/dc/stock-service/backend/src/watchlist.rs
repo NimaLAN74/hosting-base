@@ -1,10 +1,11 @@
 //! Watchlist: fixed list of symbols, current price from IBKR only. Refreshed every 60s via /iserver/marketdata/snapshot.
 
 use crate::ibkr::IbkrOAuthClient;
+use crate::today_cache;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing;
 
@@ -36,6 +37,72 @@ fn default_symbol_conids() -> HashMap<String, u64> {
 /// Conid for a watchlist symbol (for history endpoint). Returns None if symbol not in default list.
 pub fn get_conid_for_symbol(symbol: &str) -> Option<u64> {
     default_symbol_conids().get(symbol).copied()
+}
+
+/// Resolve symbols to conids via IBKR GET /trsrv/stocks (no session required). Returns map symbol -> conid; use default_symbol_conids() for any missing.
+async fn fetch_conids_from_trsrv(base_url: &str, symbols: &[&str]) -> HashMap<String, u64> {
+    let symbols_param = symbols.join(",");
+    let url = format!(
+        "{}/trsrv/stocks?symbols={}",
+        base_url.trim_end_matches('/'),
+        urlencoding::encode(&symbols_param)
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return default_symbol_conids(),
+    };
+    let resp = match client.get(&url).header("User-Agent", "Console").send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("trsrv/stocks request failed: {}", e);
+            return default_symbol_conids();
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::debug!("trsrv/stocks returned {}", resp.status());
+        return default_symbol_conids();
+    }
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(_) => return default_symbol_conids(),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => return default_symbol_conids(),
+    };
+    let mut out = default_symbol_conids();
+    // Response can be object with symbol keys -> array of {conid}, or array of {symbol, conid}
+    if let Some(obj) = parsed.as_object() {
+        for sym in symbols {
+            let key = *sym;
+            if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
+                if let Some(first) = arr.first() {
+                    if let Some(c) = first.get("conid").and_then(|v| v.as_u64()).or_else(|| {
+                        first.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
+                    }) {
+                        out.insert(key.to_string(), c);
+                    }
+                }
+            }
+        }
+    } else if let Some(arr) = parsed.as_array() {
+        for item in arr {
+            if let (Some(sym), Some(c)) = (
+                item.get("symbol").and_then(|v| v.as_str()),
+                item.get("conid").and_then(|v| v.as_u64()).or_else(|| {
+                    item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
+                }),
+            ) {
+                if symbols.contains(&sym) {
+                    out.insert(sym.to_string(), c);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -98,12 +165,15 @@ fn iso_ts() -> String {
 }
 
 /// Refresh watchlist from IBKR only. If ibkr_client is None, all quotes get error "IBKR not configured".
+/// When redis is Some, each symbol's price is pushed to Redis for today's intraday cache.
 pub async fn refresh_from_ibkr(
     cache: Arc<RwLock<WatchlistCache>>,
     ibkr_client: Option<Arc<IbkrOAuthClient>>,
     base_url: &str,
+    redis: Option<&redis::aio::ConnectionManager>,
 ) {
-    let conids_map = default_symbol_conids();
+    // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols)
+    let conids_map = fetch_conids_from_trsrv(base_url, DEFAULT_SYMBOLS).await;
     let conids_list: Vec<u64> = DEFAULT_SYMBOLS
         .iter()
         .filter_map(|s| conids_map.get(*s).copied())
@@ -500,6 +570,18 @@ pub async fn refresh_from_ibkr(
         }
     }
 
+    if let Some(conn) = redis {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        for (symbol, q) in &next.quotes {
+            if let Some(price) = q.price {
+                today_cache::push_price(Some(conn), symbol, now_secs, price).await;
+            }
+        }
+    }
+
     let mut g = cache.write().await;
     *g = next;
 }
@@ -509,12 +591,19 @@ pub fn spawn_watchlist_ticker(
     cache: Arc<RwLock<WatchlistCache>>,
     ibkr_client: Option<Arc<IbkrOAuthClient>>,
     base_url: String,
+    redis: Option<redis::aio::ConnectionManager>,
 ) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECS));
         interval.tick().await;
         loop {
-            refresh_from_ibkr(Arc::clone(&cache), ibkr_client.clone(), &base_url).await;
+            refresh_from_ibkr(
+                Arc::clone(&cache),
+                ibkr_client.clone(),
+                &base_url,
+                redis.as_ref(),
+            )
+            .await;
             interval.tick().await;
         }
     });
