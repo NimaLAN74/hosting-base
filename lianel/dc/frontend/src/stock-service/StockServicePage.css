@@ -212,6 +212,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+.stock-service-wl-name {
+  color: #1a1a1a;
+}
+
+.stock-service-wl-updated {
+  font-variant-numeric: tabular-nums;
+  color: #444;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .stock-service-wl-ok {
   color: #0f5132;
   font-size: 0.9rem;

@@ -9,11 +9,40 @@ import './StockServicePage.css';
 const WATCHLIST_URL = '/api/v1/stock-service/watchlist';
 const WATCHLIST_REFRESH_MS = 60_000;
 
+const SYMBOL_SHORT_NAMES = {
+  AAPL: 'Apple',
+  MSFT: 'Microsoft',
+  GOOGL: 'Alphabet',
+  AMZN: 'Amazon',
+  META: 'Meta',
+  NVDA: 'NVIDIA',
+  TSLA: 'Tesla',
+  JPM: 'JPMorgan',
+  V: 'Visa',
+  JNJ: 'Johnson & Johnson',
+};
+
+const formatSvDateTime24h = (isoLike) => {
+  if (!isoLike) return '—';
+  const d = new Date(isoLike);
+  if (Number.isNaN(d.getTime())) return String(isoLike);
+  return new Intl.DateTimeFormat('sv-SE', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(d);
+};
+
 export default function StockServicePage() {
   const [watchlist, setWatchlist] = useState(null);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
   const [watchlistError, setWatchlistError] = useState(null);
   const previousPricesRef = useRef({});
+  const lastPricesRef = useRef({});
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -55,7 +84,8 @@ export default function StockServicePage() {
       watchlist.symbols.forEach((s) => {
         if (s.price != null) next[s.symbol] = Number(s.price);
       });
-      previousPricesRef.current = next;
+      previousPricesRef.current = lastPricesRef.current;
+      lastPricesRef.current = next;
     }
   }, [watchlist]);
 
@@ -92,7 +122,7 @@ export default function StockServicePage() {
           {!watchlistLoading && watchlist && watchlist.symbols && watchlist.symbols.length > 0 && (
             <>
               <div className="stock-service-watchlist-meta">
-                <span>As of: {watchlist.as_of || '—'}</span>
+                <span>As of: {formatSvDateTime24h(watchlist.as_of)}</span>
                 {watchlist.provider && (
                   <span className="stock-service-watchlist-provider">{watchlist.provider}</span>
                 )}
@@ -101,9 +131,11 @@ export default function StockServicePage() {
                 <thead>
                   <tr>
                     <th>Symbol</th>
+                    <th>Name</th>
                     <th>Price</th>
                     <th>Change</th>
                     <th>Currency</th>
+                    <th>Updated</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -113,6 +145,7 @@ export default function StockServicePage() {
                     return (
                       <tr key={row.symbol}>
                         <td className="stock-service-wl-symbol">{row.symbol}</td>
+                        <td className="stock-service-wl-name">{SYMBOL_SHORT_NAMES[row.symbol] || row.symbol}</td>
                         <td className="stock-service-wl-price">
                           {row.price != null
                             ? Number(row.price).toLocaleString(undefined, {
@@ -128,6 +161,7 @@ export default function StockServicePage() {
                           {change === null && <span>—</span>}
                         </td>
                         <td>{row.currency || '—'}</td>
+                        <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
                         <td>
                           {row.error ? (
                             row.error.includes('pre-flight or stream not ready') ? (
