@@ -211,12 +211,17 @@ async fn history_handler(
     let days = q.days.unwrap_or(7).min(365);
     let period = format!("{}d", days);
     match client.fetch_history(conid, &period, "1d").await {
-        Ok(bars) => (StatusCode::OK, Json(serde_json::json!({ "symbol": symbol, "data": bars }))).into_response(),
+        Ok(bars) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "symbol": symbol, "data": bars, "provider": "IBKR" })),
+        )
+            .into_response(),
         Err(e) => {
-            tracing::warn!("IBKR history failed for {}: {}", symbol, e);
+            let msg = e.to_string();
+            tracing::warn!("IBKR history failed for {}: {}", symbol, msg);
             (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": e.to_string()})),
+                StatusCode::OK,
+                Json(serde_json::json!({ "symbol": symbol, "data": [], "provider": "IBKR", "error": msg })),
             )
                 .into_response()
         }

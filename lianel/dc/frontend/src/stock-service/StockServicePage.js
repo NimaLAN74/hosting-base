@@ -131,14 +131,16 @@ export default function StockServicePage() {
     setHistoryError(null);
     const url = `${HISTORY_URL}?symbol=${encodeURIComponent(sym)}&days=${encodeURIComponent(days)}`;
     fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } })
-      .then((r) => {
-        if (!r.ok) return r.json().then((b) => Promise.reject(new Error(b.error || r.statusText)));
-        return r.json();
-      })
+      .then((r) => r.json())
       .then((res) => {
-        const data = Array.isArray(res?.data) ? res.data : [];
-        setHistoryBySymbol((prev) => ({ ...prev, [sym]: { range, data } }));
-        setHistoryError(null);
+        if (res && res.error) {
+          setHistoryBySymbol((prev) => ({ ...prev, [sym]: null }));
+          setHistoryError(res.error);
+        } else {
+          const data = Array.isArray(res?.data) ? res.data : [];
+          setHistoryBySymbol((prev) => ({ ...prev, [sym]: { range, data } }));
+          setHistoryError(null);
+        }
       })
       .catch((err) => {
         setHistoryBySymbol((prev) => ({ ...prev, [sym]: null }));
