@@ -81,5 +81,6 @@ fn test_state() -> AppState {
         watchlist_cache: Arc::new(tokio::sync::RwLock::new(
             watchlist::WatchlistCache::default(),
         )),
+        redis: None,
     }
 }
