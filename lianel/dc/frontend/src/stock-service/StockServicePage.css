@@ -209,6 +209,10 @@
   background: #fafafa;
 }
 
+.stock-service-row-clickable {
+  cursor: pointer;
+}
+
 .stock-service-wl-symbol {
   font-weight: 600;
 }
@@ -323,4 +327,34 @@
 .stock-service-change-unchanged {
   color: #666;
   font-weight: 400;
+}
+
+.stock-service-history-row td {
+  background: #fff;
+}
+
+.stock-service-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.stock-service-history-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #222;
+}
+
+.stock-service-history-chart {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  display: block;
+}
+
+.stock-service-history-empty,
+.stock-service-history-single {
+  font-size: 0.9rem;
+  color: #555;
 }

@@ -43,6 +43,8 @@ export default function StockServicePage() {
   const [watchlistError, setWatchlistError] = useState(null);
   const previousPricesRef = useRef({});
   const lastPricesRef = useRef({});
+  const sessionChartPointsRef = useRef({});
+  const [expandedSymbol, setExpandedSymbol] = useState(null);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -81,11 +83,21 @@ export default function StockServicePage() {
   useEffect(() => {
     if (watchlist?.symbols) {
       const next = {};
+      const now = Date.now();
+      const updatedPoints = { ...sessionChartPointsRef.current };
       watchlist.symbols.forEach((s) => {
-        if (s.price != null) next[s.symbol] = Number(s.price);
+        if (s.price != null) {
+          const price = Number(s.price);
+          next[s.symbol] = price;
+          const prev = updatedPoints[s.symbol] || [];
+          const pts = [...prev, { ts: now, price }];
+          // keep last 120 points (~2h if 60s refresh)
+          updatedPoints[s.symbol] = pts.slice(-120);
+        }
       });
       previousPricesRef.current = lastPricesRef.current;
       lastPricesRef.current = next;
+      sessionChartPointsRef.current = updatedPoints;
     }
   }, [watchlist]);
 
@@ -97,6 +109,39 @@ export default function StockServicePage() {
     if (cur > prev) return 'up';
     if (cur < prev) return 'down';
     return 'unchanged';
+  };
+
+  const getSessionPoints = (symbol) => sessionChartPointsRef.current[symbol] || [];
+
+  const renderSparkline = (symbol) => {
+    const pts = getSessionPoints(symbol);
+    if (!pts.length) return <p className="stock-service-history-empty">No session history yet.</p>;
+    if (pts.length === 1) {
+      return (
+        <div className="stock-service-history-single">
+          <span>Last: {pts[0].price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+        </div>
+      );
+    }
+    const values = pts.map((p) => p.price);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const width = 260;
+    const height = 80;
+    const stepX = pts.length > 1 ? width / (pts.length - 1) : width;
+    const path = pts
+      .map((p, idx) => {
+        const x = idx * stepX;
+        const y = height - ((p.price - min) / range) * (height - 10) - 5;
+        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+      })
+      .join(' ');
+    return (
+      <svg className="stock-service-history-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Session history for ${symbol}`}>
+        <path d={path} fill="none" stroke="#0d6efd" strokeWidth="2" />
+      </svg>
+    );
   };
 
   return (
@@ -143,42 +188,64 @@ export default function StockServicePage() {
                   <tbody>
                     {watchlist.symbols.map((row) => {
                       const change = getChangeIndicator(row.symbol, row.price);
+                      const isExpanded = expandedSymbol === row.symbol;
                       return (
-                        <tr key={row.symbol}>
-                          <td className="stock-service-wl-symbol">{row.symbol}</td>
-                          <td className="stock-service-wl-name">{SYMBOL_SHORT_NAMES[row.symbol] || row.symbol}</td>
-                          <td className="stock-service-wl-price stock-service-td-number">
-                            {row.price != null
-                              ? Number(row.price).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 4,
-                                })
-                              : '—'}
-                          </td>
-                          <td className="stock-service-wl-change stock-service-td-center">
-                            {change === 'up' && <span className="stock-service-change-up" title="Up since last run">↑</span>}
-                            {change === 'down' && <span className="stock-service-change-down" title="Down since last run">↓</span>}
-                            {change === 'unchanged' && <span className="stock-service-change-unchanged" title="Unchanged">—</span>}
-                            {change === null && <span>—</span>}
-                          </td>
-                          <td>{row.currency || '—'}</td>
-                          <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
-                          <td>
-                            {row.error ? (
-                              row.error.includes('pre-flight or stream not ready') ? (
-                                <span className="stock-service-wl-pending" title={row.error}>
-                                  Pending
-                                </span>
+                        <React.Fragment key={row.symbol}>
+                          <tr
+                            className="stock-service-row-clickable"
+                            onClick={() =>
+                              setExpandedSymbol((prev) => (prev === row.symbol ? null : row.symbol))
+                            }
+                          >
+                            <td className="stock-service-wl-symbol">
+                              {row.symbol}
+                            </td>
+                            <td className="stock-service-wl-name">{SYMBOL_SHORT_NAMES[row.symbol] || row.symbol}</td>
+                            <td className="stock-service-wl-price stock-service-td-number">
+                              {row.price != null
+                                ? Number(row.price).toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 4,
+                                  })
+                                : '—'}
+                            </td>
+                            <td className="stock-service-wl-change stock-service-td-center">
+                              {change === 'up' && <span className="stock-service-change-up" title="Up since last run">↑</span>}
+                              {change === 'down' && <span className="stock-service-change-down" title="Down since last run">↓</span>}
+                              {change === 'unchanged' && <span className="stock-service-change-unchanged" title="Unchanged">—</span>}
+                              {change === null && <span>—</span>}
+                            </td>
+                            <td>{row.currency || '—'}</td>
+                            <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
+                            <td>
+                              {row.error ? (
+                                row.error.includes('pre-flight or stream not ready') ? (
+                                  <span className="stock-service-wl-pending" title={row.error}>
+                                    Pending
+                                  </span>
+                                ) : (
+                                  <span className="stock-service-wl-error" title={row.error}>
+                                    {row.error}
+                                  </span>
+                                )
                               ) : (
-                                <span className="stock-service-wl-error" title={row.error}>
-                                  {row.error}
-                                </span>
-                              )
-                            ) : (
-                              <span className="stock-service-wl-ok">OK</span>
-                            )}
-                          </td>
-                        </tr>
+                                <span className="stock-service-wl-ok">{isExpanded ? 'Hide' : 'Details'}</span>
+                              )}
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="stock-service-history-row">
+                              <td colSpan={7}>
+                                <div className="stock-service-history-header">
+                                  <span className="stock-service-history-title">
+                                    Historical data (session) – {row.symbol}
+                                  </span>
+                                </div>
+                                {renderSparkline(row.symbol)}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
