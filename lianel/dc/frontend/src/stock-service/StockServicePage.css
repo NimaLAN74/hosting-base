@@ -267,3 +267,33 @@
   margin: 0.5rem 0 0 0;
   font-size: 0.9rem;
 }
+
+.stock-service-back-link,
+.stock-service-gateway-link {
+  font-size: 0.9rem;
+  color: #0d6efd;
+  text-decoration: none;
+}
+
+.stock-service-back-link:hover,
+.stock-service-gateway-link:hover {
+  text-decoration: underline;
+}
+
+.stock-service-wl-change {
+  text-align: center;
+  font-weight: 600;
+}
+
+.stock-service-change-up {
+  color: #0f5132;
+}
+
+.stock-service-change-down {
+  color: #721c24;
+}
+
+.stock-service-change-unchanged {
+  color: #666;
+  font-weight: 400;
+}

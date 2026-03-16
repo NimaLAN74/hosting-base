@@ -1,23 +1,19 @@
 /**
  * Stock service – watchlist: price table for chosen symbols (IBKR), refreshes every 60s.
- * When using the Gateway, you can save the session cookie here (no SSH needed).
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
-import { useKeycloak } from '../KeycloakProvider';
 import './StockServicePage.css';
 
 const WATCHLIST_URL = '/api/v1/stock-service/watchlist';
-const GATEWAY_COOKIE_URL = '/api/v1/stock-service/ibkr/gateway-cookie';
 const WATCHLIST_REFRESH_MS = 60_000;
 
 export default function StockServicePage() {
   const [watchlist, setWatchlist] = useState(null);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
   const [watchlistError, setWatchlistError] = useState(null);
-  const [gatewayCookie, setGatewayCookie] = useState('');
-  const [cookieSaveStatus, setCookieSaveStatus] = useState(null);
-  const { authenticatedFetch } = useKeycloak();
+  const previousPricesRef = useRef({});
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -31,9 +27,13 @@ export default function StockServicePage() {
         return r.json();
       })
       .then((data) => {
-        setWatchlist(data);
-        if (data && data.symbols && data.symbols.length && data.symbols.every((s) => s.error)) {
-          setWatchlistError('Prices not yet available from provider. Check back in a minute.');
+        if (data && data.symbols && data.symbols.length) {
+          setWatchlist(data);
+          if (data.symbols.every((s) => s.error)) {
+            setWatchlistError('Prices not yet available from provider. Check back in a minute.');
+          }
+        } else {
+          setWatchlist(data);
         }
       })
       .catch(() => {
@@ -49,27 +49,24 @@ export default function StockServicePage() {
     return () => clearInterval(id);
   }, [loadWatchlist]);
 
-  const saveGatewayCookie = () => {
-    const cookie = gatewayCookie.trim();
-    if (!cookie) {
-      setCookieSaveStatus({ ok: false, error: 'Enter the cookie value' });
-      return;
+  useEffect(() => {
+    if (watchlist?.symbols) {
+      const next = {};
+      watchlist.symbols.forEach((s) => {
+        if (s.price != null) next[s.symbol] = Number(s.price);
+      });
+      previousPricesRef.current = next;
     }
-    setCookieSaveStatus(null);
-    authenticatedFetch(GATEWAY_COOKIE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        setCookieSaveStatus(data?.ok ? { ok: true } : { ok: false, error: data?.error || 'Failed' });
-        if (data?.ok) {
-          setGatewayCookie('');
-          loadWatchlist();
-        }
-      })
-      .catch(() => setCookieSaveStatus({ ok: false, error: 'Request failed' }));
+  }, [watchlist]);
+
+  const getChangeIndicator = (symbol, currentPrice) => {
+    if (currentPrice == null) return null;
+    const prev = previousPricesRef.current[symbol];
+    if (prev == null) return '—';
+    const cur = Number(currentPrice);
+    if (cur > prev) return 'up';
+    if (cur < prev) return 'down';
+    return 'unchanged';
   };
 
   return (
@@ -78,6 +75,9 @@ export default function StockServicePage() {
       subtitle="Watchlist – live prices (IBKR, every 60s)"
     >
       <div className="stock-service-content">
+        <p className="stock-service-explainer">
+          <Link to="/stock/gateway" className="stock-service-gateway-link">Gateway session</Link> (paste cookie when needed)
+        </p>
         <section className="stock-service-card stock-service-watchlist-card">
           <h2 className="stock-service-card-title">Prices</h2>
           <p className="stock-service-explainer">
@@ -102,71 +102,56 @@ export default function StockServicePage() {
                   <tr>
                     <th>Symbol</th>
                     <th>Price</th>
+                    <th>Change</th>
                     <th>Currency</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {watchlist.symbols.map((row) => (
-                    <tr key={row.symbol}>
-                      <td className="stock-service-wl-symbol">{row.symbol}</td>
-                      <td className="stock-service-wl-price">
-                        {row.price != null
-                          ? Number(row.price).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 4,
-                            })
-                          : '—'}
-                      </td>
-                      <td>{row.currency || '—'}</td>
-                      <td>
-                        {row.error ? (
-                          row.error.includes('pre-flight or stream not ready') ? (
-                            <span className="stock-service-wl-pending" title={row.error}>
-                              Pending
-                            </span>
+                  {watchlist.symbols.map((row) => {
+                    const change = getChangeIndicator(row.symbol, row.price);
+                    return (
+                      <tr key={row.symbol}>
+                        <td className="stock-service-wl-symbol">{row.symbol}</td>
+                        <td className="stock-service-wl-price">
+                          {row.price != null
+                            ? Number(row.price).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 4,
+                              })
+                            : '—'}
+                        </td>
+                        <td className="stock-service-wl-change">
+                          {change === 'up' && <span className="stock-service-change-up" title="Up since last run">↑</span>}
+                          {change === 'down' && <span className="stock-service-change-down" title="Down since last run">↓</span>}
+                          {change === 'unchanged' && <span className="stock-service-change-unchanged" title="Unchanged">—</span>}
+                          {change === null && <span>—</span>}
+                        </td>
+                        <td>{row.currency || '—'}</td>
+                        <td>
+                          {row.error ? (
+                            row.error.includes('pre-flight or stream not ready') ? (
+                              <span className="stock-service-wl-pending" title={row.error}>
+                                Pending
+                              </span>
+                            ) : (
+                              <span className="stock-service-wl-error" title={row.error}>
+                                {row.error}
+                              </span>
+                            )
                           ) : (
-                            <span className="stock-service-wl-error" title={row.error}>
-                              {row.error}
-                            </span>
-                          )
-                        ) : (
-                          <span className="stock-service-wl-ok">OK</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                            <span className="stock-service-wl-ok">OK</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </>
           )}
           {!watchlistLoading && (!watchlist || !watchlist.symbols?.length) && !watchlistError && (
             <p className="stock-service-explainer">No watchlist data available.</p>
-          )}
-        </section>
-        <section className="stock-service-card stock-service-gateway-card">
-          <h2 className="stock-service-card-title">Gateway session</h2>
-          <p className="stock-service-explainer">
-            If the watchlist shows &quot;Please query /accounts first&quot; or &quot;not authenticated&quot;, log in at{' '}
-            <a href="/ibkr-gateway/" target="_blank" rel="noopener noreferrer">Gateway</a>, then paste the <code>api</code> cookie here (DevTools → Application → Cookies → <code>api</code>).
-          </p>
-          <div className="stock-service-gateway-form">
-            <input
-              type="text"
-              placeholder="Paste api cookie value"
-              value={gatewayCookie}
-              onChange={(e) => setGatewayCookie(e.target.value)}
-              className="stock-service-cookie-input"
-              aria-label="Gateway session cookie"
-            />
-            <button type="button" onClick={saveGatewayCookie} className="stock-service-save-btn">
-              Save
-            </button>
-          </div>
-          {cookieSaveStatus && (
-            <p className={cookieSaveStatus.ok ? 'stock-service-cookie-ok' : 'stock-service-error'} role="status">
-              {cookieSaveStatus.ok ? 'Cookie saved. Watchlist will refresh.' : cookieSaveStatus.error}
-            </p>
           )}
         </section>
       </div>
