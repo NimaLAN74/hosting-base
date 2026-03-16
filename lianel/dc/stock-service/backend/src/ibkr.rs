@@ -315,39 +315,23 @@ impl IbkrOAuthClient {
         Ok(tickle.session)
     }
 
-    /// Establish brokerage session for api.ibkr.com via SSODH init/response (required for market data).
-    /// Requires the `api=<session>` cookie from /tickle.
+    /// Establish brokerage session for api.ibkr.com via SSODH init (required for market data).
+    /// Per IBKR doc: POST JSON {"publish":true,"compete":true}. Response may be status-only (authenticated, connected)
+    /// or include challenge for follow-up ssodh/response. Requires the `api=<session>` cookie from /tickle.
     async fn ensure_ssodh_connected(&self, session: &str) -> Result<()> {
         let base_url = self.config.ibkr_api_base_url.trim_end_matches('/');
         let init_url = format!("{}/iserver/auth/ssodh/init", base_url);
-        let mac = format!(
-            "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
-            rand::random::<u8>(),
-            rand::random::<u8>(),
-            rand::random::<u8>(),
-            rand::random::<u8>(),
-            rand::random::<u8>(),
-            rand::random::<u8>(),
-        );
-        let machine_id: String = (0..8)
-            .map(|_| {
-                let c = rand::random::<u8>();
-                if c % 2 == 0 { (b'0' + (c % 10)) as char } else { (b'A' + (c % 26)) as char }
-            })
-            .collect();
-        let form_body = format!(
-            "compete=false&locale=en_US&mac={}&machineId={}&username=-",
-            mac, machine_id,
-        );
-        let auth = self.sign_request_post_with_body("POST", &init_url, &form_body).await?;
+        // Per IBKR OAuth doc: JSON body; signature uses only OAuth params (no body).
+        let json_body = r#"{"publish":true,"compete":true}"#;
+        let auth = self.sign_request("POST", &init_url, None).await?;
         let client = self.http_client()?;
         let resp = client
             .post(&init_url)
             .header("Authorization", auth)
             .header("Cookie", format!("api={}", session))
             .header("User-Agent", "Console")
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(form_body.clone())
+            .header("Content-Type", "application/json")
+            .body(json_body)
             .send()
             .await
             .context("POST ssodh/init")?;
@@ -356,13 +340,18 @@ impl IbkrOAuthClient {
         if !status.is_success() {
             anyhow::bail!("ssodh/init failed {}: {}", status, body.trim_start().chars().take(200).collect::<String>());
         }
+        // Response may be status-only { authenticated, connected, ... } or include challenge.
         let init_res: SsodhInitResponse = serde_json::from_str(&body).with_context(|| {
             format!(
                 "parse ssodh init JSON (body starts with): {}",
                 body.trim_start().chars().take(120).collect::<String>()
             )
         })?;
-        let challenge = init_res.challenge.trim();
+        let Some(challenge) = init_res.challenge.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+            // No challenge: API returned status-only (e.g. authenticated true/false). Session may still work.
+            tracing::debug!("SSODH init returned no challenge (status-only); continuing with session");
+            return Ok(());
+        };
         // SSODH verifier: session token from initial auth (/tickle). Treat as bytes and hex-encode.
         let session_hex = hex::encode(session.as_bytes());
         let combined_hex = format!("{}{}", challenge, session_hex);
@@ -467,9 +456,13 @@ struct TickleResponse {
     session: String,
 }
 
+/// SSODH init response: either status-only (authenticated, connected) or includes challenge for ssodh/response.
 #[derive(Deserialize)]
 struct SsodhInitResponse {
-    challenge: String,
+    #[serde(default)]
+    challenge: Option<String>,
+    #[serde(default)]
+    authenticated: Option<bool>,
 }
 
 #[derive(Deserialize)]

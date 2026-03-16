@@ -106,3 +106,31 @@ If the API returns `401 Unauthorized` with an error like `"invalid consumer"` (e
 
 5. **Access token and secret**
    - Must be from the **same** application as the consumer key. Regenerate token/secret in the portal if you recreated the app or consumer key.
+
+---
+
+## Regenerate access token and secret
+
+If you get **401 Unauthorized** or **invalid consumer** and the consumer key is correct, regenerate the access token and secret:
+
+1. Log in to **[IBKR Self Service OAuth](https://ndcdyn.interactivebrokers.com/sso/Login?action=OAUTH&RL=1&ip2loc=US)**.
+2. On the configuration page, scroll to **Access Request Token**.
+3. Click **Generate Token**. New **Access Token** and **Access Token Secret** will appear.
+4. **Copy both values immediately** (they disappear when you leave or refresh the page).
+5. Update the server and restart the stock service (from repo root):
+
+   ```bash
+   IBKR_OAUTH_ACCESS_TOKEN='<paste_access_token>' \
+   IBKR_OAUTH_ACCESS_TOKEN_SECRET='<paste_secret>' \
+   REMOTE_HOST=72.60.80.84 \
+   bash lianel/dc/scripts/deployment/update-ibkr-tokens-remote-env.sh
+   ```
+
+   Or set `REMOTE_HOST` (and optionally `IBKR_OAUTH_ACCESS_TOKEN`, `IBKR_OAUTH_ACCESS_TOKEN_SECRET`) in `.env`, then:
+
+   ```bash
+   source .env
+   bash lianel/dc/scripts/deployment/update-ibkr-tokens-remote-env.sh
+   ```
+
+6. Open the Stock Service page and use **Verify IBKR** / watchlist; prices should load.
