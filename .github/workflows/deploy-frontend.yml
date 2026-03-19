@@ -193,12 +193,24 @@ jobs:
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+          ACTOR='${{ github.actor }}'
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "❌ needs.build.outputs.image_tag is empty"
+            exit 1
+          fi
+          # Keepalives: long docker pull can idle the SSH channel → broken pipe without ServerAlive*.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o ConnectTimeout=60 -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
-            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-frontend.sh '${IMAGE_TAG}'"
+            -o ConnectTimeout=60 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes \
+            -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            bash -s <<EOF
+          export GITHUB_TOKEN=$(printf '%q' "$GITHUB_TOKEN")
+          export GITHUB_ACTOR=$(printf '%q' "$ACTOR")
+          exec /root/deploy-frontend.sh $(printf '%q' "$IMAGE_TAG")
+          EOF
           echo "✅ Deploy finished"
 
       - name: Sync nginx config to remote

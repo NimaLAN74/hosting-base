@@ -178,6 +178,9 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=60 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            -o TCPKeepAlive=yes \
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" \
             bash -s <<EOF
