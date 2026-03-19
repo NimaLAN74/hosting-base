@@ -412,6 +412,19 @@
   color: #555;
 }
 
+.stock-service-history-meta {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin: 0 0 0.5rem 0;
+}
+
+.stock-service-history-meta code {
+  font-size: 0.9em;
+  background: #f1f5f9;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
 .stock-service-history-layout {
   display: flex;
   flex-wrap: wrap;
