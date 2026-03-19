@@ -415,9 +415,10 @@ async fn debug_snapshot_handler(
         })
     };
 
-    let snapshot_items = match raw {
-        serde_json::Value::Array(arr) => arr,
-        other => vec![other],
+    // Clone so we don't move `raw` (used later in the response).
+    let snapshot_items = match &raw {
+        serde_json::Value::Array(arr) => arr.clone(),
+        other => vec![other.clone()],
     };
 
     let computed: Vec<serde_json::Value> = snapshot_items
