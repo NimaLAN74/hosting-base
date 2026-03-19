@@ -308,6 +308,9 @@ struct DebugSnapshotQuery {
     /// Comma-separated list of symbols, e.g. `GOOGL,META`.
     /// If omitted, we debug all symbols that currently have `price = null`.
     symbols: Option<String>,
+    /// Optional comma-separated snapshot field list (IBKR `/iserver/marketdata/snapshot`).
+    /// If omitted, we omit `fields=` to let IBKR use its default.
+    fields: Option<String>,
 }
 
 async fn debug_snapshot_handler(
@@ -391,7 +394,7 @@ async fn debug_snapshot_handler(
         ibkr_client.as_ref(),
         &cfg.ibkr_api_base_url,
         &conids,
-        None, // Intentionally omit `fields` so we can inspect what IBKR returns for missing prices.
+        q.fields.as_deref(),
     )
     .await
     {
