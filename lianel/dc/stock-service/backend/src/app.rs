@@ -64,12 +64,16 @@ fn normalize_display_name(
 }
 
 pub fn create_router(state: AppState) -> Router {
+    // Public routes: canonical /api/v1/* and prefixed /api/v1/stock-service/* so nginx/proxy quirks never 404.
     let public = Router::new()
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
         .route("/api/v1/watchlist", get(watchlist_handler))
+        .route("/api/v1/stock-service/watchlist", get(watchlist_handler))
         .route("/api/v1/history", get(history_handler))
-        .route("/api/v1/today", get(today_handler));
+        .route("/api/v1/stock-service/history", get(history_handler))
+        .route("/api/v1/today", get(today_handler))
+        .route("/api/v1/stock-service/today", get(today_handler));
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
