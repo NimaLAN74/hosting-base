@@ -247,13 +247,29 @@ async fn history_handler(
         }
     };
     let days = q.days.unwrap_or(7).min(365);
-    let period = format!("{}d", days);
+    // IBKR CP history: use week/month/year strings so the span matches the UI (7d→1w, 30d→1m, …).
+    let period = match days {
+        7 => "1w".to_string(),
+        30 => "1m".to_string(),
+        90 => "3m".to_string(),
+        365 => "1y".to_string(),
+        n => format!("{n}d"),
+    };
     match client.fetch_history(conid, &period, "1d").await {
-        Ok(bars) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "symbol": symbol, "data": bars, "provider": "IBKR" })),
-        )
-            .into_response(),
+        Ok(bars) => {
+            let bar_count = bars.len();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "symbol": symbol,
+                    "data": bars,
+                    "provider": "IBKR",
+                    "period": period,
+                    "bars": bar_count,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             let msg = e.to_string();
             tracing::warn!("IBKR history failed for {}: {}", symbol, msg);

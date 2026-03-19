@@ -486,7 +486,9 @@ impl IbkrOAuthClient {
             .data
             .into_iter()
             .map(|b| HistoryBar {
-                t: b.t,
+                // CP API returns bar time `t` as Unix **milliseconds**; we expose **seconds**
+                // so JSON consumers can do `new Date(t * 1000)` consistently.
+                t: normalize_history_timestamp_secs(b.t),
                 open: b.o / factor,
                 high: b.h / factor,
                 low: b.l / factor,
@@ -494,6 +496,15 @@ impl IbkrOAuthClient {
             })
             .collect();
         Ok(bars)
+    }
+}
+
+/// Convert CP API bar timestamp to Unix seconds (API usually sends ms).
+fn normalize_history_timestamp_secs(t: u64) -> u64 {
+    if t >= 10_000_000_000 {
+        t / 1000
+    } else {
+        t
     }
 }
 

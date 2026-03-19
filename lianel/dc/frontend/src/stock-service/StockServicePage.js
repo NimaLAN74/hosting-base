@@ -33,6 +33,13 @@ const SYMBOL_SHORT_NAMES = {
   JNJ: 'Johnson & Johnson',
 };
 
+/** Bar `t` from API: backend sends Unix seconds; if older payloads were ms, normalize for charts. */
+const barTimeToMs = (t) => {
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) return Date.now();
+  return n > 1e11 ? n : n * 1000;
+};
+
 const formatSvDateTime24h = (isoLike) => {
   if (!isoLike) return '—';
   const d = new Date(isoLike);
@@ -150,7 +157,15 @@ export default function StockServicePage() {
           setHistoryError(res.error);
         } else {
           const data = Array.isArray(res?.data) ? res.data : [];
-          setHistoryBySymbol((prev) => ({ ...prev, [sym]: { range, data } }));
+          setHistoryBySymbol((prev) => ({
+            ...prev,
+            [sym]: {
+              range,
+              data,
+              period: res.period,
+              barCount: typeof res.bars === 'number' ? res.bars : data.length,
+            },
+          }));
           setHistoryError(null);
         }
       })
@@ -166,7 +181,13 @@ export default function StockServicePage() {
     if (!expandedSymbol) return;
     const sym = expandedSymbol;
     fetch(`${TODAY_URL}?symbol=${encodeURIComponent(sym)}`, { credentials: 'include', headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) {
+          console.warn('stock-service today:', r.status, r.statusText);
+          return { data: [] };
+        }
+        return r.json();
+      })
       .then((res) => {
         const data = Array.isArray(res?.data) ? res.data : [];
         setTodayBySymbol((prev) => ({ ...prev, [sym]: data }));
@@ -203,7 +224,7 @@ export default function StockServicePage() {
   const renderHistoryChart = (bars, isUp, symbol) => {
     if (!bars?.length) return <p className="stock-service-history-empty">No historical data.</p>;
     const barsNorm = bars.map((b) => ({
-      t: Number(b.t) * 1000,
+      t: barTimeToMs(b.t),
       o: Number(b.open ?? b.o ?? b.close ?? b.c ?? 0),
       h: Number(b.high ?? b.h ?? b.close ?? b.c ?? 0),
       l: Number(b.low ?? b.l ?? b.open ?? b.o ?? b.close ?? b.c ?? 0),
@@ -501,6 +522,14 @@ export default function StockServicePage() {
                                 )}
                                 {!historyLoading && historyEntry?.data?.length > 0 && (
                                   <div className="stock-service-history-layout">
+                                    {(historyEntry.period || historyEntry.barCount != null) && (
+                                      <p className="stock-service-history-meta">
+                                        IBKR-period: <code>{historyEntry.period ?? '—'}</code>
+                                        {historyEntry.barCount != null
+                                          ? ` · ${historyEntry.barCount} dagliga staplar`
+                                          : ''}
+                                      </p>
+                                    )}
                                     {(() => {
                                       const bars = historyEntry.data;
                                       const first = bars[0];
@@ -511,8 +540,8 @@ export default function StockServicePage() {
                                       const pct = start ? (abs / start) * 100 : 0;
                                       const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? b.o ?? b.close ?? b.c ?? 0)));
                                       const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? b.o ?? b.close ?? b.c ?? 0)));
-                                      const startDate = new Date(Number(first.t) * 1000);
-                                      const endDate = new Date(Number(last.t) * 1000);
+                                      const startDate = new Date(barTimeToMs(first.t));
+                                      const endDate = new Date(barTimeToMs(last.t));
                                       const fmtDate = (d) =>
                                         Number.isNaN(d.getTime())
                                           ? '—'
