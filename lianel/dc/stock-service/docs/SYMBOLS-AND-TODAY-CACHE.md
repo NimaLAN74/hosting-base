@@ -17,7 +17,9 @@ To get prices for all symbols:
 
 - Ensure **IBKR_API_BASE_URL** is correct (e.g. `https://api.ibkr.com/v1/api`).
 - If you use a Gateway, trsrv might be under the same base; if trsrv returns 404/401 we still use hardcoded conids.
-- Your **IBKR account** must have **market data subscription** for the instruments you request; otherwise snapshot can return “no price (pre-flight or stream not ready)”.
+- Your **IBKR account** must have **market data subscription** for the instruments you request; otherwise snapshot can return “no price …”.
+- The watchlist snapshot requests **last (31)** and falls back to **bid/ask (84/86)** when last is empty (delayed / pre-flight).
+- **`/history` and `/today`** use **resolved conids** from the latest `/trsrv/stocks` merge (stored in the watchlist cache), not only the static map—so history matches the same contract as live prices when trsrv succeeds.
 
 ## Today's intraday cache (Redis)
 
@@ -32,21 +34,10 @@ So:
 - **REDIS_URL unset** → Today chart = live only; after a **restart or new deployment** you lose today’s history until the next 60s refresh.
 - **REDIS_URL set** → Today chart = cached (Redis) + live; **restarts/deploys do not lose** today’s prices.
 
-### Set Redis on the server (one-time)
+Example (same host as Airflow Redis, different DB):
 
-1. **Redis** is already used by Airflow; it is now also attached to **lianel-network** so stock-service can reach it (`docker-compose.airflow.yaml`).
+```bash
+REDIS_URL=redis://:YOUR_REDIS_PASSWORD@redis:6379/1
+```
 
-2. **Set REDIS_URL** in the server `.env` used by stock-service. Either run the helper script on the server (it reads REDIS_PASSWORD from .env and restarts stock-service):
-
-   ```bash
-   cd /root/lianel/dc   # or /root/hosting-base/lianel/dc
-   bash scripts/deployment/ensure-redis-url-on-server.sh
-   ```
-
-   Or add manually (use the same `REDIS_PASSWORD` as Airflow; host is the Redis container name, e.g. `redis` or `dc_redis_1`):
-
-   ```bash
-   REDIS_URL=redis://:YOUR_REDIS_PASSWORD@redis:6379/1
-   ```
-
-   Use DB **1** (Celery uses 0). Then restart stock-service.
+Use DB **1** (or another free index) if DB 0 is used by Celery.

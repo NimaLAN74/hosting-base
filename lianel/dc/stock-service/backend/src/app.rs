@@ -199,7 +199,7 @@ async fn today_handler(
         )
             .into_response();
     }
-    if watchlist::get_conid_for_symbol(symbol).is_none() {
+    if !watchlist::is_watchlist_symbol(symbol) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "symbol not in watchlist"})),
@@ -230,14 +230,24 @@ async fn history_handler(
         )
             .into_response();
     }
-    let conid = match watchlist::get_conid_for_symbol(symbol) {
-        Some(c) => c,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "symbol not in watchlist"})),
-            )
-                .into_response()
+    if !watchlist::is_watchlist_symbol(symbol) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "symbol not in watchlist"})),
+        )
+            .into_response();
+    }
+    let conid = {
+        let g = state.watchlist_cache.read().await;
+        match watchlist::get_conid_with_cache(symbol, &g) {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "unknown conid for symbol"})),
+                )
+                    .into_response()
+            }
         }
     };
     let client = match state.ibkr_client.as_ref() {
