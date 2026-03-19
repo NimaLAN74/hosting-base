@@ -74,6 +74,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/stock-service/history", get(history_handler))
         .route("/api/v1/today", get(today_handler))
         .route("/api/v1/stock-service/today", get(today_handler))
+        // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
+        // so we also need the canonical alias for debug.
+        .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
         .route(
             "/api/v1/stock-service/debug/snapshot",
             get(debug_snapshot_handler),
