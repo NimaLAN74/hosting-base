@@ -11,12 +11,13 @@ const HISTORY_URL = '/api/v1/stock-service/history';
 const TODAY_URL = '/api/v1/stock-service/today';
 const WATCHLIST_REFRESH_MS = 60_000;
 
-const CHART_WIDTH = 520;
-const CHART_HEIGHT = 200;
-const PAD_LEFT = 44;
-const PAD_RIGHT = 12;
-const PAD_TOP = 12;
-const PAD_BOTTOM = 28;
+/* ViewBox coordinates — SVG scales to 100% width of container via CSS */
+const CHART_WIDTH = 960;
+const CHART_HEIGHT = 280;
+const PAD_LEFT = 52;
+const PAD_RIGHT = 16;
+const PAD_TOP = 16;
+const PAD_BOTTOM = 36;
 const PLOT_W = CHART_WIDTH - PAD_LEFT - PAD_RIGHT;
 const PLOT_H = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM;
 
@@ -298,9 +299,15 @@ export default function StockServicePage() {
     });
 
     return (
-      <div className="stock-service-chart-card">
-        <p className="stock-service-chart-legend">Each bar = day range (low → high). Hover for O/H/L/C.</p>
-        <svg className="stock-service-chart-svg" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label="OHLC by day">
+      <div className="stock-service-chart-card stock-service-chart-card--full">
+        <p className="stock-service-chart-legend">Each bar = one trading day (low → high). Hover a bar for O · H · L · C.</p>
+        <svg
+          className="stock-service-chart-svg"
+          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="OHLC by day"
+        >
           <rect x={0} y={0} width={CHART_WIDTH} height={CHART_HEIGHT} className="stock-service-chart-bg" />
           {gridLines}
           {yLabels}
@@ -361,11 +368,17 @@ export default function StockServicePage() {
 
     const gradId = `todayGradient-${symbol}`;
     return (
-      <div className="stock-service-chart-card">
+      <div className="stock-service-chart-card stock-service-chart-card--full">
         <p className="stock-service-chart-legend">
-          {sessionOnly ? 'Today (live only; set REDIS_URL on server to cache across restarts)' : 'Today (cached + live)'}
+          {sessionOnly ? 'Intraday today (live only — set REDIS_URL on server to persist across restarts)' : 'Intraday today (server cache + live updates)'}
         </p>
-        <svg className="stock-service-chart-svg" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label="Today intraday">
+        <svg
+          className="stock-service-chart-svg"
+          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="Today intraday"
+        >
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#0d9488" stopOpacity="0.2" />
@@ -506,11 +519,9 @@ export default function StockServicePage() {
                                     ))}
                                   </div>
                                 </div>
-                                <div className="stock-service-history-today">
-                                  <div className="stock-service-history-metric">
-                                    <span className="label">Today</span>
-                                  </div>
-                                  <div className="stock-service-history-chart-wrap today">
+                                <div className="stock-service-chart-section stock-service-chart-section--today">
+                                  <h4 className="stock-service-chart-section-title">Intraday — today</h4>
+                                  <div className="stock-service-history-chart-wrap stock-service-history-chart-wrap--full">
                                     {renderTodayChart(row.symbol)}
                                   </div>
                                 </div>
@@ -522,64 +533,70 @@ export default function StockServicePage() {
                                 )}
                                 {!historyLoading && historyEntry?.data?.length > 0 && (
                                   <div className="stock-service-history-layout">
-                                    {(historyEntry.period || historyEntry.barCount != null) && (
-                                      <p className="stock-service-history-meta">
-                                        IBKR-period: <code>{historyEntry.period ?? '—'}</code>
-                                        {historyEntry.barCount != null
-                                          ? ` · ${historyEntry.barCount} dagliga staplar`
-                                          : ''}
-                                      </p>
-                                    )}
-                                    {(() => {
-                                      const bars = historyEntry.data;
-                                      const first = bars[0];
-                                      const last = bars[bars.length - 1];
-                                      const start = Number(first.close ?? first.c ?? 0);
-                                      const end = Number(last.close ?? last.c ?? 0);
-                                      const abs = end - start;
-                                      const pct = start ? (abs / start) * 100 : 0;
-                                      const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? b.o ?? b.close ?? b.c ?? 0)));
-                                      const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? b.o ?? b.close ?? b.c ?? 0)));
-                                      const startDate = new Date(barTimeToMs(first.t));
-                                      const endDate = new Date(barTimeToMs(last.t));
-                                      const fmtDate = (d) =>
-                                        Number.isNaN(d.getTime())
-                                          ? '—'
-                                          : new Intl.DateTimeFormat('sv-SE', {
-                                              month: '2-digit',
-                                              day: '2-digit',
-                                            }).format(d);
-                                      const up = abs >= 0;
-                                      return (
-                                        <>
-                                          <div className="stock-service-history-summary">
-                                            <div className="stock-service-history-metric">
-                                              <span className="label">7d change</span>
-                                              <span className={up ? 'value up' : 'value down'}>
-                                                {abs >= 0 ? '+' : ''}
-                                                {abs.toFixed(2)} ({abs >= 0 ? '+' : ''}
-                                                {pct.toFixed(1)}%)
-                                              </span>
+                                    <div className="stock-service-chart-section stock-service-chart-section--history">
+                                      <h4 className="stock-service-chart-section-title">Daily bars — selected range</h4>
+                                      {(historyEntry.period || historyEntry.barCount != null) && (
+                                        <p className="stock-service-history-meta">
+                                          IBKR period: <code>{historyEntry.period ?? '—'}</code>
+                                          {historyEntry.barCount != null
+                                            ? ` · ${historyEntry.barCount} daily bars`
+                                            : ''}
+                                        </p>
+                                      )}
+                                      {(() => {
+                                        const bars = historyEntry.data;
+                                        const first = bars[0];
+                                        const last = bars[bars.length - 1];
+                                        const start = Number(first.close ?? first.c ?? 0);
+                                        const end = Number(last.close ?? last.c ?? 0);
+                                        const abs = end - start;
+                                        const pct = start ? (abs / start) * 100 : 0;
+                                        const high = Math.max(...bars.map((b) => Number(b.high ?? b.h ?? b.o ?? b.close ?? b.c ?? 0)));
+                                        const low = Math.min(...bars.map((b) => Number(b.low ?? b.l ?? b.o ?? b.close ?? b.c ?? 0)));
+                                        const startDate = new Date(barTimeToMs(first.t));
+                                        const endDate = new Date(barTimeToMs(last.t));
+                                        const fmtDate = (d) =>
+                                          Number.isNaN(d.getTime())
+                                            ? '—'
+                                            : new Intl.DateTimeFormat('sv-SE', {
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                                year: 'numeric',
+                                              }).format(d);
+                                        const up = abs >= 0;
+                                        const rangeLabels = { '7d': '7d', '1m': '1m', '3m': '3m', '1y': '1y' };
+                                        const changeLabel = `${rangeLabels[historyRange] || historyRange} change (close)`;
+                                        return (
+                                          <>
+                                            <div className="stock-service-history-metrics-row" role="group" aria-label="Period summary">
+                                              <div className="stock-service-history-metric">
+                                                <span className="label">{changeLabel}</span>
+                                                <span className={up ? 'value up' : 'value down'}>
+                                                  {abs >= 0 ? '+' : ''}
+                                                  {abs.toFixed(2)} ({abs >= 0 ? '+' : ''}
+                                                  {pct.toFixed(1)}%)
+                                                </span>
+                                              </div>
+                                              <div className="stock-service-history-metric">
+                                                <span className="label">Range high / low</span>
+                                                <span className="value">
+                                                  {high.toFixed(2)} / {low.toFixed(2)}
+                                                </span>
+                                              </div>
+                                              <div className="stock-service-history-metric">
+                                                <span className="label">First — last day</span>
+                                                <span className="value">
+                                                  {fmtDate(startDate)} — {fmtDate(endDate)}
+                                                </span>
+                                              </div>
                                             </div>
-                                            <div className="stock-service-history-metric">
-                                              <span className="label">High / Low</span>
-                                              <span className="value">
-                                                {high.toFixed(2)} / {low.toFixed(2)}
-                                              </span>
+                                            <div className="stock-service-history-chart-wrap stock-service-history-chart-wrap--full">
+                                              {renderHistoryChart(bars, up, row.symbol)}
                                             </div>
-                                            <div className="stock-service-history-metric">
-                                              <span className="label">Period</span>
-                                              <span className="value">
-                                                {fmtDate(startDate)} – {fmtDate(endDate)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                          <div className="stock-service-history-chart-wrap">
-                                            {renderHistoryChart(bars, up, row.symbol)}
-                                          </div>
-                                        </>
-                                      );
-                                    })()}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
                                   </div>
                                 )}
                                 {!historyLoading && (!historyBySymbol[row.symbol]?.data?.length) && historyBySymbol[row.symbol] !== null && (

@@ -27,9 +27,10 @@ services:
     restart: unless-stopped
     networks:
       - lianel-network
-    # Mount conf.yaml so Gateway allows nginx (172.x) and localhost; otherwise "Access Denied"
+    # Mount conf.yaml and custom Gateway (updated from IBKR to fix JS 404)
     volumes:
       - ./stock-service/ibkr-gateway/inputs:/srv/inputs:ro
+      - ./stock-service/ibkr-gateway/clientportal.gw:/srv/clientportal.gw
 
 networks:
   lianel-network:

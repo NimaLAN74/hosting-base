@@ -32,10 +32,21 @@ So:
 - **REDIS_URL unset** → Today chart = live only; after a **restart or new deployment** you lose today’s history until the next 60s refresh.
 - **REDIS_URL set** → Today chart = cached (Redis) + live; **restarts/deploys do not lose** today’s prices.
 
-Example (same host as Airflow Redis, different DB):
+### Set Redis on the server (one-time)
 
-```bash
-REDIS_URL=redis://:YOUR_REDIS_PASSWORD@redis:6379/1
-```
+1. **Redis** is already used by Airflow; it is now also attached to **lianel-network** so stock-service can reach it (`docker-compose.airflow.yaml`).
 
-Use DB **1** (or another free index) if DB 0 is used by Celery.
+2. **Set REDIS_URL** in the server `.env` used by stock-service. Either run the helper script on the server (it reads REDIS_PASSWORD from .env and restarts stock-service):
+
+   ```bash
+   cd /root/lianel/dc   # or /root/hosting-base/lianel/dc
+   bash scripts/deployment/ensure-redis-url-on-server.sh
+   ```
+
+   Or add manually (use the same `REDIS_PASSWORD` as Airflow; host is the Redis container name, e.g. `redis` or `dc_redis_1`):
+
+   ```bash
+   REDIS_URL=redis://:YOUR_REDIS_PASSWORD@redis:6379/1
+   ```
+
+   Use DB **1** (Celery uses 0). Then restart stock-service.

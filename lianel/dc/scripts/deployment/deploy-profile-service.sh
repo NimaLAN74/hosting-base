@@ -37,7 +37,10 @@ cd "$DC_DIR"
 
 if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
   echo "Logging in to ghcr.io..."
-  echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin 2>/dev/null || true
+  if ! echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin; then
+    echo "❌ ghcr.io login failed (check GITHUB_TOKEN / GITHUB_ACTOR and registry access)"
+    exit 1
+  fi
 fi
 
 echo "Pulling $IMAGE_TAG..."

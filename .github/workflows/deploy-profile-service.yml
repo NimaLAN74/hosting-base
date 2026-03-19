@@ -163,17 +163,28 @@ jobs:
         env:
           REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
           REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+          ACTOR='${{ github.actor }}'
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "❌ needs.build.outputs.image_tag is empty — build job may not have exported image_tag"
+            exit 1
+          fi
           echo "Deploying: $IMAGE_TAG"
+          # Avoid embedding token/tag in one SSH string — quotes/special chars break the remote shell.
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o ConnectTimeout=60 \
             -p "${REMOTE_PORT}" \
             "${REMOTE_USER}@${REMOTE_HOST}" \
-            "GITHUB_TOKEN='${GITHUB_TOKEN}' GITHUB_ACTOR='${{ github.actor }}' /root/deploy-profile-service.sh '${IMAGE_TAG}'"
+            bash -s <<EOF
+          export GITHUB_TOKEN=$(printf '%q' "$GITHUB_TOKEN")
+          export GITHUB_ACTOR=$(printf '%q' "$ACTOR")
+          exec /root/deploy-profile-service.sh $(printf '%q' "$IMAGE_TAG")
+          EOF
           echo "✅ Deploy finished"
 
   # ---------------------------------------------------------------------------
