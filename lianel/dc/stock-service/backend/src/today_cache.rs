@@ -14,9 +14,11 @@ pub async fn push_price(
     ts_sec: u64,
     price: f64,
 ) {
-    let Some(conn) = redis else {
+    let Some(cm) = redis else {
         return;
     };
+    // ConnectionManager commands need &mut; clone is cheap (shared pool).
+    let mut conn = cm.clone();
     let key = format!("{KEY_PREFIX}{symbol}");
     let value = format!("{}:{}", ts_sec, price);
     let _: Result<(), redis::RedisError> = conn.rpush(&key, &value).await;
@@ -28,9 +30,10 @@ pub async fn get_today(
     redis: Option<&redis::aio::ConnectionManager>,
     symbol: &str,
 ) -> Vec<(u64, f64)> {
-    let Some(conn) = redis else {
+    let Some(cm) = redis else {
         return vec![];
     };
+    let mut conn = cm.clone();
     let key = format!("{KEY_PREFIX}{symbol}");
     let raw: Result<Vec<String>, redis::RedisError> = conn.lrange(&key, 0, -1).await;
     let list = match raw {
