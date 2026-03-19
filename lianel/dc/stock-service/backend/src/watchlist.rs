@@ -662,6 +662,130 @@ pub async fn refresh_from_ibkr(
     *g = next;
 }
 
+/// Fetch raw IBKR `/iserver/marketdata/snapshot` response for the given conids.
+/// Used for debugging missing prices (what fields IBKR actually returns).
+pub async fn fetch_snapshot_raw_for_conids(
+    ibkr_client: &IbkrOAuthClient,
+    base_url: &str,
+    conids: &[u64],
+    fields: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    if conids.is_empty() {
+        return Err("conids required".to_string());
+    }
+
+    let conids_param = conids
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let url = match fields {
+        Some(f) if !f.trim().is_empty() => format!(
+            "{}/iserver/marketdata/snapshot?conids={}&fields={}",
+            base_url.trim_end_matches('/'),
+            conids_param,
+            f
+        ),
+        _ => format!(
+            "{}/iserver/marketdata/snapshot?conids={}",
+            base_url.trim_end_matches('/'),
+            conids_param
+        ),
+    };
+
+    // Build OAuth Authorization header if we're not in gateway-cookie mode.
+    let auth = if ibkr_client.use_oauth_for_api() {
+        Some(
+            ibkr_client
+                .sign_request("GET", &url, None)
+                .await
+                .map_err(|e| format!("IBKR sign_request failed: {e}"))?,
+        )
+    } else {
+        None
+    };
+
+    // /iserver/* requires brokerage session cookie (from tickle or Gateway cookie mode).
+    let cookie = ibkr_client
+        .get_session_for_cookie()
+        .await
+        .map_err(|e| format!("IBKR get_session_for_cookie failed: {e}"))?;
+
+    let http_client = ibkr_client.http_client().map_err(|e| e.to_string()).or_else(|_| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())
+    })?;
+
+    // Try to ensure brokerage session is authenticated before /accounts + market data snapshot.
+    let validate_url = format!("{}/sso/validate", base_url.trim_end_matches('/'));
+    let validate_req = http_client
+        .get(&validate_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console");
+    let validate_req = if let Some(ref a) = auth {
+        validate_req.header("Authorization", a.as_str())
+    } else {
+        validate_req
+    };
+    let _ = validate_req.send().await;
+
+    let reauth_url = format!("{}/iserver/reauthenticate", base_url.trim_end_matches('/'));
+    let reauth_req = http_client
+        .post(&reauth_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console")
+        .header("Content-Length", "0")
+        .body("");
+    let reauth_req = if let Some(ref a) = auth {
+        reauth_req.header("Authorization", a.as_str())
+    } else {
+        reauth_req
+    };
+    let _ = reauth_req.send().await;
+
+    // IBKR requires /iserver/accounts to be queried before market data snapshot.
+    let accounts_url = format!("{}/iserver/accounts", base_url.trim_end_matches('/'));
+    let accounts_req = http_client
+        .get(&accounts_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console")
+        .header("Accept", "application/json");
+    let accounts_req = if let Some(ref a) = auth {
+        accounts_req.header("Authorization", a.as_str())
+    } else {
+        accounts_req
+    };
+    let accounts_resp = accounts_req.send().await.map_err(|e| format!("IBKR /accounts req failed: {e}"))?;
+    if !accounts_resp.status().is_success() {
+        let status = accounts_resp.status();
+        let body = accounts_resp.text().await.unwrap_or_default();
+        return Err(format!("IBKR /accounts failed ({status}): {body}"));
+    }
+
+    let req = http_client
+        .get(&url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console");
+    let req = if let Some(ref a) = auth {
+        req.header("Authorization", a.as_str())
+    } else {
+        req
+    };
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("IBKR snapshot request failed: {e}"))?;
+    let status = resp.status();
+    let body_text = resp.text().await.map_err(|e| format!("IBKR snapshot body read failed: {e}"))?;
+
+    serde_json::from_str(body_text.trim())
+        .map_err(|e| format!("IBKR snapshot JSON parse failed (status {status}): {e}; body starts: {}", body_text.trim_start().chars().take(200).collect::<String>()))
+}
+
 /// Spawn the background task that refreshes the watchlist every REFRESH_INTERVAL_SECS (IBKR only).
 pub fn spawn_watchlist_ticker(
     cache: Arc<RwLock<WatchlistCache>>,

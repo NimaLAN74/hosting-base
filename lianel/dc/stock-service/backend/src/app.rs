@@ -73,7 +73,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/history", get(history_handler))
         .route("/api/v1/stock-service/history", get(history_handler))
         .route("/api/v1/today", get(today_handler))
-        .route("/api/v1/stock-service/today", get(today_handler));
+        .route("/api/v1/stock-service/today", get(today_handler))
+        .route(
+            "/api/v1/stock-service/debug/snapshot",
+            get(debug_snapshot_handler),
+        );
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -294,6 +298,172 @@ async fn history_handler(
                 .into_response()
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct DebugSnapshotQuery {
+    /// Comma-separated list of symbols, e.g. `GOOGL,META`.
+    /// If omitted, we debug all symbols that currently have `price = null`.
+    symbols: Option<String>,
+}
+
+async fn debug_snapshot_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DebugSnapshotQuery>,
+) -> impl IntoResponse {
+    let ibkr_client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+    let cfg = match state.config.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "service config missing"})),
+            )
+                .into_response();
+        }
+    };
+
+    let snapshot_symbols: Vec<String> = {
+        let g = state.watchlist_cache.read().await;
+        let from_query = q
+            .symbols
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_ascii_uppercase())
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if !from_query.is_empty() {
+            from_query
+        } else {
+            g.quotes
+                .iter()
+                .filter_map(|(sym, q)| if q.price.is_none() { Some(sym.clone()) } else { None })
+                .collect()
+        }
+    }
+    .into_iter()
+    .filter(|s| watchlist::is_watchlist_symbol(s))
+    .collect();
+
+    if snapshot_symbols.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No valid symbols to debug"})),
+        )
+            .into_response();
+    }
+
+    let resolved_pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        snapshot_symbols
+            .iter()
+            .filter_map(|sym| watchlist::get_conid_with_cache(sym, &g).map(|c| (sym.clone(), c)))
+            .collect()
+    };
+
+    if resolved_pairs.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Could not resolve any conids for requested symbols"})),
+        )
+            .into_response();
+    }
+
+    let conids: Vec<u64> = resolved_pairs.iter().map(|(_, c)| *c).collect();
+
+    let raw = match watchlist::fetch_snapshot_raw_for_conids(
+        ibkr_client.as_ref(),
+        &cfg.ibkr_api_base_url,
+        &conids,
+        None, // Intentionally omit `fields` so we can inspect what IBKR returns for missing prices.
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let conid_to_symbol: Vec<(u64, String)> = resolved_pairs
+        .iter()
+        .map(|(s, c)| (*c, s.clone()))
+        .collect();
+
+    let parse_f64 = |item: &serde_json::Value, key: &str| -> Option<f64> {
+        item.get(key).and_then(|v| v.as_f64()).or_else(|| {
+            item.get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|p| p.replace(',', "").parse::<f64>().ok())
+        })
+    };
+
+    let snapshot_items = match raw {
+        serde_json::Value::Array(arr) => arr,
+        other => vec![other],
+    };
+
+    let computed: Vec<serde_json::Value> = snapshot_items
+        .iter()
+        .filter_map(|item| {
+            let conid = item
+                .get("conid")
+                .and_then(|v| v.as_u64())
+                .or_else(|| item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))?;
+            let symbol = conid_to_symbol
+                .iter()
+                .find(|(c, _)| *c == conid)
+                .map(|(_, s)| s.clone())
+                .unwrap_or_else(|| item.get("55").and_then(|v| v.as_str()).unwrap_or("?").to_string());
+
+            let last = parse_f64(item, "31");
+            let bid = parse_f64(item, "84");
+            let ask = parse_f64(item, "86");
+            let best = last
+                .filter(|p| p.is_finite() && *p > 0.0)
+                .or_else(|| match (bid, ask) {
+                    (Some(b), Some(a)) => Some((b + a) / 2.0),
+                    (Some(b), None) => Some(b),
+                    (None, Some(a)) => Some(a),
+                    _ => None,
+                });
+
+            Some(serde_json::json!({
+                "symbol": symbol,
+                "conid": conid,
+                "fields": { "31_last": last, "84_bid": bid, "86_ask": ask },
+                "computed_best_price": best,
+            }))
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "requested_symbols": snapshot_symbols,
+            "resolved": resolved_pairs.iter().map(|(s,c)| serde_json::json!({"symbol": s, "conid": c})).collect::<Vec<_>>(),
+            "computed_from_fields": computed,
+            "raw": raw,
+        })),
+    )
+        .into_response()
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
