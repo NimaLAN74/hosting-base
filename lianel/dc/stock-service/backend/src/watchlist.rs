@@ -168,11 +168,26 @@ async fn fetch_conids_from_trsrv(
                         out.insert((*sym).to_string(), c);
                     }
                     None => {
-                        tracing::warn!(
-                            "trsrv/stocks: could not extract conid for symbol={} (raw_key={})",
-                            sym,
-                            raw_key
-                        );
+                        // Avoid flooding logs: only dump the payload for one symbol.
+                        if sym.eq_ignore_ascii_case("GOOGL") {
+                            let snippet: String = val
+                                .to_string()
+                                .chars()
+                                .take(420)
+                                .collect();
+                            tracing::warn!(
+                                "trsrv/stocks: could not extract conid for symbol={} (raw_key={}) val_snippet={}",
+                                sym,
+                                raw_key,
+                                snippet
+                            );
+                        } else {
+                            tracing::warn!(
+                                "trsrv/stocks: could not extract conid for symbol={} (raw_key={})",
+                                sym,
+                                raw_key
+                            );
+                        }
                     }
                 }
                 break;
@@ -196,11 +211,21 @@ async fn fetch_conids_from_trsrv(
                     out.insert((*matched).to_string(), c);
                 }
                 None => {
-                    tracing::warn!(
-                        "trsrv/stocks: could not extract conid for symbol={} (item_symbol={})",
-                        matched,
-                        sym_str
-                    );
+                    if matched.eq_ignore_ascii_case("GOOGL") {
+                        let snippet: String = item.to_string().chars().take(420).collect();
+                        tracing::warn!(
+                            "trsrv/stocks: could not extract conid for symbol={} (item_symbol={}) item_snippet={}",
+                            matched,
+                            sym_str,
+                            snippet
+                        );
+                    } else {
+                        tracing::warn!(
+                            "trsrv/stocks: could not extract conid for symbol={} (item_symbol={})",
+                            matched,
+                            sym_str
+                        );
+                    }
                 }
             }
         }
