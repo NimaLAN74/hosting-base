@@ -60,14 +60,28 @@ pub fn get_conid_with_cache(symbol: &str, cache: &WatchlistCache) -> Option<u64>
         .or_else(|| get_conid_for_symbol(&n))
 }
 
-/// Resolve symbols to conids via IBKR GET /trsrv/stocks (no session required). Returns map symbol -> conid; use default_symbol_conids() for any missing.
-async fn fetch_conids_from_trsrv(base_url: &str, symbols: &[&str]) -> HashMap<String, u64> {
+/// Resolve symbols to conids via IBKR GET /trsrv/stocks.
+///
+/// In practice this endpoint requires OAuth in our environment; without Authorization it returns 401 and we'd
+/// fall back to hardcoded (possibly stale) conids.
+async fn fetch_conids_from_trsrv(
+    ibkr_client: &IbkrOAuthClient,
+    base_url: &str,
+    symbols: &[&str],
+) -> HashMap<String, u64> {
     let symbols_param = symbols.join(",");
     let url = format!(
         "{}/trsrv/stocks?symbols={}",
         base_url.trim_end_matches('/'),
         urlencoding::encode(&symbols_param)
     );
+
+    // OAuth signature + LST are required for our brokerage session in production.
+    let auth = match ibkr_client.sign_request("GET", &url, None).await {
+        Ok(a) => Some(a),
+        Err(_) => None,
+    };
+
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -75,7 +89,13 @@ async fn fetch_conids_from_trsrv(base_url: &str, symbols: &[&str]) -> HashMap<St
         Ok(c) => c,
         Err(_) => return default_symbol_conids(),
     };
-    let resp = match client.get(&url).header("User-Agent", "Console").send().await {
+
+    let mut req = client.get(&url).header("User-Agent", "Console");
+    if let Some(a) = auth {
+        req = req.header("Authorization", a.as_str());
+    }
+
+    let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             tracing::debug!("trsrv/stocks request failed: {}", e);
@@ -215,8 +235,13 @@ pub async fn refresh_from_ibkr(
     base_url: &str,
     redis: Option<&redis::aio::ConnectionManager>,
 ) {
-    // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols)
-    let conids_map = fetch_conids_from_trsrv(base_url, DEFAULT_SYMBOLS).await;
+    // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols).
+    // If it fails, we keep using the hardcoded defaults.
+    let conids_map = if let Some(ref client) = ibkr_client {
+        fetch_conids_from_trsrv(client.as_ref(), base_url, DEFAULT_SYMBOLS).await
+    } else {
+        default_symbol_conids()
+    };
     let conids_list: Vec<u64> = DEFAULT_SYMBOLS
         .iter()
         .filter_map(|s| conids_map.get(*s).copied())
