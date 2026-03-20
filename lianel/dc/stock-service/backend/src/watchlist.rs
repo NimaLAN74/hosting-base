@@ -83,6 +83,12 @@ async fn fetch_conids_from_trsrv(
         Err(_) => None,
     };
     let cookie = ibkr_client.get_session_for_cookie().await.ok();
+    if auth.is_none() {
+        tracing::warn!("trsrv/stocks: sign_request failed (falling back to default conids)");
+    }
+    if cookie.is_none() {
+        tracing::warn!("trsrv/stocks: get_session_for_cookie failed (no api cookie; falling back to default conids)");
+    }
 
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -107,17 +113,43 @@ async fn fetch_conids_from_trsrv(
             return default_symbol_conids();
         }
     };
-    if !resp.status().is_success() {
-        tracing::debug!("trsrv/stocks returned {}", resp.status());
+
+    let status = resp.status();
+    let body_text = match resp.text().await {
+        Ok(b) => b,
+        Err(_) => {
+            tracing::warn!("trsrv/stocks: failed reading response body (status {})", status);
+            return default_symbol_conids();
+        }
+    };
+    if !status.is_success() {
+        let snippet: String = body_text
+            .trim_start()
+            .chars()
+            .take(220)
+            .collect();
+        tracing::warn!(
+            "trsrv/stocks: non-success status={} body_snippet={}",
+            status,
+            snippet
+        );
         return default_symbol_conids();
     }
-    let body = match resp.text().await {
-        Ok(b) => b,
-        Err(_) => return default_symbol_conids(),
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(&body) {
+    let parsed: serde_json::Value = match serde_json::from_str(&body_text) {
         Ok(v) => v,
-        Err(_) => return default_symbol_conids(),
+        Err(e) => {
+            let snippet: String = body_text
+                .trim_start()
+                .chars()
+                .take(220)
+                .collect();
+            tracing::warn!(
+                "trsrv/stocks: JSON parse failed: {} body_snippet={}",
+                e,
+                snippet
+            );
+            return default_symbol_conids();
+        }
     };
     let mut out = default_symbol_conids();
     // Response can be object with symbol keys -> array of {conid}, or array of {symbol, conid}
