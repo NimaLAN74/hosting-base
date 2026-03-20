@@ -163,8 +163,17 @@ async fn fetch_conids_from_trsrv(
                 if norm_sym(sym) != kn {
                     continue;
                 }
-                if let Some(c) = conid_from_trsrv_entry(val) {
-                    out.insert((*sym).to_string(), c);
+                match conid_from_trsrv_entry(val) {
+                    Some(c) => {
+                        out.insert((*sym).to_string(), c);
+                    }
+                    None => {
+                        tracing::warn!(
+                            "trsrv/stocks: could not extract conid for symbol={} (raw_key={})",
+                            sym,
+                            raw_key
+                        );
+                    }
                 }
                 break;
             }
@@ -182,8 +191,17 @@ async fn fetch_conids_from_trsrv(
             let Some(matched) = symbols.iter().find(|s| norm_sym(s) == sn) else {
                 continue;
             };
-            if let Some(c) = conid_from_trsrv_entry(item) {
-                out.insert((*matched).to_string(), c);
+            match conid_from_trsrv_entry(item) {
+                Some(c) => {
+                    out.insert((*matched).to_string(), c);
+                }
+                None => {
+                    tracing::warn!(
+                        "trsrv/stocks: could not extract conid for symbol={} (item_symbol={})",
+                        matched,
+                        sym_str
+                    );
+                }
             }
         }
     }
