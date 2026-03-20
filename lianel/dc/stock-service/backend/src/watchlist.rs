@@ -239,10 +239,26 @@ fn conid_from_trsrv_entry(val: &serde_json::Value) -> Option<u64> {
     } else {
         val
     };
-    node
-        .get("conid")
+    // Common shapes we have seen:
+    // 1) { "conid": 123 }
+    // 2) [ { "conid": 123 } ]
+    // 3) { "contracts": [ { "conid": 123, ... }, ... ] }  (this is what `/trsrv/stocks` returns for our assets)
+    node.get("conid")
         .and_then(|v| v.as_u64())
         .or_else(|| node.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
+        .or_else(|| {
+            let contracts = node.get("contracts")?;
+            let contracts = contracts.as_array()?;
+            for c in contracts {
+                let conid = c.get("conid")
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| c.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()));
+                if conid.is_some() {
+                    return conid;
+                }
+            }
+            None::<u64>
+        })
 }
 
 #[derive(Clone, Debug, Serialize)]
