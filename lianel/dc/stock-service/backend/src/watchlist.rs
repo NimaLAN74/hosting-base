@@ -95,7 +95,10 @@ async fn fetch_conids_from_trsrv(
         .build()
     {
         Ok(c) => c,
-        Err(_) => return default_symbol_conids(),
+        Err(e) => {
+            tracing::warn!("trsrv/stocks: failed building http client: {}", e);
+            return default_symbol_conids();
+        }
     };
 
     let mut req = client.get(&url).header("User-Agent", "Console");
@@ -109,7 +112,7 @@ async fn fetch_conids_from_trsrv(
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
-            tracing::debug!("trsrv/stocks request failed: {}", e);
+            tracing::warn!("trsrv/stocks request failed: {}", e);
             return default_symbol_conids();
         }
     };
