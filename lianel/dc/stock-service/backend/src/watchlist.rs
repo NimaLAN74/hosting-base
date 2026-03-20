@@ -76,11 +76,13 @@ async fn fetch_conids_from_trsrv(
         urlencoding::encode(&symbols_param)
     );
 
-    // OAuth signature + LST are required for our brokerage session in production.
+    // OAuth signature + (often) an active brokerage session cookie are required for /trsrv/stocks.
+    // Without the cookie, IBKR can return 401/empty and we fall back to hardcoded conids.
     let auth = match ibkr_client.sign_request("GET", &url, None).await {
         Ok(a) => Some(a),
         Err(_) => None,
     };
+    let cookie = ibkr_client.get_session_for_cookie().await.ok();
 
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -93,6 +95,9 @@ async fn fetch_conids_from_trsrv(
     let mut req = client.get(&url).header("User-Agent", "Console");
     if let Some(a) = auth {
         req = req.header("Authorization", a.as_str());
+    }
+    if let Some(c) = cookie {
+        req = req.header("Cookie", format!("api={}", c));
     }
 
     let resp = match req.send().await {
