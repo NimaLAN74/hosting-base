@@ -66,3 +66,11 @@ docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml
 sleep 3
 docker compose -f docker-compose.infra.yaml -f docker-compose.stock-service.yaml ps $SERVICE_NAME
 echo "✅ Stock service backend deployed"
+
+# nginx-proxy runs as a separate container and can keep stale upstream IPs after
+# stock-service container recreation. Reload nginx-proxy to re-resolve and stop 502s.
+echo "Reloading nginx-proxy..."
+docker exec nginx-proxy nginx -t 2>/dev/null && \
+  docker exec nginx-proxy nginx -s reload 2>/dev/null && \
+  echo "✅ nginx-proxy reloaded" || \
+  echo "⚠️ nginx-proxy reload skipped (nginx-proxy or config not ready)"

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
+use crate::daily_strategy;
 use crate::ibkr::IbkrOAuthClient;
 use crate::watchlist;
 use tokio::sync::RwLock;
@@ -73,7 +74,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/history", get(history_handler))
         .route("/api/v1/stock-service/history", get(history_handler))
         .route("/api/v1/today", get(today_handler))
-        .route("/api/v1/stock-service/today", get(today_handler));
+        .route("/api/v1/stock-service/today", get(today_handler))
+        .route("/api/v1/daily-signals", get(daily_signals_handler))
+        .route("/api/v1/stock-service/daily-signals", get(daily_signals_handler))
+        // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
+        // so we also need the canonical alias for debug.
+        .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
+        .route(
+            "/api/v1/stock-service/debug/snapshot",
+            get(debug_snapshot_handler),
+        );
 
     let protected = Router::new()
         .route("/api/v1/me", get(me))
@@ -199,7 +209,7 @@ async fn today_handler(
         )
             .into_response();
     }
-    if watchlist::get_conid_for_symbol(symbol).is_none() {
+    if !watchlist::is_watchlist_symbol(symbol) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "symbol not in watchlist"})),
@@ -230,14 +240,24 @@ async fn history_handler(
         )
             .into_response();
     }
-    let conid = match watchlist::get_conid_for_symbol(symbol) {
-        Some(c) => c,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "symbol not in watchlist"})),
-            )
-                .into_response()
+    if !watchlist::is_watchlist_symbol(symbol) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "symbol not in watchlist"})),
+        )
+            .into_response();
+    }
+    let conid = {
+        let g = state.watchlist_cache.read().await;
+        match watchlist::get_conid_with_cache(symbol, &g) {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "unknown conid for symbol"})),
+                )
+                    .into_response()
+            }
         }
     };
     let client = match state.ibkr_client.as_ref() {
@@ -284,6 +304,256 @@ async fn history_handler(
                 .into_response()
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct DailySignalsQuery {
+    /// Cross-sectional top/bottom fraction (default 0.2).
+    #[serde(default = "default_signal_quantile")]
+    quantile: f64,
+    /// If false, long-only (no short leg). Default: true unless `DAILY_STRATEGY_SHORT_ENABLED=0`.
+    #[serde(default)]
+    short: Option<bool>,
+    /// Include simple long/short backtest on aligned history (default false).
+    #[serde(default)]
+    backtest: Option<bool>,
+}
+
+fn default_signal_quantile() -> f64 {
+    daily_strategy::DEFAULT_QUANTILE
+}
+
+async fn daily_signals_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DailySignalsQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    let quantile = q.quantile.clamp(0.05, 0.45);
+    let short_enabled = q.short.unwrap_or_else(|| {
+        std::env::var("DAILY_STRATEGY_SHORT_ENABLED")
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+    });
+    let include_backtest = q.backtest.unwrap_or(false);
+
+    let pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        watchlist::DEFAULT_SYMBOLS
+            .iter()
+            .filter_map(|s| {
+                let sym = s.to_string();
+                watchlist::get_conid_with_cache(s, &g).map(|c| (sym, c))
+            })
+            .collect()
+    };
+
+    if pairs.len() < 3 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "need at least 3 watchlist symbols with conids"})),
+        )
+            .into_response();
+    }
+
+    match daily_strategy::compute_daily_signals(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        include_backtest,
+    )
+    .await
+    {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => {
+            tracing::warn!("daily-signals failed: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct DebugSnapshotQuery {
+    /// Comma-separated list of symbols, e.g. `GOOGL,META`.
+    /// If omitted, we debug all symbols that currently have `price = null`.
+    symbols: Option<String>,
+    /// Optional comma-separated snapshot field list (IBKR `/iserver/marketdata/snapshot`).
+    /// If omitted, we omit `fields=` to let IBKR use its default.
+    fields: Option<String>,
+}
+
+async fn debug_snapshot_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DebugSnapshotQuery>,
+) -> impl IntoResponse {
+    let ibkr_client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+    let cfg = match state.config.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "service config missing"})),
+            )
+                .into_response();
+        }
+    };
+
+    let snapshot_symbols: Vec<String> = {
+        let g = state.watchlist_cache.read().await;
+        let from_query = q
+            .symbols
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_ascii_uppercase())
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if !from_query.is_empty() {
+            from_query
+        } else {
+            g.quotes
+                .iter()
+                .filter_map(|(sym, q)| if q.price.is_none() { Some(sym.clone()) } else { None })
+                .collect()
+        }
+    }
+    .into_iter()
+    .filter(|s| watchlist::is_watchlist_symbol(s))
+    .collect();
+
+    if snapshot_symbols.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "No valid symbols to debug"})),
+        )
+            .into_response();
+    }
+
+    let resolved_pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        snapshot_symbols
+            .iter()
+            .filter_map(|sym| watchlist::get_conid_with_cache(sym, &g).map(|c| (sym.clone(), c)))
+            .collect()
+    };
+
+    if resolved_pairs.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Could not resolve any conids for requested symbols"})),
+        )
+            .into_response();
+    }
+
+    let conids: Vec<u64> = resolved_pairs.iter().map(|(_, c)| *c).collect();
+
+    let raw = match watchlist::fetch_snapshot_raw_for_conids(
+        ibkr_client.as_ref(),
+        &cfg.ibkr_api_base_url,
+        &conids,
+        q.fields.as_deref(),
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let conid_to_symbol: Vec<(u64, String)> = resolved_pairs
+        .iter()
+        .map(|(s, c)| (*c, s.clone()))
+        .collect();
+
+    let parse_f64 = |item: &serde_json::Value, key: &str| -> Option<f64> {
+        item.get(key).and_then(|v| v.as_f64()).or_else(|| {
+            item.get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|p| p.replace(',', "").parse::<f64>().ok())
+        })
+    };
+
+    // Clone so we don't move `raw` (used later in the response).
+    let snapshot_items = match &raw {
+        serde_json::Value::Array(arr) => arr.clone(),
+        other => vec![other.clone()],
+    };
+
+    let computed: Vec<serde_json::Value> = snapshot_items
+        .iter()
+        .filter_map(|item| {
+            let conid = item
+                .get("conid")
+                .and_then(|v| v.as_u64())
+                .or_else(|| item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))?;
+            let symbol = conid_to_symbol
+                .iter()
+                .find(|(c, _)| *c == conid)
+                .map(|(_, s)| s.clone())
+                .unwrap_or_else(|| item.get("55").and_then(|v| v.as_str()).unwrap_or("?").to_string());
+
+            let last = parse_f64(item, "31");
+            let bid = parse_f64(item, "84");
+            let ask = parse_f64(item, "86");
+            let best = last
+                .filter(|p| p.is_finite() && *p > 0.0)
+                .or_else(|| match (bid, ask) {
+                    (Some(b), Some(a)) => Some((b + a) / 2.0),
+                    (Some(b), None) => Some(b),
+                    (None, Some(a)) => Some(a),
+                    _ => None,
+                });
+
+            Some(serde_json::json!({
+                "symbol": symbol,
+                "conid": conid,
+                "fields": { "31_last": last, "84_bid": bid, "86_ask": ask },
+                "computed_best_price": best,
+            }))
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "requested_symbols": snapshot_symbols,
+            "resolved": resolved_pairs.iter().map(|(s,c)| serde_json::json!({"symbol": s, "conid": c})).collect::<Vec<_>>(),
+            "computed_from_fields": computed,
+            "raw": raw,
+        })),
+    )
+        .into_response()
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {

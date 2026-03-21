@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 use tracing;
 
 const REFRESH_INTERVAL_SECS: u64 = 60;
-/// Field 31 = last price (IBKR snapshot).
-const SNAPSHOT_FIELDS: &str = "31";
+/// 31 = last; 84/86 = bid/ask (used when last is empty — delayed data / pre-flight).
+const SNAPSHOT_FIELDS: &str = "31,84,86";
 
 /// Default 10 common symbols (US large cap). Conids from IBKR for these symbols.
 pub const DEFAULT_SYMBOLS: &[&str] = &[
@@ -19,6 +19,7 @@ pub const DEFAULT_SYMBOLS: &[&str] = &[
 ];
 
 /// Symbol → conid for default watchlist (IBKR US stock conids).
+/// Refreshed from `/trsrv/stocks` each cycle when possible; these are fallbacks if trsrv fails.
 fn default_symbol_conids() -> HashMap<String, u64> {
     let mut m = HashMap::new();
     m.insert("AAPL".to_string(), 265598);
@@ -34,75 +35,230 @@ fn default_symbol_conids() -> HashMap<String, u64> {
     m
 }
 
-/// Conid for a watchlist symbol (for history endpoint). Returns None if symbol not in default list.
-pub fn get_conid_for_symbol(symbol: &str) -> Option<u64> {
-    default_symbol_conids().get(symbol).copied()
+fn norm_sym(s: &str) -> String {
+    s.trim().to_ascii_uppercase()
 }
 
-/// Resolve symbols to conids via IBKR GET /trsrv/stocks (no session required). Returns map symbol -> conid; use default_symbol_conids() for any missing.
-async fn fetch_conids_from_trsrv(base_url: &str, symbols: &[&str]) -> HashMap<String, u64> {
+/// True if `symbol` is one of the fixed watchlist tickers.
+pub fn is_watchlist_symbol(symbol: &str) -> bool {
+    let n = norm_sym(symbol);
+    DEFAULT_SYMBOLS.iter().any(|s| norm_sym(s) == n)
+}
+
+/// Static fallback conid (for tests and last-resort). Prefer [`get_conid_with_cache`] after a refresh.
+pub fn get_conid_for_symbol(symbol: &str) -> Option<u64> {
+    default_symbol_conids().get(&norm_sym(symbol)).copied()
+}
+
+/// Conid from last successful trsrv resolution, else static fallback.
+pub fn get_conid_with_cache(symbol: &str, cache: &WatchlistCache) -> Option<u64> {
+    let n = norm_sym(symbol);
+    cache
+        .resolved_conids
+        .get(&n)
+        .copied()
+        .or_else(|| get_conid_for_symbol(&n))
+}
+
+/// Resolve symbols to conids via IBKR GET /trsrv/stocks.
+///
+/// In practice this endpoint requires OAuth in our environment; without Authorization it returns 401 and we'd
+/// fall back to hardcoded (possibly stale) conids.
+async fn fetch_conids_from_trsrv(
+    ibkr_client: &IbkrOAuthClient,
+    base_url: &str,
+    symbols: &[&str],
+) -> HashMap<String, u64> {
     let symbols_param = symbols.join(",");
     let url = format!(
         "{}/trsrv/stocks?symbols={}",
         base_url.trim_end_matches('/'),
         urlencoding::encode(&symbols_param)
     );
+
+    // OAuth signature + (often) an active brokerage session cookie are required for /trsrv/stocks.
+    // Without the cookie, IBKR can return 401/empty and we fall back to hardcoded conids.
+    let auth = match ibkr_client.sign_request("GET", &url, None).await {
+        Ok(a) => Some(a),
+        Err(_) => None,
+    };
+    let cookie = ibkr_client.get_session_for_cookie().await.ok();
+    if auth.is_none() {
+        tracing::warn!("trsrv/stocks: sign_request failed (falling back to default conids)");
+    }
+    if cookie.is_none() {
+        tracing::warn!("trsrv/stocks: get_session_for_cookie failed (no api cookie; falling back to default conids)");
+    }
+
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return default_symbol_conids(),
-    };
-    let resp = match client.get(&url).header("User-Agent", "Console").send().await {
-        Ok(r) => r,
         Err(e) => {
-            tracing::debug!("trsrv/stocks request failed: {}", e);
+            tracing::warn!("trsrv/stocks: failed building http client: {}", e);
             return default_symbol_conids();
         }
     };
-    if !resp.status().is_success() {
-        tracing::debug!("trsrv/stocks returned {}", resp.status());
+
+    let mut req = client.get(&url).header("User-Agent", "Console");
+    if let Some(a) = auth {
+        req = req.header("Authorization", a.as_str());
+    }
+    if let Some(c) = cookie {
+        req = req.header("Cookie", format!("api={}", c));
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("trsrv/stocks request failed: {}", e);
+            return default_symbol_conids();
+        }
+    };
+
+    let status = resp.status();
+    let body_text = match resp.text().await {
+        Ok(b) => b,
+        Err(_) => {
+            tracing::warn!("trsrv/stocks: failed reading response body (status {})", status);
+            return default_symbol_conids();
+        }
+    };
+    if !status.is_success() {
+        let snippet: String = body_text
+            .trim_start()
+            .chars()
+            .take(220)
+            .collect();
+        tracing::warn!(
+            "trsrv/stocks: non-success status={} body_snippet={}",
+            status,
+            snippet
+        );
         return default_symbol_conids();
     }
-    let body = match resp.text().await {
-        Ok(b) => b,
-        Err(_) => return default_symbol_conids(),
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(&body) {
+    let parsed: serde_json::Value = match serde_json::from_str(&body_text) {
         Ok(v) => v,
-        Err(_) => return default_symbol_conids(),
+        Err(e) => {
+            let snippet: String = body_text
+                .trim_start()
+                .chars()
+                .take(220)
+                .collect();
+            tracing::warn!(
+                "trsrv/stocks: JSON parse failed: {} body_snippet={}",
+                e,
+                snippet
+            );
+            return default_symbol_conids();
+        }
     };
     let mut out = default_symbol_conids();
     // Response can be object with symbol keys -> array of {conid}, or array of {symbol, conid}
     if let Some(obj) = parsed.as_object() {
-        for sym in symbols {
-            let key = *sym;
-            if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
-                if let Some(first) = arr.first() {
-                    if let Some(c) = first.get("conid").and_then(|v| v.as_u64()).or_else(|| {
-                        first.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
-                    }) {
-                        out.insert(key.to_string(), c);
+        for (raw_key, val) in obj {
+            let kn = norm_sym(raw_key);
+            for sym in symbols {
+                if norm_sym(sym) != kn {
+                    continue;
+                }
+                match conid_from_trsrv_entry(val) {
+                    Some(c) => {
+                        out.insert((*sym).to_string(), c);
+                    }
+                    None => {
+                        // Avoid flooding logs: only dump the payload for one symbol.
+                        if sym.eq_ignore_ascii_case("GOOGL") {
+                            let snippet: String = val
+                                .to_string()
+                                .chars()
+                                .take(420)
+                                .collect();
+                            tracing::warn!(
+                                "trsrv/stocks: could not extract conid for symbol={} (raw_key={}) val_snippet={}",
+                                sym,
+                                raw_key,
+                                snippet
+                            );
+                        } else {
+                            tracing::warn!(
+                                "trsrv/stocks: could not extract conid for symbol={} (raw_key={})",
+                                sym,
+                                raw_key
+                            );
+                        }
                     }
                 }
+                break;
             }
         }
     } else if let Some(arr) = parsed.as_array() {
         for item in arr {
-            if let (Some(sym), Some(c)) = (
-                item.get("symbol").and_then(|v| v.as_str()),
-                item.get("conid").and_then(|v| v.as_u64()).or_else(|| {
-                    item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
-                }),
-            ) {
-                if symbols.contains(&sym) {
-                    out.insert(sym.to_string(), c);
+            let sym_str = item
+                .get("symbol")
+                .or_else(|| item.get("Symbol"))
+                .and_then(|v| v.as_str());
+            let Some(sym_str) = sym_str else {
+                continue;
+            };
+            let sn = norm_sym(sym_str);
+            let Some(matched) = symbols.iter().find(|s| norm_sym(s) == sn) else {
+                continue;
+            };
+            match conid_from_trsrv_entry(item) {
+                Some(c) => {
+                    out.insert((*matched).to_string(), c);
+                }
+                None => {
+                    if matched.eq_ignore_ascii_case("GOOGL") {
+                        let snippet: String = item.to_string().chars().take(420).collect();
+                        tracing::warn!(
+                            "trsrv/stocks: could not extract conid for symbol={} (item_symbol={}) item_snippet={}",
+                            matched,
+                            sym_str,
+                            snippet
+                        );
+                    } else {
+                        tracing::warn!(
+                            "trsrv/stocks: could not extract conid for symbol={} (item_symbol={})",
+                            matched,
+                            sym_str
+                        );
+                    }
                 }
             }
         }
     }
     out
+}
+
+fn conid_from_trsrv_entry(val: &serde_json::Value) -> Option<u64> {
+    let node = if let Some(arr) = val.as_array() {
+        arr.first()?
+    } else {
+        val
+    };
+    // Common shapes we have seen:
+    // 1) { "conid": 123 }
+    // 2) [ { "conid": 123 } ]
+    // 3) { "contracts": [ { "conid": 123, ... }, ... ] }  (this is what `/trsrv/stocks` returns for our assets)
+    node.get("conid")
+        .and_then(|v| v.as_u64())
+        .or_else(|| node.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
+        .or_else(|| {
+            let contracts = node.get("contracts")?;
+            let contracts = contracts.as_array()?;
+            for c in contracts {
+                let conid = c.get("conid")
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| c.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()));
+                if conid.is_some() {
+                    return conid;
+                }
+            }
+            None::<u64>
+        })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -124,6 +280,8 @@ pub struct WatchlistResponse {
 pub struct WatchlistCache {
     pub quotes: HashMap<String, WatchlistQuote>,
     pub as_of: String,
+    /// Latest symbol → conid from `/trsrv/stocks` (merged with defaults). Used for `/history` and `/today`.
+    pub resolved_conids: HashMap<String, u64>,
 }
 
 impl Default for WatchlistCache {
@@ -143,7 +301,11 @@ impl Default for WatchlistCache {
             .into_iter()
             .map(|q| (q.symbol.clone(), q))
             .collect();
-        Self { quotes, as_of }
+        Self {
+            quotes,
+            as_of,
+            resolved_conids: default_symbol_conids(),
+        }
     }
 }
 
@@ -172,8 +334,13 @@ pub async fn refresh_from_ibkr(
     base_url: &str,
     redis: Option<&redis::aio::ConnectionManager>,
 ) {
-    // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols)
-    let conids_map = fetch_conids_from_trsrv(base_url, DEFAULT_SYMBOLS).await;
+    // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols).
+    // If it fails, we keep using the hardcoded defaults.
+    let conids_map = if let Some(ref client) = ibkr_client {
+        fetch_conids_from_trsrv(client.as_ref(), base_url, DEFAULT_SYMBOLS).await
+    } else {
+        default_symbol_conids()
+    };
     let conids_list: Vec<u64> = DEFAULT_SYMBOLS
         .iter()
         .filter_map(|s| conids_map.get(*s).copied())
@@ -444,7 +611,31 @@ pub async fn refresh_from_ibkr(
         .map(|(sym, &c)| (c, sym.clone()))
         .collect();
 
-    /// Extract error message from IBKR error object, e.g. {"error":"...","statusCode":400}
+    fn parse_snapshot_f64(item: &serde_json::Value, field: &str) -> Option<f64> {
+        item.get(field).and_then(|v| v.as_f64()).or_else(|| {
+            item.get(field)
+                .and_then(|v| v.as_str())
+                .and_then(|p| p.replace(',', "").parse::<f64>().ok())
+        })
+    }
+
+    // Prefer last (31); if missing use bid/ask midpoint or single side (delayed / pre-flight).
+    fn best_price_from_snapshot_item(item: &serde_json::Value) -> Option<f64> {
+        let last = parse_snapshot_f64(item, "31").filter(|p| p.is_finite() && *p > 0.0);
+        if last.is_some() {
+            return last;
+        }
+        let bid = parse_snapshot_f64(item, "84").filter(|p| p.is_finite() && *p > 0.0);
+        let ask = parse_snapshot_f64(item, "86").filter(|p| p.is_finite() && *p > 0.0);
+        match (bid, ask) {
+            (Some(b), Some(a)) => Some((b + a) / 2.0),
+            (Some(b), None) => Some(b),
+            (None, Some(a)) => Some(a),
+            _ => None,
+        }
+    }
+
+    // Extract error message from IBKR error object, e.g. {"error":"...","statusCode":400}
     fn ibkr_error_from_value(v: &serde_json::Value) -> Option<String> {
         let obj = v.as_object()?;
         let msg = obj
@@ -467,17 +658,24 @@ pub async fn refresh_from_ibkr(
                 let conid = item.get("conid").and_then(|v| v.as_u64()).or_else(|| {
                     item.get("conid").and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
                 });
-                let symbol = conid
+                let mut symbol = conid
                     .and_then(|c| conid_to_symbol.get(&c).cloned())
                     .unwrap_or_else(|| "?".to_string());
-                // Field 31 = last price; IBKR may return number or string
-                let price = item.get("31").and_then(|v| v.as_f64()).or_else(|| {
-                    item.get("31")
+                if symbol == "?" {
+                    if let Some(s) = item
+                        .get("55")
                         .and_then(|v| v.as_str())
-                        .and_then(|p| p.replace(',', "").parse::<f64>().ok())
-                });
+                        .map(|s| s.to_string())
+                    {
+                        symbol = s;
+                    }
+                }
+                let price = best_price_from_snapshot_item(&item);
                 let error = if price.is_none() {
-                    Some("no price (pre-flight or stream not ready)".to_string())
+                    Some(
+                        "no price (needs market data subscription, or pre-flight / delayed quote)"
+                            .to_string(),
+                    )
                 } else {
                     None
                 };
@@ -570,6 +768,8 @@ pub async fn refresh_from_ibkr(
         }
     }
 
+    next.resolved_conids = conids_map;
+
     if let Some(conn) = redis {
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -584,6 +784,130 @@ pub async fn refresh_from_ibkr(
 
     let mut g = cache.write().await;
     *g = next;
+}
+
+/// Fetch raw IBKR `/iserver/marketdata/snapshot` response for the given conids.
+/// Used for debugging missing prices (what fields IBKR actually returns).
+pub async fn fetch_snapshot_raw_for_conids(
+    ibkr_client: &IbkrOAuthClient,
+    base_url: &str,
+    conids: &[u64],
+    fields: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    if conids.is_empty() {
+        return Err("conids required".to_string());
+    }
+
+    let conids_param = conids
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let url = match fields {
+        Some(f) if !f.trim().is_empty() => format!(
+            "{}/iserver/marketdata/snapshot?conids={}&fields={}",
+            base_url.trim_end_matches('/'),
+            conids_param,
+            f
+        ),
+        _ => format!(
+            "{}/iserver/marketdata/snapshot?conids={}",
+            base_url.trim_end_matches('/'),
+            conids_param
+        ),
+    };
+
+    // Build OAuth Authorization header if we're not in gateway-cookie mode.
+    let auth = if ibkr_client.use_oauth_for_api() {
+        Some(
+            ibkr_client
+                .sign_request("GET", &url, None)
+                .await
+                .map_err(|e| format!("IBKR sign_request failed: {e}"))?,
+        )
+    } else {
+        None
+    };
+
+    // /iserver/* requires brokerage session cookie (from tickle or Gateway cookie mode).
+    let cookie = ibkr_client
+        .get_session_for_cookie()
+        .await
+        .map_err(|e| format!("IBKR get_session_for_cookie failed: {e}"))?;
+
+    let http_client = ibkr_client.http_client().map_err(|e| e.to_string()).or_else(|_| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())
+    })?;
+
+    // Try to ensure brokerage session is authenticated before /accounts + market data snapshot.
+    let validate_url = format!("{}/sso/validate", base_url.trim_end_matches('/'));
+    let validate_req = http_client
+        .get(&validate_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console");
+    let validate_req = if let Some(ref a) = auth {
+        validate_req.header("Authorization", a.as_str())
+    } else {
+        validate_req
+    };
+    let _ = validate_req.send().await;
+
+    let reauth_url = format!("{}/iserver/reauthenticate", base_url.trim_end_matches('/'));
+    let reauth_req = http_client
+        .post(&reauth_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console")
+        .header("Content-Length", "0")
+        .body("");
+    let reauth_req = if let Some(ref a) = auth {
+        reauth_req.header("Authorization", a.as_str())
+    } else {
+        reauth_req
+    };
+    let _ = reauth_req.send().await;
+
+    // IBKR requires /iserver/accounts to be queried before market data snapshot.
+    let accounts_url = format!("{}/iserver/accounts", base_url.trim_end_matches('/'));
+    let accounts_req = http_client
+        .get(&accounts_url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console")
+        .header("Accept", "application/json");
+    let accounts_req = if let Some(ref a) = auth {
+        accounts_req.header("Authorization", a.as_str())
+    } else {
+        accounts_req
+    };
+    let accounts_resp = accounts_req.send().await.map_err(|e| format!("IBKR /accounts req failed: {e}"))?;
+    if !accounts_resp.status().is_success() {
+        let status = accounts_resp.status();
+        let body = accounts_resp.text().await.unwrap_or_default();
+        return Err(format!("IBKR /accounts failed ({status}): {body}"));
+    }
+
+    let req = http_client
+        .get(&url)
+        .header("Cookie", &format!("api={cookie}"))
+        .header("User-Agent", "Console");
+    let req = if let Some(ref a) = auth {
+        req.header("Authorization", a.as_str())
+    } else {
+        req
+    };
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("IBKR snapshot request failed: {e}"))?;
+    let status = resp.status();
+    let body_text = resp.text().await.map_err(|e| format!("IBKR snapshot body read failed: {e}"))?;
+
+    serde_json::from_str(body_text.trim())
+        .map_err(|e| format!("IBKR snapshot JSON parse failed (status {status}): {e}; body starts: {}", body_text.trim_start().chars().take(200).collect::<String>()))
 }
 
 /// Spawn the background task that refreshes the watchlist every REFRESH_INTERVAL_SECS (IBKR only).

@@ -17,7 +17,9 @@ To get prices for all symbols:
 
 - Ensure **IBKR_API_BASE_URL** is correct (e.g. `https://api.ibkr.com/v1/api`).
 - If you use a Gateway, trsrv might be under the same base; if trsrv returns 404/401 we still use hardcoded conids.
-- Your **IBKR account** must have **market data subscription** for the instruments you request; otherwise snapshot can return “no price (pre-flight or stream not ready)”.
+- Your **IBKR account** must have **market data subscription** for the instruments you request; otherwise snapshot can return “no price …”.
+- The watchlist snapshot requests **last (31)** and falls back to **bid/ask (84/86)** when last is empty (delayed / pre-flight).
+- **`/history` and `/today`** use **resolved conids** from the latest `/trsrv/stocks` merge (stored in the watchlist cache), not only the static map—so history matches the same contract as live prices when trsrv succeeds.
 
 ## Today's intraday cache (Redis)
 
