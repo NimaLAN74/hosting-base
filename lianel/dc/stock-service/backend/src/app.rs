@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
+use crate::daily_strategy;
 use crate::ibkr::IbkrOAuthClient;
 use crate::watchlist;
 use tokio::sync::RwLock;
@@ -74,6 +75,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/stock-service/history", get(history_handler))
         .route("/api/v1/today", get(today_handler))
         .route("/api/v1/stock-service/today", get(today_handler))
+        .route("/api/v1/daily-signals", get(daily_signals_handler))
+        .route("/api/v1/stock-service/daily-signals", get(daily_signals_handler))
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -297,6 +300,86 @@ async fn history_handler(
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "symbol": symbol, "data": [], "provider": "IBKR", "error": msg })),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct DailySignalsQuery {
+    /// Cross-sectional top/bottom fraction (default 0.2).
+    #[serde(default = "default_signal_quantile")]
+    quantile: f64,
+    /// If false, long-only (no short leg). Default: true unless `DAILY_STRATEGY_SHORT_ENABLED=0`.
+    #[serde(default)]
+    short: Option<bool>,
+    /// Include simple long/short backtest on aligned history (default false).
+    #[serde(default)]
+    backtest: Option<bool>,
+}
+
+fn default_signal_quantile() -> f64 {
+    daily_strategy::DEFAULT_QUANTILE
+}
+
+async fn daily_signals_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DailySignalsQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    let quantile = q.quantile.clamp(0.05, 0.45);
+    let short_enabled = q.short.unwrap_or_else(|| {
+        std::env::var("DAILY_STRATEGY_SHORT_ENABLED")
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+    });
+    let include_backtest = q.backtest.unwrap_or(false);
+
+    let pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        watchlist::DEFAULT_SYMBOLS
+            .iter()
+            .filter_map(|s| {
+                let sym = s.to_string();
+                watchlist::get_conid_with_cache(s, &g).map(|c| (sym, c))
+            })
+            .collect()
+    };
+
+    if pairs.len() < 3 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "need at least 3 watchlist symbols with conids"})),
+        )
+            .into_response();
+    }
+
+    match daily_strategy::compute_daily_signals(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        include_backtest,
+    )
+    .await
+    {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => {
+            tracing::warn!("daily-signals failed: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": e.to_string()})),
             )
                 .into_response()
         }
