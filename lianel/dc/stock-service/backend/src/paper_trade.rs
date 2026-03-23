@@ -76,7 +76,7 @@ const DECISION_KEY_PREFIX: &str = "paper:daily:decision:";
 const EXECUTION_KEY_PREFIX: &str = "paper:daily:execution:";
 const RECENT_EXECUTIONS_LIST_KEY: &str = "paper:daily:recent_executions";
 const LAST_EXECUTION_TS_KEY: &str = "paper:daily:last_execution_ts";
-const RECENT_EXECUTIONS_LIMIT: i64 = 20;
+const RECENT_EXECUTIONS_LIMIT: isize = 20;
 
 fn now_ts() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -145,7 +145,8 @@ async fn execute_decision_for_ts(
     redis: &redis::aio::ConnectionManager,
     decision_ts: u64,
 ) -> Result<Option<PaperExecution>> {
-    let raw: Option<String> = redis.get(decision_key(decision_ts)).await.ok();
+    let mut conn = redis.clone();
+    let raw: Option<String> = conn.get(decision_key(decision_ts)).await.ok();
     let Some(raw) = raw else {
         return Ok(None);
     };
@@ -229,7 +230,8 @@ pub async fn paper_trade_run(
     short_enabled: bool,
     train_days: usize,
 ) -> Result<PaperTradeRunResult> {
-    let pending: Vec<String> = redis.smembers(PENDING_SET_KEY).await.unwrap_or_default();
+    let mut conn = redis.clone();
+    let pending: Vec<String> = conn.smembers(PENDING_SET_KEY).await.unwrap_or_default();
     let pending_ts: Vec<u64> = pending
         .iter()
         .filter_map(|s| s.parse::<u64>().ok())
@@ -241,21 +243,23 @@ pub async fn paper_trade_run(
             Some(execution) => {
                 let exec_key = execution_key(execution.decision_as_of_ts);
                 let raw = serde_json::to_string(&execution)?;
-                let _: () = redis.set(exec_key, raw).await?;
-                let _: () = redis
+                let _: () = conn.set(exec_key, raw).await?;
+                let _: () = conn
                     .lpush(RECENT_EXECUTIONS_LIST_KEY, execution.decision_as_of_ts)
                     .await?;
-                let _: () = redis
+                let _: () = conn
                     .ltrim(
                         RECENT_EXECUTIONS_LIST_KEY,
                         0,
                         RECENT_EXECUTIONS_LIMIT.saturating_sub(1),
                     )
                     .await?;
-                let _: () = redis
+                let _: () = conn
                     .set(LAST_EXECUTION_TS_KEY, execution.decision_as_of_ts)
                     .await?;
-                let _: () = redis.srem(PENDING_SET_KEY, execution.decision_as_of_ts).await?;
+                let _: () = conn
+                    .srem(PENDING_SET_KEY, execution.decision_as_of_ts)
+                    .await?;
                 executed_count += 1;
             }
             None => {}
@@ -288,21 +292,18 @@ pub async fn paper_trade_run(
     if resp.publish_signals && resp.as_of_ts.is_some() && !resp.signals.is_empty() {
         let ts = resp.as_of_ts.unwrap();
         let key = decision_key(ts);
-        let exists: bool = redis.exists(&key).await.unwrap_or(false);
+        let exists: bool = conn.exists(&key).await.unwrap_or(false);
         if !exists {
             let decision = to_paper_decision(&resp);
             let raw = serde_json::to_string(&decision)?;
-            let _: () = redis.set(key, raw).await?;
-            let _: () = redis.sadd(PENDING_SET_KEY, ts).await?;
+            let _: () = conn.set(key, raw).await?;
+            let _: () = conn.sadd(PENDING_SET_KEY, ts).await?;
             stored_decision = true;
             stored_decision_ts = Some(ts);
         }
     }
 
-    let pending_after: usize = redis
-        .scard(PENDING_SET_KEY)
-        .await
-        .unwrap_or(0usize);
+    let pending_after: usize = conn.scard(PENDING_SET_KEY).await.unwrap_or(0usize);
 
     Ok(PaperTradeRunResult {
         executed_count,
@@ -315,17 +316,15 @@ pub async fn paper_trade_run(
 pub async fn paper_trade_status(
     redis: &redis::aio::ConnectionManager,
 ) -> Result<serde_json::Value> {
-    let last_ts: Option<u64> = redis
+    let mut conn = redis.clone();
+    let last_ts: Option<u64> = conn
         .get(LAST_EXECUTION_TS_KEY)
         .await
         .ok();
-    let pending_after: usize = redis.scard(PENDING_SET_KEY).await.unwrap_or(0usize);
+    let pending_after: usize = conn.scard(PENDING_SET_KEY).await.unwrap_or(0usize);
 
     if let Some(ts) = last_ts {
-        let raw: Option<String> = redis
-            .get(execution_key(ts))
-            .await
-            .ok();
+        let raw: Option<String> = conn.get(execution_key(ts)).await.ok();
         if let Some(raw) = raw {
             let exec: PaperExecution = serde_json::from_str(&raw)?;
             return Ok(serde_json::json!({
@@ -345,14 +344,19 @@ pub async fn paper_trade_records(
     redis: &redis::aio::ConnectionManager,
     limit: isize,
 ) -> Result<Vec<PaperExecution>> {
+    let mut conn = redis.clone();
     let llimit: i64 = limit.max(1).min(50) as i64;
-    let recent: Vec<u64> = redis
-        .lrange(RECENT_EXECUTIONS_LIST_KEY, 0, llimit.saturating_sub(1))
+    let recent: Vec<u64> = conn
+        .lrange(
+            RECENT_EXECUTIONS_LIST_KEY,
+            0,
+            (llimit as isize).saturating_sub(1),
+        )
         .await
         .unwrap_or_default();
     let mut out = Vec::new();
     for ts in recent {
-        let raw: Option<String> = redis.get(execution_key(ts)).await.ok();
+        let raw: Option<String> = conn.get(execution_key(ts)).await.ok();
         if let Some(raw) = raw {
             if let Ok(exec) = serde_json::from_str::<PaperExecution>(&raw) {
                 out.push(exec);
