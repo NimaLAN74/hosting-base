@@ -97,6 +97,7 @@ export default function StockServicePage() {
   const [dailySignalsLoading, setDailySignalsLoading] = useState(true);
   const [dailySignalsError, setDailySignalsError] = useState(null);
   const [dailySignalsSource, setDailySignalsSource] = useState('model');
+  const [showSignalsJson, setShowSignalsJson] = useState(false);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -305,6 +306,7 @@ export default function StockServicePage() {
       || (coefficients && Object.prototype.hasOwnProperty.call(coefficients, 'vol_regime'))
     ),
   };
+  const dailySignalsJson = dailySignals ? JSON.stringify(dailySignals, null, 2) : '';
 
   /** Merged today points: Redis/cached (todayBySymbol) + current session (sessionChartPointsRef), sorted by ts. */
   const getMergedTodayPoints = (symbol) => {
@@ -590,6 +592,52 @@ export default function StockServicePage() {
                     </table>
                   </div>
                 </>
+              )}
+              <div className="stock-service-signals-json-controls">
+                <button
+                  type="button"
+                  className="stock-service-btn secondary"
+                  onClick={() => setShowSignalsJson((prev) => !prev)}
+                >
+                  {showSignalsJson ? 'Hide raw JSON' : 'View raw JSON'}
+                </button>
+                {dailySignals && (
+                  <>
+                    <button
+                      type="button"
+                      className="stock-service-btn secondary"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(dailySignalsJson);
+                        } catch {
+                          // Clipboard can fail in non-secure contexts; keep UI silent.
+                        }
+                      }}
+                    >
+                      Copy JSON
+                    </button>
+                    <button
+                      type="button"
+                      className="stock-service-btn secondary"
+                      onClick={() => {
+                        const blob = new Blob([dailySignalsJson], { type: 'application/json;charset=utf-8' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'daily-signals.json';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      Download JSON
+                    </button>
+                  </>
+                )}
+              </div>
+              {showSignalsJson && dailySignals && (
+                <pre className="stock-service-signals-json" aria-label="Daily signals raw JSON">
+                  {dailySignalsJson}
+                </pre>
               )}
             </div>
           )}
