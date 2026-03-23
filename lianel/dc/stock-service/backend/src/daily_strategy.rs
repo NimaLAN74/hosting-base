@@ -557,6 +557,99 @@ pub struct Phase2ResearchResponse {
     pub walkforward: Option<WalkForwardSummary>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct LinearModelCoefficients {
+    pub intercept: f64,
+    pub mom5: f64,
+    pub mom20: f64,
+    pub vol20: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Phase2ModelSignalsResponse {
+    pub model: &'static str,
+    pub label: &'static str,
+    pub data_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of_ts: Option<u64>,
+    pub symbols_with_history: usize,
+    pub overlapping_days: usize,
+    pub training_rows: usize,
+    pub quantile: f64,
+    pub short_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coefficients: Option<LinearModelCoefficients>,
+    pub features: Vec<SymbolFeatures>,
+    pub signals: Vec<DailySignal>,
+}
+
+fn solve_linear_system(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> Option<[f64; 4]> {
+    // Gaussian elimination with partial pivoting.
+    for col in 0..4 {
+        let mut pivot = col;
+        let mut best = a[col][col].abs();
+        for r in (col + 1)..4 {
+            if a[r][col].abs() > best {
+                best = a[r][col].abs();
+                pivot = r;
+            }
+        }
+        if best < 1e-12 {
+            return None;
+        }
+        if pivot != col {
+            a.swap(col, pivot);
+            b.swap(col, pivot);
+        }
+
+        let diag = a[col][col];
+        for j in col..4 {
+            a[col][j] /= diag;
+        }
+        b[col] /= diag;
+
+        for r in 0..4 {
+            if r == col {
+                continue;
+            }
+            let factor = a[r][col];
+            if factor.abs() < 1e-20 {
+                continue;
+            }
+            for j in col..4 {
+                a[r][j] -= factor * a[col][j];
+            }
+            b[r] -= factor * b[col];
+        }
+    }
+    Some(b)
+}
+
+fn fit_linear_model(rows: &[ResearchRow], ridge: f64) -> Option<[f64; 4]> {
+    if rows.len() < 20 {
+        return None;
+    }
+    // X = [1, mom5, mom20, vol20]
+    let mut xtx = [[0.0_f64; 4]; 4];
+    let mut xty = [0.0_f64; 4];
+    for r in rows {
+        let x = [1.0, r.mom5, r.mom20, r.vol20];
+        for i in 0..4 {
+            xty[i] += x[i] * r.y_oc_next;
+            for j in 0..4 {
+                xtx[i][j] += x[i] * x[j];
+            }
+        }
+    }
+    // L2 regularization (ridge), skip intercept term.
+    for i in 1..4 {
+        xtx[i][i] += ridge.max(0.0);
+    }
+    solve_linear_system(xtx, xty)
+}
+
 fn walkforward_score_proxy(
     prepared: &[PreparedSymbol],
     quantile: f64,
@@ -781,5 +874,195 @@ pub async fn compute_phase2_research(
         row_count,
         rows_sample,
         walkforward,
+    }
+}
+
+pub async fn compute_phase2_model_signals(
+    client: &IbkrOAuthClient,
+    symbol_conids: &[(String, u64)],
+    quantile: f64,
+    short_enabled: bool,
+    train_days: usize,
+) -> Phase2ModelSignalsResponse {
+    let mut bars_by_symbol: HashMap<String, Vec<HistoryBar>> = HashMap::new();
+    for (sym, conid) in symbol_conids {
+        match client.fetch_history(*conid, "1y", "1d").await {
+            Ok(bars) => {
+                bars_by_symbol.insert(sym.clone(), bars);
+            }
+            Err(e) => tracing::warn!("phase2-model: history failed for {}: {}", sym, e),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    }
+    let symbols_with_history = bars_by_symbol.len();
+    if symbols_with_history < 3 {
+        return Phase2ModelSignalsResponse {
+            model: "linear_regression_baseline",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("insufficient_symbols_with_history".to_string()),
+            as_of_ts: None,
+            symbols_with_history,
+            overlapping_days: 0,
+            training_rows: 0,
+            quantile,
+            short_enabled,
+            coefficients: None,
+            features: vec![],
+            signals: vec![],
+        };
+    }
+
+    let ts = aligned_timestamps(&bars_by_symbol);
+    let overlapping_days = ts.len();
+    if ts.len() < 23 {
+        return Phase2ModelSignalsResponse {
+            model: "linear_regression_baseline",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("insufficient_overlapping_history_for_features".to_string()),
+            as_of_ts: None,
+            symbols_with_history,
+            overlapping_days,
+            training_rows: 0,
+            quantile,
+            short_enabled,
+            coefficients: None,
+            features: vec![],
+            signals: vec![],
+        };
+    }
+
+    let mut prepared: Vec<PreparedSymbol> = Vec::new();
+    for (sym, bars) in bars_by_symbol {
+        if let Some(p) = prepare_symbol(sym, bars, &ts) {
+            prepared.push(p);
+        }
+    }
+    if prepared.len() < 3 {
+        return Phase2ModelSignalsResponse {
+            model: "linear_regression_baseline",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("not_enough_symbols_after_alignment".to_string()),
+            as_of_ts: None,
+            symbols_with_history,
+            overlapping_days,
+            training_rows: 0,
+            quantile,
+            short_enabled,
+            coefficients: None,
+            features: vec![],
+            signals: vec![],
+        };
+    }
+
+    // Build train rows from historical dates except the latest decision day.
+    let mut train_rows = Vec::<ResearchRow>::new();
+    let n = ts.len();
+    let last_i = n - 1;
+    let train_start = 20.max(last_i.saturating_sub(train_days));
+    for i in train_start..last_i {
+        let day_scores = match scores_at_day(&prepared, i) {
+            Some(v) => v,
+            None => continue,
+        };
+        for (symbol, mom5, mom20, vol20, score) in day_scores {
+            let p = match prepared.iter().find(|x| x.symbol == symbol) {
+                Some(v) => v,
+                None => continue,
+            };
+            let y = match forward_oc_return(p.opens[i + 1], p.closes[i + 1]) {
+                Some(v) => v,
+                None => continue,
+            };
+            train_rows.push(ResearchRow {
+                ts: ts[i],
+                symbol,
+                mom5,
+                mom20,
+                vol20,
+                score,
+                y_oc_next: y,
+            });
+        }
+    }
+    let training_rows = train_rows.len();
+    let beta = match fit_linear_model(&train_rows, 1e-4) {
+        Some(v) => v,
+        None => {
+            return Phase2ModelSignalsResponse {
+                model: "linear_regression_baseline",
+                label: "ln(C[t+1]/O[t+1])",
+                data_available: false,
+                reason: Some("model_fit_failed".to_string()),
+                as_of_ts: None,
+                symbols_with_history,
+                overlapping_days,
+                training_rows,
+                quantile,
+                short_enabled,
+                coefficients: None,
+                features: vec![],
+                signals: vec![],
+            };
+        }
+    };
+
+    // Latest decision-day features at t=last_i, then predict y(t).
+    let day_scores = match scores_at_day(&prepared, last_i) {
+        Some(v) => v,
+        None => {
+            return Phase2ModelSignalsResponse {
+                model: "linear_regression_baseline",
+                label: "ln(C[t+1]/O[t+1])",
+                data_available: false,
+                reason: Some("feature_computation_unavailable".to_string()),
+                as_of_ts: None,
+                symbols_with_history,
+                overlapping_days,
+                training_rows,
+                quantile,
+                short_enabled,
+                coefficients: Some(LinearModelCoefficients {
+                    intercept: beta[0],
+                    mom5: beta[1],
+                    mom20: beta[2],
+                    vol20: beta[3],
+                }),
+                features: vec![],
+                signals: vec![],
+            };
+        }
+    };
+
+    let predicted_scores = day_scores
+        .into_iter()
+        .map(|(symbol, mom5, mom20, vol20, _)| {
+            let pred = beta[0] + beta[1] * mom5 + beta[2] * mom20 + beta[3] * vol20;
+            (symbol, mom5, mom20, vol20, pred)
+        })
+        .collect::<Vec<_>>();
+
+    let (features, signals) = signals_from_scores(&predicted_scores, quantile, short_enabled);
+    Phase2ModelSignalsResponse {
+        model: "linear_regression_baseline",
+        label: "ln(C[t+1]/O[t+1])",
+        data_available: true,
+        reason: None,
+        as_of_ts: Some(ts[last_i]),
+        symbols_with_history,
+        overlapping_days,
+        training_rows,
+        quantile,
+        short_enabled,
+        coefficients: Some(LinearModelCoefficients {
+            intercept: beta[0],
+            mom5: beta[1],
+            mom20: beta[2],
+            vol20: beta[3],
+        }),
+        features,
+        signals,
     }
 }

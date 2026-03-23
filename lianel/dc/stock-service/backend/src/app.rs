@@ -77,6 +77,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/stock-service/today", get(today_handler))
         .route("/api/v1/daily-signals", get(daily_signals_handler))
         .route("/api/v1/stock-service/daily-signals", get(daily_signals_handler))
+        .route("/api/v1/daily-signals/model", get(daily_signals_model_handler))
+        .route(
+            "/api/v1/stock-service/daily-signals/model",
+            get(daily_signals_model_handler),
+        )
         .route("/api/v1/daily-signals/research", get(daily_signals_research_handler))
         .route(
             "/api/v1/stock-service/daily-signals/research",
@@ -341,6 +346,17 @@ struct DailySignalsResearchQuery {
     sample_rows: usize,
 }
 
+#[derive(serde::Deserialize)]
+struct DailySignalsModelQuery {
+    #[serde(default = "default_signal_quantile")]
+    quantile: f64,
+    #[serde(default)]
+    short: Option<bool>,
+    /// Rolling train window used for model fit (default 120).
+    #[serde(default = "default_train_days")]
+    train_days: usize,
+}
+
 fn default_signal_quantile() -> f64 {
     daily_strategy::DEFAULT_QUANTILE
 }
@@ -460,6 +476,53 @@ async fn daily_signals_research_handler(
         q.train_days,
         q.test_days,
         q.sample_rows.min(50000),
+    )
+    .await;
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+async fn daily_signals_model_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DailySignalsModelQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+    let quantile = q.quantile.clamp(0.05, 0.45);
+    let short_enabled = q.short.unwrap_or_else(|| {
+        std::env::var("DAILY_STRATEGY_SHORT_ENABLED")
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+    });
+
+    let pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        watchlist::DEFAULT_SYMBOLS
+            .iter()
+            .filter_map(|s| watchlist::get_conid_with_cache(s, &g).map(|c| (s.to_string(), c)))
+            .collect()
+    };
+    if pairs.len() < 3 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "need at least 3 watchlist symbols with conids"})),
+        )
+            .into_response();
+    }
+
+    let resp = daily_strategy::compute_phase2_model_signals(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        q.train_days.max(60),
     )
     .await;
     (StatusCode::OK, Json(resp)).into_response()
