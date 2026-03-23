@@ -9,7 +9,8 @@ import './StockServicePage.css';
 const WATCHLIST_URL = '/api/v1/stock-service/watchlist';
 const HISTORY_URL = '/api/v1/stock-service/history';
 const TODAY_URL = '/api/v1/stock-service/today';
-const DAILY_SIGNALS_URL = '/api/v1/stock-service/daily-signals?backtest=true';
+const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train_days=120&quantile=0.2&short=true';
+const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 
@@ -86,6 +87,7 @@ export default function StockServicePage() {
   const [dailySignals, setDailySignals] = useState(null);
   const [dailySignalsLoading, setDailySignalsLoading] = useState(true);
   const [dailySignalsError, setDailySignalsError] = useState(null);
+  const [dailySignalsSource, setDailySignalsSource] = useState('model');
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -124,20 +126,42 @@ export default function StockServicePage() {
   const loadDailySignals = useCallback(() => {
     setDailySignalsLoading(true);
     setDailySignalsError(null);
-    fetch(DAILY_SIGNALS_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
-      .then((r) => {
+    setDailySignalsSource('model');
+    fetch(DAILY_SIGNALS_MODEL_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then(async (r) => {
         if (!r.ok) {
-          setDailySignalsError(`Signals request failed (${r.status}).`);
-          return null;
+          throw new Error(`Model request failed (${r.status}).`);
         }
-        return r.json();
-      })
-      .then((data) => {
-        if (data) setDailySignals(data);
+        const modelData = await r.json();
+        // Prefer model output; if unavailable for current bar/session, fallback to phase-1 engine.
+        if (modelData && modelData.data_available) {
+          setDailySignals(modelData);
+          setDailySignalsSource('model');
+          return;
+        }
+
+        const fallbackResp = await fetch(DAILY_SIGNALS_PHASE1_URL, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!fallbackResp.ok) {
+          // Keep model payload so reason is visible.
+          setDailySignals(modelData);
+          setDailySignalsSource('model');
+          return;
+        }
+        const fallbackData = await fallbackResp.json();
+        setDailySignals({
+          ...fallbackData,
+          fallback_reason: modelData?.reason || null,
+          model_unavailable: true,
+        });
+        setDailySignalsSource('phase1-fallback');
       })
       .catch(() => {
         setDailySignalsError('Could not load daily signals.');
         setDailySignals(null);
+        setDailySignalsSource('model');
       })
       .finally(() => setDailySignalsLoading(false));
   }, []);
@@ -461,9 +485,17 @@ export default function StockServicePage() {
             <div className="stock-service-signals-wrap">
               <div className="stock-service-watchlist-meta">
                 <span>As of: {dailySignals.as_of_ts ? formatSvDateTime24h(new Date(Number(dailySignals.as_of_ts) * 1000).toISOString()) : '—'}</span>
-                <span>Universe: {Array.isArray(dailySignals.universe) ? dailySignals.universe.length : 0}</span>
+                <span>Universe: {Array.isArray(dailySignals.universe) ? dailySignals.universe.length : Number(dailySignals.symbols_with_history || 0)}</span>
                 <span>Overlap days: {Number(dailySignals.overlapping_days || 0)}</span>
+                <span className="stock-service-signal-source">
+                  Source: {dailySignalsSource === 'phase1-fallback' ? 'phase1 fallback' : 'model'}
+                </span>
               </div>
+              {dailySignalsSource === 'phase1-fallback' && (
+                <p className="stock-service-signal-empty">
+                  Model unavailable now: {formatSignalReason(dailySignals.fallback_reason)}. Using phase-1 fallback.
+                </p>
+              )}
               {!dailySignals.data_available && (
                 <p className="stock-service-signal-empty">
                   {formatSignalReason(dailySignals.reason)}
