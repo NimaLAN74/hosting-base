@@ -749,7 +749,12 @@ pub async fn compute_phase2_research(
     }
     rows.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.symbol.cmp(&b.symbol)));
     let row_count = rows.len();
-    let rows_sample = rows.into_iter().take(sample_rows.max(1)).collect::<Vec<_>>();
+    // `sample_rows=0` means "return all rows" (useful for model training).
+    let rows_sample = if sample_rows == 0 {
+        rows
+    } else {
+        rows.into_iter().take(sample_rows).collect::<Vec<_>>()
+    };
     let walkforward = walkforward_score_proxy(
         &prepared,
         quantile,
