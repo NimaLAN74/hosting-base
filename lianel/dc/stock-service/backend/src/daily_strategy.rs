@@ -302,6 +302,24 @@ fn scores_at_day(prepared: &[PreparedSymbol], i: usize) -> Option<Vec<DayFeature
     Some(out)
 }
 
+/// Find latest day index that can form a full cross-sectional feature row.
+/// This allows fallback from a partial/holiday latest bar to the most recent
+/// fully closed aligned day.
+fn latest_usable_decision_day(
+    prepared: &[PreparedSymbol],
+    n_days: usize,
+) -> Option<(usize, Vec<DayFeatureRow>)> {
+    if n_days <= 20 {
+        return None;
+    }
+    for i in (20..n_days).rev() {
+        if let Some(sc) = scores_at_day(prepared, i) {
+            return Some((i, sc));
+        }
+    }
+    None
+}
+
 /// Rank by score; long top `quantile`, short bottom `quantile`; vol-parity weights within side.
 fn signals_from_scores(
     scores: &[DayFeatureRow],
@@ -536,10 +554,9 @@ pub async fn compute_daily_signals(
         );
     }
 
-    let last_i = ts.len() - 1;
-    let Some(sc) = scores_at_day(&prepared, last_i) else {
+    let Some((decision_i, sc)) = latest_usable_decision_day(&prepared, ts.len()) else {
         tracing::info!(
-            "daily-signals: feature computation skipped (e.g. holiday bar without full lookback)"
+            "daily-signals: no usable decision day found in aligned window"
         );
         return empty_daily_response(
             requested_universe,
@@ -564,7 +581,7 @@ pub async fn compute_daily_signals(
         strategy: "cross_sectional_momentum_vol_target",
         execution: "enter_next_open_exit_next_close",
         label: "ln(C[t+1]/O[t+1])",
-        as_of_ts: Some(ts[last_i]),
+        as_of_ts: Some(ts[decision_i]),
         data_available: true,
         reason: None,
         symbols_with_history,
@@ -1108,12 +1125,34 @@ pub async fn compute_phase2_model_signals(
         };
     }
 
-    // Build train rows from historical dates except the latest decision day.
+    // Choose prediction day as the latest usable full-feature day; this avoids
+    // failing on partial latest bars and prevents training leakage.
+    let Some((decision_i, day_scores_for_prediction)) =
+        latest_usable_decision_day(&prepared, ts.len())
+    else {
+        return Phase2ModelSignalsResponse {
+            model: "linear_regression_enhanced_v2",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("feature_computation_unavailable".to_string()),
+            as_of_ts: None,
+            symbols_with_history,
+            overlapping_days,
+            training_rows: 0,
+            quantile,
+            short_enabled,
+            publish_signals: false,
+            coefficients: None,
+            model_health: None,
+            features: vec![],
+            signals: vec![],
+        };
+    };
+
+    // Build train rows from historical dates except the chosen decision day.
     let mut train_rows = Vec::<ResearchRow>::new();
-    let n = ts.len();
-    let last_i = n - 1;
-    let train_start = 20.max(last_i.saturating_sub(train_days));
-    for i in train_start..last_i {
+    let train_start = 20.max(decision_i.saturating_sub(train_days));
+    for i in train_start..decision_i {
         let day_scores = match scores_at_day(&prepared, i) {
             Some(v) => v,
             None => continue,
@@ -1173,43 +1212,8 @@ pub async fn compute_phase2_model_signals(
         }
     };
 
-    // Latest decision-day features at t=last_i, then predict y(t).
-    let day_scores = match scores_at_day(&prepared, last_i) {
-        Some(v) => v,
-        None => {
-            return Phase2ModelSignalsResponse {
-                model: "linear_regression_enhanced_v2",
-                label: "ln(C[t+1]/O[t+1])",
-                data_available: false,
-                reason: Some("feature_computation_unavailable".to_string()),
-                as_of_ts: None,
-                symbols_with_history,
-                overlapping_days,
-                training_rows,
-                quantile,
-                short_enabled,
-                publish_signals: false,
-                coefficients: Some(LinearModelCoefficients {
-                    intercept: beta[0],
-                    mom5: beta[1],
-                    mom20: beta[2],
-                    vol20: beta[3],
-                    rank_mom5_cs: beta[4],
-                    rank_mom20_cs: beta[5],
-                    rank_vol20_cs: beta[6],
-                    vol_regime: beta[7],
-                }),
-                model_health: Some(ModelHealth {
-                    feature_row_count: 0,
-                    nan_or_inf_count: count_non_finite_values(&train_rows, &beta, &[]),
-                    coef_norm: coef_l2_norm(&beta),
-                    train_window_days,
-                }),
-                features: vec![],
-                signals: vec![],
-            };
-        }
-    };
+    // Predict y(t) on latest usable decision-day features.
+    let day_scores = day_scores_for_prediction;
 
     let predicted_scores = day_scores
         .into_iter()
@@ -1285,7 +1289,7 @@ pub async fn compute_phase2_model_signals(
         label: "ln(C[t+1]/O[t+1])",
         data_available: publish_signals,
         reason: publish_reason,
-        as_of_ts: Some(ts[last_i]),
+        as_of_ts: Some(ts[decision_i]),
         symbols_with_history,
         overlapping_days,
         training_rows,
