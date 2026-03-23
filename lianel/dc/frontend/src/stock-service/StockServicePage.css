@@ -200,6 +200,28 @@
   color: #334155;
 }
 
+.stock-service-model-diagnostics {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.stock-service-model-diag-row {
+  font-size: 0.82rem;
+  color: #334155;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.stock-service-model-diag-row span:first-child {
+  font-weight: 700;
+}
+
 .stock-service-signal-long {
   color: #0f5132;
   font-weight: 700;

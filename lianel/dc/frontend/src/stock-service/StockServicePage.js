@@ -70,6 +70,15 @@ const formatSignalReason = (reason) => {
   return map[reason] || reason || 'No signal data available.';
 };
 
+const pickTopCoefficientEntries = (coefficients) => {
+  if (!coefficients || typeof coefficients !== 'object') return [];
+  return Object.entries(coefficients)
+    .filter(([k]) => k !== 'intercept')
+    .map(([k, v]) => ({ key: k, value: Number(v || 0) }))
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    .slice(0, 4);
+};
+
 export default function StockServicePage() {
   const [watchlist, setWatchlist] = useState(null);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
@@ -274,6 +283,16 @@ export default function StockServicePage() {
   };
 
   const getSessionPoints = (symbol) => sessionChartPointsRef.current[symbol] || [];
+
+  const modelName = dailySignals?.model || null;
+  const topCoefficientEntries = pickTopCoefficientEntries(dailySignals?.coefficients);
+  const firstFeature = Array.isArray(dailySignals?.features) && dailySignals.features.length > 0
+    ? dailySignals.features[0]
+    : null;
+  const featureAvailability = {
+    rankFeatures: Boolean(firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs')),
+    volRegime: Boolean(firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'vol_regime')),
+  };
 
   /** Merged today points: Redis/cached (todayBySymbol) + current session (sessionChartPointsRef), sorted by ts. */
   const getMergedTodayPoints = (symbol) => {
@@ -506,10 +525,32 @@ export default function StockServicePage() {
                   <div className="stock-service-signals-kpis">
                     <span>Long/Short quantile: {Number(dailySignals.quantile || 0).toFixed(2)}</span>
                     <span>Short enabled: {dailySignals.short_enabled ? 'yes' : 'no'}</span>
+                    {modelName && <span>Model: {modelName}</span>}
+                    {dailySignals.training_rows != null && (
+                      <span>Training rows: {Number(dailySignals.training_rows || 0)}</span>
+                    )}
                     {dailySignals.backtest && (
                       <span>Backtest Sharpe(252): {Number(dailySignals.backtest.sharpe_252 || 0).toFixed(2)}</span>
                     )}
                   </div>
+                  {(modelName || topCoefficientEntries.length > 0) && (
+                    <div className="stock-service-model-diagnostics">
+                      <div className="stock-service-model-diag-row">
+                        <span>Feature set:</span>
+                        <span>
+                          rank features {featureAvailability.rankFeatures ? 'enabled' : 'n/a'}; vol regime {featureAvailability.volRegime ? 'enabled' : 'n/a'}
+                        </span>
+                      </div>
+                      {topCoefficientEntries.length > 0 && (
+                        <div className="stock-service-model-diag-row">
+                          <span>Top coefficients:</span>
+                          <span>
+                            {topCoefficientEntries.map((c) => `${c.key}=${c.value.toFixed(4)}`).join(', ')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="stock-service-table-wrap">
                     <table className="stock-service-watchlist-table" aria-label="Daily strategy signals">
                       <thead>
