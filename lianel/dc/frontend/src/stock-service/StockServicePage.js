@@ -11,8 +11,10 @@ const HISTORY_URL = '/api/v1/stock-service/history';
 const TODAY_URL = '/api/v1/stock-service/today';
 const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train_days=120&quantile=0.2&short=true';
 const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
+const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
+const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
 
 /* ViewBox coordinates — SVG scales to 100% width of container via CSS */
 const CHART_WIDTH = 960;
@@ -99,6 +101,10 @@ export default function StockServicePage() {
   const [dailySignalsSource, setDailySignalsSource] = useState('model');
   const [showSignalsJson, setShowSignalsJson] = useState(false);
 
+  const [paperTradeStatus, setPaperTradeStatus] = useState(null);
+  const [paperTradeLoading, setPaperTradeLoading] = useState(true);
+  const [paperTradeError, setPaperTradeError] = useState(null);
+
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
     setWatchlistError(null);
@@ -181,11 +187,36 @@ export default function StockServicePage() {
       .finally(() => setDailySignalsLoading(false));
   }, []);
 
+  const loadPaperTradeStatus = useCallback(() => {
+    setPaperTradeLoading(true);
+    setPaperTradeError(null);
+    fetch(PAPER_TRADE_STATUS_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error(`Paper-trade status request failed (${r.status}).`);
+        }
+        return r.json();
+      })
+      .then((data) => setPaperTradeStatus(data))
+      .catch(() => {
+        // Endpoint may not exist right after deploy; keep UI non-blocking.
+        setPaperTradeError(null);
+        setPaperTradeStatus(null);
+      })
+      .finally(() => setPaperTradeLoading(false));
+  }, []);
+
   useEffect(() => {
     loadDailySignals();
     const id = setInterval(loadDailySignals, DAILY_SIGNALS_REFRESH_MS);
     return () => clearInterval(id);
   }, [loadDailySignals]);
+
+  useEffect(() => {
+    loadPaperTradeStatus();
+    const id = setInterval(loadPaperTradeStatus, PAPER_TRADE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadPaperTradeStatus]);
 
   useEffect(() => {
     if (watchlist?.symbols) {
@@ -571,6 +602,24 @@ export default function StockServicePage() {
                   )}
                 </div>
               )}
+              <div className="stock-service-model-diag-row">
+                <span>Paper trade:</span>
+                <span>
+                  {paperTradeLoading ? 'loading…' : (
+                    <>
+                      pending={Number(paperTradeStatus?.pending_after || 0)}
+                      {paperTradeStatus?.last_execution ? (
+                        <>
+                          ; last pnl_return={Number(paperTradeStatus.last_execution.pnl_return || 0).toFixed(4)}
+                          ; as-of={paperTradeStatus.last_execution.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(paperTradeStatus.last_execution.execution_as_of_ts) * 1000).toISOString()) : '—'}
+                        </>
+                      ) : (
+                        '; last execution=—'
+                      )}
+                    </>
+                  )}
+                </span>
+              </div>
               {dailySignals.data_available && (
                 <>
                   <div className="stock-service-signals-kpis">
