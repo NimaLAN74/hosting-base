@@ -612,11 +612,23 @@ pub async fn refresh_from_ibkr(
         .collect();
 
     fn parse_snapshot_f64(item: &serde_json::Value, field: &str) -> Option<f64> {
-        item.get(field).and_then(|v| v.as_f64()).or_else(|| {
-            item.get(field)
-                .and_then(|v| v.as_str())
-                .and_then(|p| p.replace(',', "").parse::<f64>().ok())
-        })
+        fn parse_ibkr_number(raw: &str) -> Option<f64> {
+            let cleaned = raw.trim().replace(',', "");
+            if let Ok(v) = cleaned.parse::<f64>() {
+                return Some(v);
+            }
+            // IBKR can prefix numeric fields with state flags (e.g. "C247.99").
+            let trimmed = cleaned
+                .trim_start_matches(|c: char| {
+                    !(c.is_ascii_digit() || c == '-' || c == '+' || c == '.')
+                })
+                .to_string();
+            trimmed.parse::<f64>().ok()
+        }
+
+        item.get(field)
+            .and_then(|v| v.as_f64())
+            .or_else(|| item.get(field).and_then(|v| v.as_str()).and_then(parse_ibkr_number))
     }
 
     // Prefer last (31); if missing use bid/ask midpoint or single side (delayed / pre-flight).
