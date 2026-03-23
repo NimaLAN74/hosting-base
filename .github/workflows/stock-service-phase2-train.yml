@@ -1,0 +1,51 @@
+name: Stock Service Phase 2 – LightGBM Train (Research)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  STOCK_SERVICE_BASE_URL: ${{ secrets.STOCK_SERVICE_BASE_URL || format('http://{0}', secrets.REMOTE_HOST) }}
+  QUANTILE: "0.2"
+  TRAIN_DAYS: "120"
+  TEST_DAYS: "20"
+  SAMPLE_ROWS: "0" # 0 => all rows
+  SHORT_ENABLED: "true"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scikit-learn requests lightgbm
+
+      - name: Fetch + train LightGBM
+        env:
+          STOCK_SERVICE_BASE_URL: ${{ env.STOCK_SERVICE_BASE_URL }}
+          DAILY_SIGNAL_QUANTILE: ${{ env.QUANTILE }}
+          DAILY_SIGNAL_TRAIN_DAYS: ${{ env.TRAIN_DAYS }}
+          DAILY_SIGNAL_TEST_DAYS: ${{ env.TEST_DAYS }}
+          DAILY_SIGNAL_SAMPLE_ROWS: ${{ env.SAMPLE_ROWS }}
+          DAILY_SIGNAL_SHORT_ENABLED: ${{ env.SHORT_ENABLED }}
+        run: |
+          python lianel/dc/stock-service/scripts/phase2_train_lightgbm.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --quantile "$QUANTILE" \
+            --short "$SHORT_ENABLED" \
+            --train-days "$TRAIN_DAYS" \
+            --test-days "$TEST_DAYS" \
+            --sample-rows "$SAMPLE_ROWS"
+

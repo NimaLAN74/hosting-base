@@ -459,7 +459,7 @@ async fn daily_signals_research_handler(
         short_enabled,
         q.train_days,
         q.test_days,
-        q.sample_rows.min(2000),
+        q.sample_rows.min(50000),
     )
     .await;
     (StatusCode::OK, Json(resp)).into_response()
