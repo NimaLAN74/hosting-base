@@ -56,6 +56,28 @@ def fmt_signal_row(s: Dict[str, Any]) -> str:
     return f"{sym}: w={w:.4f}, score={score:.4f}"
 
 
+def pick_top_coefficients(coefficients: Dict[str, Any], limit: int = 4) -> List[Tuple[str, float]]:
+    pairs: List[Tuple[str, float]] = []
+    for k, v in (coefficients or {}).items():
+        if k == "intercept":
+            continue
+        try:
+            pairs.append((str(k), float(v)))
+        except Exception:
+            continue
+    pairs.sort(key=lambda kv: abs(kv[1]), reverse=True)
+    return pairs[:limit]
+
+
+def detect_feature_availability(payload: Dict[str, Any]) -> Dict[str, bool]:
+    features = payload.get("features") or []
+    first = features[0] if features else {}
+    return {
+        "rank_features": "rank_mom5_cs" in first and "rank_mom20_cs" in first and "rank_vol20_cs" in first,
+        "vol_regime": "vol_regime" in first,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Capture model-first daily signals snapshot")
     parser.add_argument("--base-url", required=True, help="Base URL, e.g. http://host or https://host")
@@ -106,6 +128,11 @@ def main() -> None:
     signals = payload.get("signals") or []
     longs, shorts = split_signals(signals)
     data_available = bool(payload.get("data_available", False))
+    model_name = payload.get("model")
+    training_rows = payload.get("training_rows")
+    coefficients = payload.get("coefficients") or {}
+    top_coeffs = pick_top_coefficients(coefficients)
+    feature_flags = detect_feature_availability(payload)
 
     summary = {
         "timestamp_utc": timestamp,
@@ -116,6 +143,11 @@ def main() -> None:
         "as_of_ts": payload.get("as_of_ts"),
         "symbols_with_history": payload.get("symbols_with_history"),
         "overlapping_days": payload.get("overlapping_days"),
+        "model": model_name,
+        "training_rows": training_rows,
+        "feature_availability": feature_flags,
+        "coefficients": coefficients,
+        "top_coefficients": [{"name": k, "value": v} for (k, v) in top_coeffs],
         "signal_count": len(signals),
         "long_count": len(longs),
         "short_count": len(shorts),
@@ -136,6 +168,16 @@ def main() -> None:
     print(f"as_of_ts={payload.get('as_of_ts')}")
     print(f"symbols_with_history={payload.get('symbols_with_history')}")
     print(f"overlapping_days={payload.get('overlapping_days')}")
+    print(f"model={model_name}")
+    print(f"training_rows={training_rows}")
+    print(
+        "feature_availability="
+        f"rank_features:{feature_flags['rank_features']},vol_regime:{feature_flags['vol_regime']}"
+    )
+    if top_coeffs:
+        print("Top coefficients:")
+        for name, val in top_coeffs:
+            print(f"  - {name}={val:.6f}")
 
     if longs:
         print("Top LONGs:")
