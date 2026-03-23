@@ -195,6 +195,11 @@
   color: #475569;
 }
 
+.stock-service-signal-source {
+  font-weight: 600;
+  color: #334155;
+}
+
 .stock-service-signal-long {
   color: #0f5132;
   font-weight: 700;
