@@ -168,6 +168,43 @@
   margin-top: 1rem;
 }
 
+.stock-service-signals-card {
+  margin-top: 1rem;
+}
+
+.stock-service-signals-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.stock-service-signal-empty {
+  margin: 0;
+  color: #664d03;
+  background: #fff3cd;
+  border: 1px solid #ffecb5;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+}
+
+.stock-service-signals-kpis {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.stock-service-signal-long {
+  color: #0f5132;
+  font-weight: 700;
+}
+
+.stock-service-signal-short {
+  color: #842029;
+  font-weight: 700;
+}
+
 .stock-service-watchlist-meta {
   font-size: 0.85rem;
   color: #555;

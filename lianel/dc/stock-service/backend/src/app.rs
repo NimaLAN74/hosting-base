@@ -365,25 +365,23 @@ async fn daily_signals_handler(
             .into_response();
     }
 
-    match daily_strategy::compute_daily_signals(
+    let resp = daily_strategy::compute_daily_signals(
         client,
         &pairs,
         quantile,
         short_enabled,
         include_backtest,
     )
-    .await
-    {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => {
-            tracing::warn!("daily-signals failed: {}", e);
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response()
-        }
+    .await;
+    if !resp.data_available {
+        tracing::info!(
+            "daily-signals: no data (reason={:?}, symbols_with_history={}, overlapping_days={})",
+            resp.reason,
+            resp.symbols_with_history,
+            resp.overlapping_days
+        );
     }
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 #[derive(serde::Deserialize)]

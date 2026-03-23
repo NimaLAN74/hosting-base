@@ -35,7 +35,16 @@ pub struct DailySignalsResponse {
     pub strategy: &'static str,
     pub execution: &'static str,
     pub label: &'static str,
-    pub as_of_ts: u64,
+    /// Unix seconds of last aligned bar; omitted / null in JSON when `data_available` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of_ts: Option<u64>,
+    /// False when IBKR returned empty/partial history (e.g. holiday), overlap too short, or features cannot be formed.
+    pub data_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Counts for debugging when data is missing (always present).
+    pub symbols_with_history: usize,
+    pub overlapping_days: usize,
     pub universe: Vec<String>,
     pub quantile: f64,
     pub short_enabled: bool,
@@ -306,6 +315,32 @@ fn signals_from_scores(
     (features, signals)
 }
 
+fn empty_daily_response(
+    universe: Vec<String>,
+    quantile: f64,
+    short_enabled: bool,
+    symbols_with_history: usize,
+    overlapping_days: usize,
+    reason: String,
+) -> DailySignalsResponse {
+    DailySignalsResponse {
+        strategy: "cross_sectional_momentum_vol_target",
+        execution: "enter_next_open_exit_next_close",
+        label: "ln(C[t+1]/O[t+1])",
+        as_of_ts: None,
+        data_available: false,
+        reason: Some(reason),
+        symbols_with_history,
+        overlapping_days,
+        universe,
+        quantile,
+        short_enabled,
+        features: vec![],
+        signals: vec![],
+        backtest: None,
+    }
+}
+
 fn run_backtest(
     prepared: &[PreparedSymbol],
     quantile: f64,
@@ -363,13 +398,17 @@ fn run_backtest(
     })
 }
 
+/// Build daily-signals payload. On holidays or empty IBKR history, returns **200-safe** empty state
+/// (`data_available: false`) instead of failing.
 pub async fn compute_daily_signals(
     client: &IbkrOAuthClient,
     symbol_conids: &[(String, u64)],
     quantile: f64,
     short_enabled: bool,
     include_backtest: bool,
-) -> anyhow::Result<DailySignalsResponse> {
+) -> DailySignalsResponse {
+    let requested_universe: Vec<String> = symbol_conids.iter().map(|(s, _)| s.clone()).collect();
+
     let mut bars_by_symbol: HashMap<String, Vec<HistoryBar>> = HashMap::new();
     for (sym, conid) in symbol_conids {
         match client.fetch_history(*conid, "1y", "1d").await {
@@ -382,13 +421,40 @@ pub async fn compute_daily_signals(
         }
         tokio::time::sleep(std::time::Duration::from_millis(75)).await;
     }
-    if bars_by_symbol.len() < 3 {
-        anyhow::bail!("need at least 3 symbols with history");
+
+    let symbols_with_history = bars_by_symbol.len();
+    if symbols_with_history < 3 {
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            0,
+            "insufficient_symbols_with_history".to_string(),
+        );
     }
 
     let ts = aligned_timestamps(&bars_by_symbol);
+    let overlapping_days = ts.len();
+    if ts.is_empty() {
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            0,
+            "no_overlapping_trading_days".to_string(),
+        );
+    }
     if ts.len() < 22 {
-        anyhow::bail!("not enough overlapping trading days");
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            overlapping_days,
+            "insufficient_overlapping_history_for_features".to_string(),
+        );
     }
 
     let mut prepared: Vec<PreparedSymbol> = Vec::new();
@@ -398,11 +464,31 @@ pub async fn compute_daily_signals(
         }
     }
     if prepared.len() < 3 {
-        anyhow::bail!("not enough symbols after alignment");
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            overlapping_days,
+            "not_enough_symbols_after_alignment".to_string(),
+        );
     }
 
     let last_i = ts.len() - 1;
-    let sc = scores_at_day(&prepared, last_i).ok_or_else(|| anyhow::anyhow!("feature computation failed"))?;
+    let Some(sc) = scores_at_day(&prepared, last_i) else {
+        tracing::info!(
+            "daily-signals: feature computation skipped (e.g. holiday bar without full lookback)"
+        );
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            overlapping_days,
+            "feature_computation_unavailable".to_string(),
+        );
+    };
+
     let (features, signals) = signals_from_scores(&sc, quantile, short_enabled);
 
     let backtest = if include_backtest {
@@ -412,16 +498,20 @@ pub async fn compute_daily_signals(
     };
 
     let universe: Vec<String> = prepared.iter().map(|p| p.symbol.clone()).collect();
-    Ok(DailySignalsResponse {
+    DailySignalsResponse {
         strategy: "cross_sectional_momentum_vol_target",
         execution: "enter_next_open_exit_next_close",
         label: "ln(C[t+1]/O[t+1])",
-        as_of_ts: ts[last_i],
+        as_of_ts: Some(ts[last_i]),
+        data_available: true,
+        reason: None,
+        symbols_with_history,
+        overlapping_days,
         universe,
         quantile,
         short_enabled,
         features,
         signals,
         backtest,
-    })
+    }
 }
