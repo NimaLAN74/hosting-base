@@ -222,6 +222,10 @@
   font-weight: 700;
 }
 
+.stock-service-model-publish-row {
+  margin-bottom: 0.2rem;
+}
+
 .stock-service-signals-json-controls {
   display: flex;
   gap: 0.5rem;
