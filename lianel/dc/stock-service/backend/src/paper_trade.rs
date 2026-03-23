@@ -547,6 +547,7 @@ pub async fn paper_trade_backfill(
     days: usize,
     quantile: f64,
     short_enabled: bool,
+    overwrite: bool,
 ) -> Result<PaperTradeBackfillResult> {
     let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
         .iter()
@@ -598,6 +599,14 @@ pub async fn paper_trade_backfill(
     let selected = ts_sorted[ts_sorted.len() - keep..].to_vec();
 
     let mut conn = redis.clone();
+    if overwrite {
+        let _: () = conn.del(RECENT_EXECUTIONS_LIST_KEY).await.unwrap_or(());
+        let _: () = conn.del(LAST_EXECUTION_TS_KEY).await.unwrap_or(());
+        let _: () = conn.del(CUM_PNL_LN_KEY).await.unwrap_or(());
+        let _: () = conn.del(CUM_PNL_LN_GROSS_KEY).await.unwrap_or(());
+        let _: () = conn.del(CUM_PNL_LN_NET_KEY).await.unwrap_or(());
+        let _: () = conn.del(EXECUTION_COUNT_KEY).await.unwrap_or(());
+    }
     let mut inserted_count = 0usize;
     let mut skipped_existing_count = 0usize;
     for (idx, ts) in selected.iter().enumerate() {
@@ -610,9 +619,12 @@ pub async fn paper_trade_backfill(
         };
         let key = execution_key(decision_ts);
         let exists: bool = conn.exists(&key).await.unwrap_or(false);
-        if exists {
+        if exists && !overwrite {
             skipped_existing_count += 1;
             continue;
+        }
+        if exists && overwrite {
+            let _: () = conn.del(&key).await.unwrap_or(());
         }
         let Some(day_rows) = by_ts.get(&decision_ts) else {
             continue;

@@ -13,7 +13,7 @@ const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train
 const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
-const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true';
+const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true&overwrite=true';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
