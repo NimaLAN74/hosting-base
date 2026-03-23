@@ -77,6 +77,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/stock-service/today", get(today_handler))
         .route("/api/v1/daily-signals", get(daily_signals_handler))
         .route("/api/v1/stock-service/daily-signals", get(daily_signals_handler))
+        .route("/api/v1/daily-signals/research", get(daily_signals_research_handler))
+        .route(
+            "/api/v1/stock-service/daily-signals/research",
+            get(daily_signals_research_handler),
+        )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -319,8 +324,34 @@ struct DailySignalsQuery {
     backtest: Option<bool>,
 }
 
+#[derive(serde::Deserialize)]
+struct DailySignalsResearchQuery {
+    #[serde(default = "default_signal_quantile")]
+    quantile: f64,
+    #[serde(default)]
+    short: Option<bool>,
+    /// Rolling train window size in trading days (default 120).
+    #[serde(default = "default_train_days")]
+    train_days: usize,
+    /// Rolling test window size in trading days (default 20).
+    #[serde(default = "default_test_days")]
+    test_days: usize,
+    /// Number of latest rows to include in response sample (default 300).
+    #[serde(default = "default_sample_rows")]
+    sample_rows: usize,
+}
+
 fn default_signal_quantile() -> f64 {
     daily_strategy::DEFAULT_QUANTILE
+}
+fn default_train_days() -> usize {
+    120
+}
+fn default_test_days() -> usize {
+    20
+}
+fn default_sample_rows() -> usize {
+    300
 }
 
 async fn daily_signals_handler(
@@ -381,6 +412,56 @@ async fn daily_signals_handler(
             resp.overlapping_days
         );
     }
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+async fn daily_signals_research_handler(
+    State(state): State<AppState>,
+    Query(q): Query<DailySignalsResearchQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    let quantile = q.quantile.clamp(0.05, 0.45);
+    let short_enabled = q.short.unwrap_or_else(|| {
+        std::env::var("DAILY_STRATEGY_SHORT_ENABLED")
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+    });
+
+    let pairs: Vec<(String, u64)> = {
+        let g = state.watchlist_cache.read().await;
+        watchlist::DEFAULT_SYMBOLS
+            .iter()
+            .filter_map(|s| watchlist::get_conid_with_cache(s, &g).map(|c| (s.to_string(), c)))
+            .collect()
+    };
+    if pairs.len() < 3 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "need at least 3 watchlist symbols with conids"})),
+        )
+            .into_response();
+    }
+
+    let resp = daily_strategy::compute_phase2_research(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        q.train_days,
+        q.test_days,
+        q.sample_rows.min(2000),
+    )
+    .await;
     (StatusCode::OK, Json(resp)).into_response()
 }
 
