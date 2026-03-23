@@ -3,7 +3,7 @@
 Train a LightGBM model on stock-service Phase-2 research rows.
 
 Data source:
-  GET {base_url}/api/v1/daily-signals/research?sample_rows=0&train_days=...&test_days=...&short=...
+  GET {base_url}/api/v1/stock-service/daily-signals/research?sample_rows=0&train_days=...&test_days=...&short=...
 
 Evaluation:
   Chronological walk-forward proxy using the same long/short quantile + vol20 inverse weighting.
@@ -230,7 +230,8 @@ def main() -> None:
     base_url = args.base_url.rstrip("/")
 
     url = (
-        f"{base_url}/api/v1/daily-signals/research"
+        # Via public nginx, the working path is the prefixed alias.
+        f"{base_url}/api/v1/stock-service/daily-signals/research"
         f"?sample_rows={args.sample_rows}"
         f"&train_days={args.train_days}"
         f"&test_days={args.test_days}"
