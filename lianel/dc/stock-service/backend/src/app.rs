@@ -676,6 +676,7 @@ struct PaperTradeBackfillQuery {
     days: Option<usize>,
     quantile: Option<f64>,
     short_enabled: Option<bool>,
+    overwrite: Option<bool>,
 }
 
 async fn paper_trade_backfill_handler(
@@ -709,6 +710,7 @@ async fn paper_trade_backfill_handler(
     let days = q.days.unwrap_or(30).max(5).min(250);
     let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
     let short_enabled = q.short_enabled.unwrap_or(true);
+    let overwrite = q.overwrite.unwrap_or(false);
     match paper_trade::paper_trade_backfill(
         client,
         &resolved_conids,
@@ -716,6 +718,7 @@ async fn paper_trade_backfill_handler(
         days,
         quantile,
         short_enabled,
+        overwrite,
     )
     .await
     {
