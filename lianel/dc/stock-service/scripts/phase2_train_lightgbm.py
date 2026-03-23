@@ -134,6 +134,16 @@ def chronological_walkforward_eval(
             max_drawdown=0.0,
         )
 
+    feature_cols = [
+        "mom5",
+        "mom20",
+        "vol20",
+        "rank_mom5_cs",
+        "rank_mom20_cs",
+        "rank_vol20_cs",
+        "vol_regime",
+    ]
+
     # Import here so training can still run if the workflow only imports file.
     import lightgbm as lgb
 
@@ -153,9 +163,9 @@ def chronological_walkforward_eval(
             start_i += step
             continue
 
-        X_train = train_df[["mom5", "mom20", "vol20"]]
+        X_train = train_df[feature_cols]
         y_train = train_df["y_oc_next"]
-        X_test = test_df[["mom5", "mom20", "vol20"]]
+        X_test = test_df[feature_cols]
 
         model = lgb.LGBMRegressor(
             objective="regression",
@@ -251,10 +261,42 @@ def main() -> None:
     if missing:
         raise SystemExit(f"Missing expected columns from response: {sorted(missing)}")
 
+    # Backward-safe defaults for newly added features.
+    for col, default_v in [
+        ("rank_mom5_cs", 0.5),
+        ("rank_mom20_cs", 0.5),
+        ("rank_vol20_cs", 0.5),
+        ("vol_regime", 1.0),
+    ]:
+        if col not in df.columns:
+            df[col] = default_v
+
     # Ensure numeric
-    for col in ["ts", "mom5", "mom20", "vol20", "y_oc_next"]:
+    for col in [
+        "ts",
+        "mom5",
+        "mom20",
+        "vol20",
+        "rank_mom5_cs",
+        "rank_mom20_cs",
+        "rank_vol20_cs",
+        "vol_regime",
+        "y_oc_next",
+    ]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["ts", "mom5", "mom20", "vol20", "y_oc_next"])
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=[
+            "ts",
+            "mom5",
+            "mom20",
+            "vol20",
+            "rank_mom5_cs",
+            "rank_mom20_cs",
+            "rank_vol20_cs",
+            "vol_regime",
+            "y_oc_next",
+        ]
+    )
 
     print(f"Loaded rows: {len(df)} (unique decision-days: {df['ts'].nunique()})")
 
