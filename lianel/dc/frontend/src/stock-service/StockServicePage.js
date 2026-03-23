@@ -638,6 +638,8 @@ export default function StockServicePage() {
                   {paperTradeLoading ? 'loading…' : (
                     <>
                       pending={Number(paperTradeStatus?.pending_after || 0)}
+                      ; exec-count={Number(paperTradeStatus?.execution_count || 0)}
+                      ; cum-pnl={Number(paperTradeStatus?.cumulative_pnl_return || 0).toFixed(4)}
                       {paperTradeStatus?.last_execution ? (
                         <>
                           ; last pnl_return={Number(paperTradeStatus.last_execution.pnl_return || 0).toFixed(4)}

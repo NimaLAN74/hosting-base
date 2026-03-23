@@ -79,6 +79,8 @@ const DECISION_KEY_PREFIX: &str = "paper:daily:decision:";
 const EXECUTION_KEY_PREFIX: &str = "paper:daily:execution:";
 const RECENT_EXECUTIONS_LIST_KEY: &str = "paper:daily:recent_executions";
 const LAST_EXECUTION_TS_KEY: &str = "paper:daily:last_execution_ts";
+const CUM_PNL_LN_KEY: &str = "paper:daily:cum_pnl_ln";
+const EXECUTION_COUNT_KEY: &str = "paper:daily:execution_count";
 const RECENT_EXECUTIONS_LIMIT: isize = 20;
 
 fn now_ts() -> u64 {
@@ -260,6 +262,10 @@ pub async fn paper_trade_run(
                 let _: () = conn
                     .set(LAST_EXECUTION_TS_KEY, execution.decision_as_of_ts)
                     .await?;
+                let prev_cum: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+                let _: () = conn.set(CUM_PNL_LN_KEY, prev_cum + execution.pnl_ln).await?;
+                let prev_cnt: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
+                let _: () = conn.set(EXECUTION_COUNT_KEY, prev_cnt + 1).await?;
                 let _: () = conn
                     .srem(PENDING_SET_KEY, execution.decision_as_of_ts)
                     .await?;
@@ -333,6 +339,9 @@ pub async fn paper_trade_status(
         .await
         .ok();
     let pending_after: usize = conn.scard(PENDING_SET_KEY).await.unwrap_or(0usize);
+    let cumulative_pnl_ln: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+    let execution_count: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
+    let cumulative_pnl_return = cumulative_pnl_ln.exp() - 1.0;
 
     if let Some(ts) = last_ts {
         let raw: Option<String> = conn.get(execution_key(ts)).await.ok();
@@ -340,6 +349,9 @@ pub async fn paper_trade_status(
             let exec: PaperExecution = serde_json::from_str(&raw)?;
             return Ok(serde_json::json!({
                 "pending_after": pending_after,
+                "execution_count": execution_count,
+                "cumulative_pnl_ln": cumulative_pnl_ln,
+                "cumulative_pnl_return": cumulative_pnl_return,
                 "last_execution": exec,
             }));
         }
@@ -347,6 +359,9 @@ pub async fn paper_trade_status(
 
     Ok(serde_json::json!({
         "pending_after": pending_after,
+        "execution_count": execution_count,
+        "cumulative_pnl_ln": cumulative_pnl_ln,
+        "cumulative_pnl_return": cumulative_pnl_return,
         "last_execution": null,
     }))
 }
