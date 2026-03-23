@@ -1,0 +1,58 @@
+name: Stock Service Paper Trade Loop
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekdays near US cash close.
+    - cron: "55 20 * * 1-5"
+
+permissions:
+  contents: read
+
+env:
+  STOCK_SERVICE_BASE_URL: ${{ secrets.STOCK_SERVICE_BASE_URL || format('http://{0}', secrets.REMOTE_HOST) }}
+  QUANTILE: "0.2"
+  TRAIN_DAYS: "120"
+  SHORT_ENABLED: "true"
+  INSECURE_SSL: "true"
+
+jobs:
+  paper_trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run paper-trade loop
+        env:
+          STOCK_SERVICE_BASE_URL: ${{ env.STOCK_SERVICE_BASE_URL }}
+          QUANTILE: ${{ env.QUANTILE }}
+          TRAIN_DAYS: ${{ env.TRAIN_DAYS }}
+          SHORT_ENABLED: ${{ env.SHORT_ENABLED }}
+          INSECURE_SSL: ${{ env.INSECURE_SSL }}
+        run: |
+          python lianel/dc/stock-service/scripts/run_paper_trade_loop.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --quantile "$QUANTILE" \
+            --short-enabled "$SHORT_ENABLED" \
+            --train-days "$TRAIN_DAYS" \
+            --insecure-ssl
+
+      - name: Upload paper-trade artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-trade-loop-${{ github.run_id }}
+          path: artifacts/paper-trade
+          if-no-files-found: error
+
