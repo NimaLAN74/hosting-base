@@ -163,6 +163,12 @@
   background: #f8f9fa;
 }
 
+.stock-service-btn-active {
+  border-color: #2563eb !important;
+  color: #1d4ed8 !important;
+  font-weight: 600;
+}
+
 /* Watchlist section */
 .stock-service-watchlist-card {
   margin-top: 1rem;
