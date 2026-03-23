@@ -13,6 +13,7 @@ env:
   TEST_DAYS: "20"
   SAMPLE_ROWS: "0" # 0 => all rows
   SHORT_ENABLED: "true"
+  INSECURE_SSL: "true"
 
 jobs:
   train:
@@ -47,5 +48,6 @@ jobs:
             --short "$SHORT_ENABLED" \
             --train-days "$TRAIN_DAYS" \
             --test-days "$TEST_DAYS" \
-            --sample-rows "$SAMPLE_ROWS"
+            --sample-rows "$SAMPLE_ROWS" \
+            --insecure-ssl
 

@@ -3,7 +3,7 @@
 Train a LightGBM model on stock-service Phase-2 research rows.
 
 Data source:
-  GET {base_url}/api/v1/daily-signals/research?sample_rows=0&train_days=...&test_days=...&short=...
+  GET {base_url}/api/v1/stock-service/daily-signals/research?sample_rows=0&train_days=...&test_days=...&short=...
 
 Evaluation:
   Chronological walk-forward proxy using the same long/short quantile + vol20 inverse weighting.
@@ -23,10 +23,15 @@ import numpy as np
 import pandas as pd
 
 
-def fetch_json(url: str, timeout_s: int = 60) -> dict:
+def fetch_json(url: str, timeout_s: int = 60, insecure_ssl: bool = False) -> dict:
     import requests
 
-    r = requests.get(url, timeout=timeout_s)
+    if insecure_ssl:
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    r = requests.get(url, timeout=timeout_s, verify=(not insecure_ssl))
     r.raise_for_status()
     return r.json()
 
@@ -214,13 +219,19 @@ def main() -> None:
     ap.add_argument("--test-days", type=int, default=int(os.environ.get("DAILY_SIGNAL_TEST_DAYS", "20")))
     ap.add_argument("--sample-rows", type=int, default=int(os.environ.get("DAILY_SIGNAL_SAMPLE_ROWS", "0")))
     ap.add_argument("--timeout-s", type=int, default=int(os.environ.get("STOCK_SERVICE_TIMEOUT_S", "120")))
+    ap.add_argument(
+        "--insecure-ssl",
+        action="store_true",
+        default=str(os.environ.get("INSECURE_SSL", "false")).lower() in {"1", "true", "yes"},
+    )
     args = ap.parse_args()
 
     short_enabled = str(args.short_enabled).lower() in {"1", "true", "yes"}
     base_url = args.base_url.rstrip("/")
 
     url = (
-        f"{base_url}/api/v1/daily-signals/research"
+        # Via public nginx, the working path is the prefixed alias.
+        f"{base_url}/api/v1/stock-service/daily-signals/research"
         f"?sample_rows={args.sample_rows}"
         f"&train_days={args.train_days}"
         f"&test_days={args.test_days}"
@@ -228,7 +239,7 @@ def main() -> None:
         f"&quantile={args.quantile}"
     )
     print(f"Fetching dataset: {url}")
-    payload = fetch_json(url, timeout_s=args.timeout_s)
+    payload = fetch_json(url, timeout_s=args.timeout_s, insecure_ssl=args.insecure_ssl)
 
     if not payload.get("data_available", False):
         raise SystemExit(f"Dataset not available: {payload.get('reason')}")
