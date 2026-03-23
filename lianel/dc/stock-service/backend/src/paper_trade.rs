@@ -74,6 +74,14 @@ pub struct PaperTradeRunResult {
     pub pending_after: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PaperTradeBackfillResult {
+    pub requested_days: usize,
+    pub inserted_count: usize,
+    pub skipped_existing_count: usize,
+    pub source_rows: usize,
+}
+
 const PENDING_SET_KEY: &str = "paper:daily:pending";
 const DECISION_KEY_PREFIX: &str = "paper:daily:decision:";
 const EXECUTION_KEY_PREFIX: &str = "paper:daily:execution:";
@@ -101,6 +109,58 @@ fn execution_key(ts: u64) -> String {
 
 fn day_bar_price_ok(x: f64) -> bool {
     x.is_finite() && x > 0.0
+}
+
+fn rank_and_weight_by_score(
+    rows: &[daily_strategy::ResearchRow],
+    quantile: f64,
+    short_enabled: bool,
+) -> Vec<PaperSignal> {
+    if rows.is_empty() {
+        return vec![];
+    }
+    let n = rows.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        rows[a]
+            .score
+            .partial_cmp(&rows[b].score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let k = ((n as f64 * quantile).ceil() as usize).max(1).min(n);
+    let long_idx: Vec<usize> = order.iter().rev().take(k).copied().collect();
+    let short_idx: Vec<usize> = order.iter().take(k).copied().collect();
+    let inv_vol = |i: usize| 1.0 / rows[i].vol20.max(1e-8);
+    let long_sum: f64 = long_idx.iter().map(|&i| inv_vol(i)).sum();
+    let short_sum: f64 = short_idx.iter().map(|&i| inv_vol(i)).sum();
+    let mut out = Vec::new();
+    for &i in &long_idx {
+        out.push(PaperSignal {
+            symbol: rows[i].symbol.clone(),
+            side: "LONG".to_string(),
+            weight: if long_sum > 1e-12 {
+                inv_vol(i) / long_sum
+            } else {
+                1.0 / long_idx.len() as f64
+            },
+            score: rows[i].score,
+        });
+    }
+    if short_enabled {
+        for &i in &short_idx {
+            out.push(PaperSignal {
+                symbol: rows[i].symbol.clone(),
+                side: "SHORT".to_string(),
+                weight: if short_sum > 1e-12 {
+                    inv_vol(i) / short_sum
+                } else {
+                    1.0 / short_idx.len() as f64
+                },
+                score: rows[i].score,
+            });
+        }
+    }
+    out
 }
 
 fn to_paper_decision(resp: &daily_strategy::Phase2ModelSignalsResponse) -> PaperDecision {
@@ -390,5 +450,142 @@ pub async fn paper_trade_records(
         }
     }
     Ok(out)
+}
+
+pub async fn paper_trade_backfill(
+    client: &IbkrOAuthClient,
+    resolved_conids: &HashMap<String, u64>,
+    redis: &redis::aio::ConnectionManager,
+    days: usize,
+    quantile: f64,
+    short_enabled: bool,
+) -> Result<PaperTradeBackfillResult> {
+    let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
+        .iter()
+        .filter_map(|s| {
+            let n = s.trim().to_ascii_uppercase();
+            resolved_conids
+                .get(&n)
+                .copied()
+                .or_else(|| watchlist::get_conid_for_symbol(&n))
+                .map(|c| (s.to_string(), c))
+        })
+        .collect();
+    let research = daily_strategy::compute_phase2_research(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        250,
+        60,
+        0, // return all rows
+    )
+    .await;
+    let rows = research.rows_sample;
+    if rows.is_empty() {
+        return Ok(PaperTradeBackfillResult {
+            requested_days: days,
+            inserted_count: 0,
+            skipped_existing_count: 0,
+            source_rows: 0,
+        });
+    }
+
+    let mut by_ts: HashMap<u64, Vec<daily_strategy::ResearchRow>> = HashMap::new();
+    for r in rows.clone() {
+        by_ts.entry(r.ts).or_default().push(r);
+    }
+    let mut ts_sorted: Vec<u64> = by_ts.keys().copied().collect();
+    ts_sorted.sort_unstable();
+    if ts_sorted.is_empty() {
+        return Ok(PaperTradeBackfillResult {
+            requested_days: days,
+            inserted_count: 0,
+            skipped_existing_count: 0,
+            source_rows: rows.len(),
+        });
+    }
+
+    let keep = days.max(1).min(ts_sorted.len());
+    let selected = ts_sorted[ts_sorted.len() - keep..].to_vec();
+
+    let mut conn = redis.clone();
+    let mut inserted_count = 0usize;
+    let mut skipped_existing_count = 0usize;
+    for (idx, ts) in selected.iter().enumerate() {
+        let decision_ts = *ts;
+        let exec_ts = if idx + 1 < selected.len() {
+            selected[idx + 1]
+        } else {
+            // last selected day has unknown t+1 in this window; skip
+            continue;
+        };
+        let key = execution_key(decision_ts);
+        let exists: bool = conn.exists(&key).await.unwrap_or(false);
+        if exists {
+            skipped_existing_count += 1;
+            continue;
+        }
+        let Some(day_rows) = by_ts.get(&decision_ts) else {
+            continue;
+        };
+        let sigs = rank_and_weight_by_score(day_rows, quantile, short_enabled);
+        if sigs.is_empty() {
+            continue;
+        }
+        let mut legs = Vec::new();
+        let mut pnl_ln = 0.0;
+        for s in &sigs {
+            if let Some(r) = day_rows.iter().find(|r| r.symbol == s.symbol) {
+                let contrib = if s.side == "LONG" {
+                    s.weight * r.y_oc_next
+                } else {
+                    -s.weight * r.y_oc_next
+                };
+                pnl_ln += contrib;
+                legs.push(PaperLegPnl {
+                    symbol: s.symbol.clone(),
+                    side: s.side.clone(),
+                    weight: s.weight,
+                    y_oc_next: r.y_oc_next,
+                    contrib,
+                });
+            }
+        }
+        if legs.is_empty() {
+            continue;
+        }
+        let exec = PaperExecution {
+            decision_as_of_ts: decision_ts,
+            execution_as_of_ts: exec_ts,
+            executed_at_ts: now_ts(),
+            pnl_ln,
+            pnl_return: pnl_ln.exp() - 1.0,
+            legs,
+        };
+        let raw = serde_json::to_string(&exec)?;
+        let _: () = conn.set(execution_key(decision_ts), raw).await?;
+        let _: () = conn.lpush(RECENT_EXECUTIONS_LIST_KEY, decision_ts).await?;
+        let _: () = conn
+            .ltrim(
+                RECENT_EXECUTIONS_LIST_KEY,
+                0,
+                RECENT_EXECUTIONS_LIMIT.saturating_sub(1),
+            )
+            .await?;
+        let _: () = conn.set(LAST_EXECUTION_TS_KEY, decision_ts).await?;
+        let prev_cum: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+        let _: () = conn.set(CUM_PNL_LN_KEY, prev_cum + pnl_ln).await?;
+        let prev_cnt: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
+        let _: () = conn.set(EXECUTION_COUNT_KEY, prev_cnt + 1).await?;
+        inserted_count += 1;
+    }
+
+    Ok(PaperTradeBackfillResult {
+        requested_days: days,
+        inserted_count,
+        skipped_existing_count,
+        source_rows: rows.len(),
+    })
 }
 
