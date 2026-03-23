@@ -1,0 +1,54 @@
+name: Stock Service Daily Signals Snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekdays near US cash close (20:55 UTC ~= 15:55 ET during standard time).
+    - cron: "55 20 * * 1-5"
+
+permissions:
+  contents: read
+
+env:
+  STOCK_SERVICE_BASE_URL: ${{ secrets.STOCK_SERVICE_BASE_URL || format('http://{0}', secrets.REMOTE_HOST) }}
+  QUANTILE: "0.2"
+  TRAIN_DAYS: "120"
+  SHORT_ENABLED: "true"
+  INSECURE_SSL: "true"
+  OUTPUT_DIR: "artifacts/daily-signals"
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Capture model-first snapshot (with phase1 fallback)
+        run: |
+          python lianel/dc/stock-service/scripts/capture_daily_signals_snapshot.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --quantile "$QUANTILE" \
+            --short "$SHORT_ENABLED" \
+            --train-days "$TRAIN_DAYS" \
+            --output-dir "$OUTPUT_DIR" \
+            --insecure-ssl
+
+      - name: Upload snapshot artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-signals-snapshot-${{ github.run_id }}
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+
