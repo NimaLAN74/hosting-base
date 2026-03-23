@@ -9,7 +9,9 @@ import './StockServicePage.css';
 const WATCHLIST_URL = '/api/v1/stock-service/watchlist';
 const HISTORY_URL = '/api/v1/stock-service/history';
 const TODAY_URL = '/api/v1/stock-service/today';
+const DAILY_SIGNALS_URL = '/api/v1/stock-service/daily-signals?backtest=true';
 const WATCHLIST_REFRESH_MS = 60_000;
+const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 
 /* ViewBox coordinates — SVG scales to 100% width of container via CSS */
 const CHART_WIDTH = 960;
@@ -56,6 +58,17 @@ const formatSvDateTime24h = (isoLike) => {
   }).format(d);
 };
 
+const formatSignalReason = (reason) => {
+  const map = {
+    insufficient_symbols_with_history: 'Too few symbols have daily history from IBKR right now.',
+    no_overlapping_trading_days: 'No shared trading days across symbols (likely market holiday / feed gap).',
+    insufficient_overlapping_history_for_features: 'Not enough overlapping days to build 20-day features yet.',
+    not_enough_symbols_after_alignment: 'Too few symbols left after aligning history windows.',
+    feature_computation_unavailable: 'Feature calculation is unavailable for the latest bar (holiday/partial session).',
+  };
+  return map[reason] || reason || 'No signal data available.';
+};
+
 export default function StockServicePage() {
   const [watchlist, setWatchlist] = useState(null);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
@@ -70,6 +83,9 @@ export default function StockServicePage() {
   const [historyRange, setHistoryRange] = useState('7d'); // '7d' | '1m' | '3m' | '1y'
   const [todayBySymbol, setTodayBySymbol] = useState({});
   const [chartHover, setChartHover] = useState({ symbol: null, barIndex: null });
+  const [dailySignals, setDailySignals] = useState(null);
+  const [dailySignalsLoading, setDailySignalsLoading] = useState(true);
+  const [dailySignalsError, setDailySignalsError] = useState(null);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -104,6 +120,33 @@ export default function StockServicePage() {
     const id = setInterval(loadWatchlist, WATCHLIST_REFRESH_MS);
     return () => clearInterval(id);
   }, [loadWatchlist]);
+
+  const loadDailySignals = useCallback(() => {
+    setDailySignalsLoading(true);
+    setDailySignalsError(null);
+    fetch(DAILY_SIGNALS_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then((r) => {
+        if (!r.ok) {
+          setDailySignalsError(`Signals request failed (${r.status}).`);
+          return null;
+        }
+        return r.json();
+      })
+      .then((data) => {
+        if (data) setDailySignals(data);
+      })
+      .catch(() => {
+        setDailySignalsError('Could not load daily signals.');
+        setDailySignals(null);
+      })
+      .finally(() => setDailySignalsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadDailySignals();
+    const id = setInterval(loadDailySignals, DAILY_SIGNALS_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadDailySignals]);
 
   useEffect(() => {
     if (watchlist?.symbols) {
@@ -405,6 +448,67 @@ export default function StockServicePage() {
         <p className="stock-service-explainer">
           <Link to="/stock/gateway" className="stock-service-gateway-link">Gateway session</Link> (paste cookie when needed)
         </p>
+        <section className="stock-service-card stock-service-signals-card">
+          <h2 className="stock-service-card-title">Daily Signals (next open → next close)</h2>
+          <p className="stock-service-explainer">
+            Decision at close, then execute at next session open and exit at close.
+          </p>
+          {dailySignalsLoading && <p className="stock-service-loading">Loading signals…</p>}
+          {!dailySignalsLoading && dailySignalsError && (
+            <p className="stock-service-error" role="alert">{dailySignalsError}</p>
+          )}
+          {!dailySignalsLoading && !dailySignalsError && dailySignals && (
+            <div className="stock-service-signals-wrap">
+              <div className="stock-service-watchlist-meta">
+                <span>As of: {dailySignals.as_of_ts ? formatSvDateTime24h(new Date(Number(dailySignals.as_of_ts) * 1000).toISOString()) : '—'}</span>
+                <span>Universe: {Array.isArray(dailySignals.universe) ? dailySignals.universe.length : 0}</span>
+                <span>Overlap days: {Number(dailySignals.overlapping_days || 0)}</span>
+              </div>
+              {!dailySignals.data_available && (
+                <p className="stock-service-signal-empty">
+                  {formatSignalReason(dailySignals.reason)}
+                </p>
+              )}
+              {dailySignals.data_available && (
+                <>
+                  <div className="stock-service-signals-kpis">
+                    <span>Long/Short quantile: {Number(dailySignals.quantile || 0).toFixed(2)}</span>
+                    <span>Short enabled: {dailySignals.short_enabled ? 'yes' : 'no'}</span>
+                    {dailySignals.backtest && (
+                      <span>Backtest Sharpe(252): {Number(dailySignals.backtest.sharpe_252 || 0).toFixed(2)}</span>
+                    )}
+                  </div>
+                  <div className="stock-service-table-wrap">
+                    <table className="stock-service-watchlist-table" aria-label="Daily strategy signals">
+                      <thead>
+                        <tr>
+                          <th>Symbol</th>
+                          <th>Side</th>
+                          <th className="stock-service-th-number">Weight</th>
+                          <th className="stock-service-th-number">Score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(dailySignals.signals || []).map((s) => (
+                          <tr key={`${s.symbol}-${s.side}`}>
+                            <td className="stock-service-wl-symbol">{s.symbol}</td>
+                            <td>
+                              <span className={s.side === 'LONG' ? 'stock-service-signal-long' : 'stock-service-signal-short'}>
+                                {s.side}
+                              </span>
+                            </td>
+                            <td className="stock-service-td-number">{Number(s.weight || 0).toFixed(3)}</td>
+                            <td className="stock-service-td-number">{Number(s.score || 0).toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </section>
         <section className="stock-service-card stock-service-watchlist-card">
           <h2 className="stock-service-card-title">Prices</h2>
           <p className="stock-service-explainer">
