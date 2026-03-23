@@ -117,6 +117,11 @@ def main() -> None:
             payload = fetch_json(phase1_url, timeout_s=args.timeout_s, insecure_ssl=args.insecure_ssl)
             payload["model_unavailable"] = True
             payload["model_unavailable_reason"] = fallback_reason
+            payload["model"] = model_payload.get("model")
+            payload["training_rows"] = model_payload.get("training_rows")
+            payload["coefficients"] = model_payload.get("coefficients")
+            payload["model_health"] = model_payload.get("model_health")
+            payload["publish_signals"] = model_payload.get("publish_signals", False)
         except Exception as exc:
             payload = model_payload
             payload["fallback_error"] = str(exc)
@@ -133,12 +138,17 @@ def main() -> None:
     coefficients = payload.get("coefficients") or {}
     top_coeffs = pick_top_coefficients(coefficients)
     feature_flags = detect_feature_availability(payload)
+    publish_signals = bool(payload.get("publish_signals", data_available))
+    publish_reason = payload.get("reason")
+    model_health = payload.get("model_health") or {}
 
     summary = {
         "timestamp_utc": timestamp,
         "source": source,
         "data_available": data_available,
         "reason": payload.get("reason"),
+        "publish_signals": publish_signals,
+        "publish_reason": publish_reason,
         "model_unavailable_reason": fallback_reason,
         "as_of_ts": payload.get("as_of_ts"),
         "symbols_with_history": payload.get("symbols_with_history"),
@@ -147,6 +157,7 @@ def main() -> None:
         "training_rows": training_rows,
         "feature_availability": feature_flags,
         "coefficients": coefficients,
+        "model_health": model_health,
         "top_coefficients": [{"name": k, "value": v} for (k, v) in top_coeffs],
         "signal_count": len(signals),
         "long_count": len(longs),
@@ -163,6 +174,8 @@ def main() -> None:
     print(f"source={source}")
     print(f"data_available={data_available}")
     print(f"reason={payload.get('reason')}")
+    print(f"publish_signals={publish_signals}")
+    print(f"publish_reason={publish_reason}")
     print(f"model_unavailable_reason={fallback_reason}")
     print(f"signal_count={len(signals)} longs={len(longs)} shorts={len(shorts)}")
     print(f"as_of_ts={payload.get('as_of_ts')}")
@@ -174,6 +187,14 @@ def main() -> None:
         "feature_availability="
         f"rank_features:{feature_flags['rank_features']},vol_regime:{feature_flags['vol_regime']}"
     )
+    if model_health:
+        print(
+            "model_health="
+            f"feature_row_count:{model_health.get('feature_row_count')},"
+            f"nan_or_inf_count:{model_health.get('nan_or_inf_count')},"
+            f"coef_norm:{model_health.get('coef_norm')},"
+            f"train_window_days:{model_health.get('train_window_days')}"
+        )
     if top_coeffs:
         print("Top coefficients:")
         for name, val in top_coeffs:

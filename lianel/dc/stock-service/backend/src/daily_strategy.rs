@@ -649,10 +649,67 @@ pub struct Phase2ModelSignalsResponse {
     pub training_rows: usize,
     pub quantile: f64,
     pub short_enabled: bool,
+    pub publish_signals: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coefficients: Option<LinearModelCoefficients>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_health: Option<ModelHealth>,
     pub features: Vec<SymbolFeatures>,
     pub signals: Vec<DailySignal>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelHealth {
+    pub feature_row_count: usize,
+    pub nan_or_inf_count: usize,
+    pub coef_norm: f64,
+    pub train_window_days: usize,
+}
+
+const MODEL_MIN_FEATURE_ROWS: usize = 5;
+const MODEL_MIN_UNIVERSE_SIZE: usize = 5;
+const MODEL_MAX_WEIGHT_PER_SYMBOL: f64 = 0.35;
+const MODEL_MAX_COEF_NORM: f64 = 5.0;
+
+fn coef_l2_norm(beta: &[f64]) -> f64 {
+    beta.iter().skip(1).map(|x| x * x).sum::<f64>().sqrt()
+}
+
+fn count_non_finite_values(rows: &[ResearchRow], beta: &[f64], day_scores: &[DayFeatureRow]) -> usize {
+    let mut c = 0usize;
+    for b in beta {
+        if !b.is_finite() {
+            c += 1;
+        }
+    }
+    for r in rows {
+        let vals = [
+            r.mom5,
+            r.mom20,
+            r.vol20,
+            r.rank_mom5_cs,
+            r.rank_mom20_cs,
+            r.rank_vol20_cs,
+            r.vol_regime,
+            r.score,
+            r.y_oc_next,
+        ];
+        c += vals.iter().filter(|v| !v.is_finite()).count();
+    }
+    for r in day_scores {
+        let vals = [
+            r.mom5,
+            r.mom20,
+            r.vol20,
+            r.rank_mom5_cs,
+            r.rank_mom20_cs,
+            r.rank_vol20_cs,
+            r.vol_regime,
+            r.score,
+        ];
+        c += vals.iter().filter(|v| !v.is_finite()).count();
+    }
+    c
 }
 
 fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
@@ -995,7 +1052,9 @@ pub async fn compute_phase2_model_signals(
             training_rows: 0,
             quantile,
             short_enabled,
+            publish_signals: false,
             coefficients: None,
+            model_health: None,
             features: vec![],
             signals: vec![],
         };
@@ -1015,7 +1074,9 @@ pub async fn compute_phase2_model_signals(
             training_rows: 0,
             quantile,
             short_enabled,
+            publish_signals: false,
             coefficients: None,
+            model_health: None,
             features: vec![],
             signals: vec![],
         };
@@ -1039,7 +1100,9 @@ pub async fn compute_phase2_model_signals(
             training_rows: 0,
             quantile,
             short_enabled,
+            publish_signals: false,
             coefficients: None,
+            model_health: None,
             features: vec![],
             signals: vec![],
         };
@@ -1080,6 +1143,13 @@ pub async fn compute_phase2_model_signals(
         }
     }
     let training_rows = train_rows.len();
+    let train_window_days = {
+        let mut d = std::collections::HashSet::<u64>::new();
+        for r in &train_rows {
+            d.insert(r.ts);
+        }
+        d.len()
+    };
     let beta = match fit_linear_model(&train_rows, 1e-4) {
         Some(v) => v,
         None => {
@@ -1094,7 +1164,9 @@ pub async fn compute_phase2_model_signals(
                 training_rows,
                 quantile,
                 short_enabled,
+                publish_signals: false,
                 coefficients: None,
+                model_health: None,
                 features: vec![],
                 signals: vec![],
             };
@@ -1116,6 +1188,7 @@ pub async fn compute_phase2_model_signals(
                 training_rows,
                 quantile,
                 short_enabled,
+                publish_signals: false,
                 coefficients: Some(LinearModelCoefficients {
                     intercept: beta[0],
                     mom5: beta[1],
@@ -1125,6 +1198,12 @@ pub async fn compute_phase2_model_signals(
                     rank_mom20_cs: beta[5],
                     rank_vol20_cs: beta[6],
                     vol_regime: beta[7],
+                }),
+                model_health: Some(ModelHealth {
+                    feature_row_count: 0,
+                    nan_or_inf_count: count_non_finite_values(&train_rows, &beta, &[]),
+                    coef_norm: coef_l2_norm(&beta),
+                    train_window_days,
                 }),
                 features: vec![],
                 signals: vec![],
@@ -1150,18 +1229,69 @@ pub async fn compute_phase2_model_signals(
         })
         .collect::<Vec<_>>();
 
-    let (features, signals) = signals_from_scores(&predicted_scores, quantile, short_enabled);
+    let (features, mut signals) = signals_from_scores(&predicted_scores, quantile, short_enabled);
+    let model_health = ModelHealth {
+        feature_row_count: predicted_scores.len(),
+        nan_or_inf_count: count_non_finite_values(&train_rows, &beta, &predicted_scores),
+        coef_norm: coef_l2_norm(&beta),
+        train_window_days,
+    };
+
+    // Guardrail 1: cap concentration and renormalize each side.
+    for side in ["LONG", "SHORT"] {
+        let idx: Vec<usize> = signals
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| if s.side == side { Some(i) } else { None })
+            .collect();
+        if idx.is_empty() {
+            continue;
+        }
+        for &i in &idx {
+            signals[i].weight = signals[i].weight.min(MODEL_MAX_WEIGHT_PER_SYMBOL);
+        }
+        let total: f64 = idx.iter().map(|&i| signals[i].weight).sum();
+        if total > 1e-12 {
+            for &i in &idx {
+                signals[i].weight /= total;
+            }
+        }
+    }
+
+    // Guardrail 2: publish only if diagnostics pass.
+    let mut publish_reason: Option<String> = None;
+    if model_health.feature_row_count < MODEL_MIN_FEATURE_ROWS {
+        publish_reason = Some("publish_blocked_low_feature_rows".to_string());
+    } else if model_health.nan_or_inf_count > 0 {
+        publish_reason = Some("publish_blocked_non_finite_features".to_string());
+    } else if model_health.coef_norm > MODEL_MAX_COEF_NORM {
+        publish_reason = Some("publish_blocked_coef_norm_outlier".to_string());
+    } else if features.len() < MODEL_MIN_UNIVERSE_SIZE {
+        publish_reason = Some("publish_blocked_small_universe".to_string());
+    } else {
+        let long_n = signals.iter().filter(|s| s.side == "LONG").count();
+        let short_n = signals.iter().filter(|s| s.side == "SHORT").count();
+        if long_n == 0 || (short_enabled && short_n == 0) {
+            publish_reason = Some("publish_blocked_empty_signal_side".to_string());
+        }
+    }
+
+    let publish_signals = publish_reason.is_none();
+    if !publish_signals {
+        signals.clear();
+    }
     Phase2ModelSignalsResponse {
         model: "linear_regression_enhanced_v2",
         label: "ln(C[t+1]/O[t+1])",
-        data_available: true,
-        reason: None,
+        data_available: publish_signals,
+        reason: publish_reason,
         as_of_ts: Some(ts[last_i]),
         symbols_with_history,
         overlapping_days,
         training_rows,
         quantile,
         short_enabled,
+        publish_signals,
         coefficients: Some(LinearModelCoefficients {
             intercept: beta[0],
             mom5: beta[1],
@@ -1172,6 +1302,7 @@ pub async fn compute_phase2_model_signals(
             rank_vol20_cs: beta[6],
             vol_regime: beta[7],
         }),
+        model_health: Some(model_health),
         features,
         signals,
     }
