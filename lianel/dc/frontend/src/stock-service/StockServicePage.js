@@ -12,6 +12,7 @@ const TODAY_URL = '/api/v1/stock-service/today';
 const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train_days=120&quantile=0.2&short=true';
 const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
+const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
@@ -104,6 +105,10 @@ export default function StockServicePage() {
   const [paperTradeStatus, setPaperTradeStatus] = useState(null);
   const [paperTradeLoading, setPaperTradeLoading] = useState(true);
   const [paperTradeError, setPaperTradeError] = useState(null);
+
+  const [paperTradeRecords, setPaperTradeRecords] = useState(null);
+  const [paperTradeRecordsLoading, setPaperTradeRecordsLoading] = useState(true);
+  const [paperTradeRecordsError, setPaperTradeRecordsError] = useState(null);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -206,6 +211,25 @@ export default function StockServicePage() {
       .finally(() => setPaperTradeLoading(false));
   }, []);
 
+  const loadPaperTradeRecords = useCallback(() => {
+    setPaperTradeRecordsLoading(true);
+    setPaperTradeRecordsError(null);
+    fetch(PAPER_TRADE_RECORDS_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error(`Paper-trade records request failed (${r.status}).`);
+        }
+        return r.json();
+      })
+      .then((data) => setPaperTradeRecords(data?.records || []))
+      .catch(() => {
+        // Keep UI non-blocking; this may fail right after deploy.
+        setPaperTradeRecordsError(null);
+        setPaperTradeRecords(null);
+      })
+      .finally(() => setPaperTradeRecordsLoading(false));
+  }, []);
+
   useEffect(() => {
     loadDailySignals();
     const id = setInterval(loadDailySignals, DAILY_SIGNALS_REFRESH_MS);
@@ -217,6 +241,12 @@ export default function StockServicePage() {
     const id = setInterval(loadPaperTradeStatus, PAPER_TRADE_REFRESH_MS);
     return () => clearInterval(id);
   }, [loadPaperTradeStatus]);
+
+  useEffect(() => {
+    loadPaperTradeRecords();
+    const id = setInterval(loadPaperTradeRecords, PAPER_TRADE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadPaperTradeRecords]);
 
   useEffect(() => {
     if (watchlist?.symbols) {
@@ -619,6 +649,72 @@ export default function StockServicePage() {
                     </>
                   )}
                 </span>
+              </div>
+              <div className="stock-service-paper-trade-records-wrap">
+                <div className="stock-service-model-diag-row">
+                  <span>Last executions:</span>
+                  <span>
+                    {paperTradeRecordsLoading ? 'loading…' : (
+                      <>
+                        {paperTradeRecords?.length ? `${paperTradeRecords.length} rec` : 'none'}
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                {paperTradeRecords && paperTradeRecords.length > 0 && (
+                  <div className="stock-service-paper-trade-records">
+                    {paperTradeRecords.slice(0, 3).map((exec) => (
+                      <div key={exec.executed_at_ts} className="stock-service-paper-trade-exec">
+                        <div className="stock-service-paper-trade-exec-meta">
+                          <span>
+                            decision-as-of={exec.decision_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.decision_as_of_ts) * 1000).toISOString()) : '—'}
+                          </span>
+                          <span>
+                            exec-ts={exec.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.execution_as_of_ts) * 1000).toISOString()) : '—'}
+                          </span>
+                          <span>pnl_ln={Number(exec.pnl_ln || 0).toFixed(5)}</span>
+                          <span>pnl_return={Number(exec.pnl_return || 0).toFixed(4)}</span>
+                        </div>
+
+                        <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
+                          <table className="stock-service-watchlist-table" aria-label="Paper trade execution legs">
+                            <thead>
+                              <tr>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th className="stock-service-th-number">Weight</th>
+                                <th className="stock-service-th-number">y_oc_next</th>
+                                <th className="stock-service-th-number">contrib</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(exec.legs || []).map((leg) => (
+                                <tr key={`${leg.symbol}-${leg.side}-${leg.y_oc_next}`}>
+                                  <td className="stock-service-wl-symbol">{leg.symbol}</td>
+                                  <td>
+                                    <span className={leg.side === 'LONG' ? 'stock-service-signal-long' : 'stock-service-signal-short'}>
+                                      {leg.side}
+                                    </span>
+                                  </td>
+                                  <td className="stock-service-td-number">{Number(leg.weight || 0).toFixed(3)}</td>
+                                  <td className="stock-service-td-number">{Number(leg.y_oc_next || 0).toFixed(5)}</td>
+                                  <td className="stock-service-td-number">{Number(leg.contrib || 0).toFixed(5)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!paperTradeRecordsLoading && paperTradeRecords && paperTradeRecords.length === 0 && (
+                  <p className="stock-service-explainer" style={{ margin: '0.5rem 0 0 0' }}>
+                    No paper-trade executions recorded yet.
+                  </p>
+                )}
               </div>
               {dailySignals.data_available && (
                 <>
