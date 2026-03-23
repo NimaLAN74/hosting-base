@@ -68,6 +68,9 @@ pub struct PaperTradeRunResult {
     pub executed_count: usize,
     pub stored_decision: bool,
     pub stored_decision_ts: Option<u64>,
+    pub latest_model_publish_signals: bool,
+    pub latest_model_publish_reason: Option<String>,
+    pub latest_model_as_of_ts: Option<u64>,
     pub pending_after: usize,
 }
 
@@ -289,8 +292,13 @@ pub async fn paper_trade_run(
 
     let mut stored_decision = false;
     let mut stored_decision_ts = None;
+
+    let latest_model_publish_signals = resp.publish_signals;
+    let latest_model_publish_reason = resp.reason.clone();
+    let latest_model_as_of_ts = resp.as_of_ts;
+
     if resp.publish_signals && resp.as_of_ts.is_some() && !resp.signals.is_empty() {
-        let ts = resp.as_of_ts.unwrap();
+        let ts = latest_model_as_of_ts.unwrap();
         let key = decision_key(ts);
         let exists: bool = conn.exists(&key).await.unwrap_or(false);
         if !exists {
@@ -309,6 +317,9 @@ pub async fn paper_trade_run(
         executed_count,
         stored_decision,
         stored_decision_ts,
+        latest_model_publish_signals,
+        latest_model_publish_reason,
+        latest_model_as_of_ts,
         pending_after,
     })
 }
