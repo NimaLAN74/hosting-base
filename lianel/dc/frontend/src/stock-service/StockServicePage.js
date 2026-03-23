@@ -359,6 +359,28 @@ export default function StockServicePage() {
   const coefficients = dailySignals?.coefficients || null;
   const modelHealth = dailySignals?.model_health || null;
   const publishSignals = dailySignals?.publish_signals ?? Boolean(dailySignals?.data_available);
+  const paperTradeStats = React.useMemo(() => {
+    const rows = Array.isArray(paperTradeRecords) ? paperTradeRecords : [];
+    if (!rows.length) {
+      return {
+        count: 0,
+        winRate: 0,
+        avgReturn: 0,
+        bestReturn: 0,
+        worstReturn: 0,
+      };
+    }
+    const rets = rows.map((r) => Number(r?.pnl_return || 0));
+    const wins = rets.filter((x) => x > 0).length;
+    const avg = rets.reduce((a, b) => a + b, 0) / rets.length;
+    return {
+      count: rows.length,
+      winRate: wins / rows.length,
+      avgReturn: avg,
+      bestReturn: Math.max(...rets),
+      worstReturn: Math.min(...rets),
+    };
+  }, [paperTradeRecords]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -666,6 +688,12 @@ export default function StockServicePage() {
 
                 {paperTradeRecords && paperTradeRecords.length > 0 && (
                   <div className="stock-service-paper-trade-records">
+                    <div className="stock-service-paper-trade-summary">
+                      <span>win-rate={Number(paperTradeStats.winRate * 100).toFixed(1)}%</span>
+                      <span>avg={Number(paperTradeStats.avgReturn).toFixed(4)}</span>
+                      <span>best={Number(paperTradeStats.bestReturn).toFixed(4)}</span>
+                      <span>worst={Number(paperTradeStats.worstReturn).toFixed(4)}</span>
+                    </div>
                     {paperTradeRecords.slice(0, 3).map((exec) => (
                       <div key={exec.executed_at_ts} className="stock-service-paper-trade-exec">
                         <div className="stock-service-paper-trade-exec-meta">
