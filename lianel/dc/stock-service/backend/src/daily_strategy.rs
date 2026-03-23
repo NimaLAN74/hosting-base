@@ -515,3 +515,266 @@ pub async fn compute_daily_signals(
         backtest,
     }
 }
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ResearchRow {
+    pub ts: u64,
+    pub symbol: String,
+    pub mom5: f64,
+    pub mom20: f64,
+    pub vol20: f64,
+    pub score: f64,
+    /// Label aligned with execution: ln(C[t+1] / O[t+1])
+    pub y_oc_next: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WalkForwardSummary {
+    pub folds: usize,
+    pub trading_days: usize,
+    pub mean_daily: f64,
+    pub vol_daily: f64,
+    pub sharpe_252: f64,
+    pub cumulative_return: f64,
+    pub max_drawdown: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Phase2ResearchResponse {
+    pub model_scaffold: &'static str,
+    pub label: &'static str,
+    pub data_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub symbols_with_history: usize,
+    pub overlapping_days: usize,
+    pub train_days: usize,
+    pub test_days: usize,
+    pub quantile: f64,
+    pub short_enabled: bool,
+    pub row_count: usize,
+    pub rows_sample: Vec<ResearchRow>,
+    pub walkforward: Option<WalkForwardSummary>,
+}
+
+fn walkforward_score_proxy(
+    prepared: &[PreparedSymbol],
+    quantile: f64,
+    short_enabled: bool,
+    train_days: usize,
+    test_days: usize,
+) -> Option<WalkForwardSummary> {
+    let n = prepared.first()?.closes.len();
+    if n < (train_days + 2) || test_days == 0 {
+        return None;
+    }
+
+    let mut pnls = Vec::<f64>::new();
+    let mut folds = 0usize;
+    let mut start = train_days.max(20);
+    while start < n - 1 {
+        let end = (start + test_days).min(n - 1);
+        let mut fold_has_day = false;
+        for i in start..end {
+            let sc = match scores_at_day(prepared, i) {
+                Some(v) => v,
+                None => continue,
+            };
+            let (_, sigs) = signals_from_scores(&sc, quantile, short_enabled);
+            if sigs.is_empty() {
+                continue;
+            }
+            let mut pnl = 0.0;
+            let mut used = false;
+            for s in &sigs {
+                let p = match prepared.iter().find(|x| x.symbol == s.symbol) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let y = match forward_oc_return(p.opens[i + 1], p.closes[i + 1]) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                used = true;
+                pnl += if s.side == "SHORT" { -s.weight * y } else { s.weight * y };
+            }
+            if used {
+                pnls.push(pnl);
+                fold_has_day = true;
+            }
+        }
+        if fold_has_day {
+            folds += 1;
+        }
+        start += test_days;
+    }
+
+    if pnls.is_empty() {
+        return None;
+    }
+    let m = mean(&pnls);
+    let sd = std_sample(&pnls, m);
+    let sharpe = if sd > 1e-12 {
+        (m / sd) * (252_f64).sqrt()
+    } else {
+        0.0
+    };
+    let mut cum = 0.0;
+    let mut peak = 0.0_f64;
+    let mut max_dd = 0.0_f64;
+    for &x in &pnls {
+        cum += x;
+        peak = peak.max(cum);
+        max_dd = max_dd.min(cum - peak);
+    }
+    Some(WalkForwardSummary {
+        folds,
+        trading_days: pnls.len(),
+        mean_daily: m,
+        vol_daily: sd,
+        sharpe_252: sharpe,
+        cumulative_return: pnls.iter().sum(),
+        max_drawdown: max_dd,
+    })
+}
+
+pub async fn compute_phase2_research(
+    client: &IbkrOAuthClient,
+    symbol_conids: &[(String, u64)],
+    quantile: f64,
+    short_enabled: bool,
+    train_days: usize,
+    test_days: usize,
+    sample_rows: usize,
+) -> Phase2ResearchResponse {
+    let mut bars_by_symbol: HashMap<String, Vec<HistoryBar>> = HashMap::new();
+    for (sym, conid) in symbol_conids {
+        match client.fetch_history(*conid, "1y", "1d").await {
+            Ok(bars) => {
+                bars_by_symbol.insert(sym.clone(), bars);
+            }
+            Err(e) => tracing::warn!("phase2-research: history failed for {}: {}", sym, e),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    }
+    let symbols_with_history = bars_by_symbol.len();
+    if symbols_with_history < 3 {
+        return Phase2ResearchResponse {
+            model_scaffold: "phase2_proxy_score_walkforward",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("insufficient_symbols_with_history".to_string()),
+            symbols_with_history,
+            overlapping_days: 0,
+            train_days,
+            test_days,
+            quantile,
+            short_enabled,
+            row_count: 0,
+            rows_sample: vec![],
+            walkforward: None,
+        };
+    }
+
+    let ts = aligned_timestamps(&bars_by_symbol);
+    let overlapping_days = ts.len();
+    if ts.len() < 22 {
+        return Phase2ResearchResponse {
+            model_scaffold: "phase2_proxy_score_walkforward",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("insufficient_overlapping_history_for_features".to_string()),
+            symbols_with_history,
+            overlapping_days,
+            train_days,
+            test_days,
+            quantile,
+            short_enabled,
+            row_count: 0,
+            rows_sample: vec![],
+            walkforward: None,
+        };
+    }
+
+    let mut prepared: Vec<PreparedSymbol> = Vec::new();
+    for (sym, bars) in bars_by_symbol {
+        if let Some(p) = prepare_symbol(sym, bars, &ts) {
+            prepared.push(p);
+        }
+    }
+    if prepared.len() < 3 {
+        return Phase2ResearchResponse {
+            model_scaffold: "phase2_proxy_score_walkforward",
+            label: "ln(C[t+1]/O[t+1])",
+            data_available: false,
+            reason: Some("not_enough_symbols_after_alignment".to_string()),
+            symbols_with_history,
+            overlapping_days,
+            train_days,
+            test_days,
+            quantile,
+            short_enabled,
+            row_count: 0,
+            rows_sample: vec![],
+            walkforward: None,
+        };
+    }
+
+    let mut rows = Vec::<ResearchRow>::new();
+    let n = ts.len();
+    for i in 20..(n - 1) {
+        let day_scores = match scores_at_day(&prepared, i) {
+            Some(v) => v,
+            None => continue,
+        };
+        for (symbol, mom5, mom20, vol20, score) in day_scores {
+            let p = match prepared.iter().find(|x| x.symbol == symbol) {
+                Some(v) => v,
+                None => continue,
+            };
+            let y = match forward_oc_return(p.opens[i + 1], p.closes[i + 1]) {
+                Some(v) => v,
+                None => continue,
+            };
+            rows.push(ResearchRow {
+                ts: ts[i],
+                symbol,
+                mom5,
+                mom20,
+                vol20,
+                score,
+                y_oc_next: y,
+            });
+        }
+    }
+    rows.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.symbol.cmp(&b.symbol)));
+    let row_count = rows.len();
+    let rows_sample = rows.into_iter().take(sample_rows.max(1)).collect::<Vec<_>>();
+    let walkforward = walkforward_score_proxy(
+        &prepared,
+        quantile,
+        short_enabled,
+        train_days.max(60),
+        test_days.max(5),
+    );
+
+    Phase2ResearchResponse {
+        model_scaffold: "phase2_proxy_score_walkforward",
+        label: "ln(C[t+1]/O[t+1])",
+        data_available: row_count > 0,
+        reason: if row_count > 0 {
+            None
+        } else {
+            Some("no_rows_generated".to_string())
+        },
+        symbols_with_history,
+        overlapping_days,
+        train_days,
+        test_days,
+        quantile,
+        short_enabled,
+        row_count,
+        rows_sample,
+        walkforward,
+    }
+}
