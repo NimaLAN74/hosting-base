@@ -164,6 +164,11 @@ export default function StockServicePage() {
           ...fallbackData,
           fallback_reason: modelData?.reason || null,
           model_unavailable: true,
+          model: modelData?.model || null,
+          training_rows: modelData?.training_rows ?? null,
+          coefficients: modelData?.coefficients || null,
+          model_as_of_ts: modelData?.as_of_ts ?? null,
+          model_reason: modelData?.reason || null,
         });
         setDailySignalsSource('phase1-fallback');
       })
