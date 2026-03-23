@@ -495,11 +495,21 @@ async fn debug_snapshot_handler(
         .collect();
 
     let parse_f64 = |item: &serde_json::Value, key: &str| -> Option<f64> {
-        item.get(key).and_then(|v| v.as_f64()).or_else(|| {
-            item.get(key)
-                .and_then(|v| v.as_str())
-                .and_then(|p| p.replace(',', "").parse::<f64>().ok())
-        })
+        let parse_ibkr_number = |raw: &str| -> Option<f64> {
+            let cleaned = raw.trim().replace(',', "");
+            if let Ok(v) = cleaned.parse::<f64>() {
+                return Some(v);
+            }
+            let trimmed = cleaned
+                .trim_start_matches(|c: char| {
+                    !(c.is_ascii_digit() || c == '-' || c == '+' || c == '.')
+                })
+                .to_string();
+            trimmed.parse::<f64>().ok()
+        };
+        item.get(key)
+            .and_then(|v| v.as_f64())
+            .or_else(|| item.get(key).and_then(|v| v.as_str()).and_then(parse_ibkr_number))
     };
 
     // Clone so we don't move `raw` (used later in the response).
