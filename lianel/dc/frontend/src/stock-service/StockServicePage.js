@@ -289,9 +289,16 @@ export default function StockServicePage() {
   const firstFeature = Array.isArray(dailySignals?.features) && dailySignals.features.length > 0
     ? dailySignals.features[0]
     : null;
+  const coefficients = dailySignals?.coefficients || null;
   const featureAvailability = {
-    rankFeatures: Boolean(firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs')),
-    volRegime: Boolean(firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'vol_regime')),
+    rankFeatures: Boolean(
+      (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
+      || (coefficients && Object.prototype.hasOwnProperty.call(coefficients, 'rank_mom5_cs'))
+    ),
+    volRegime: Boolean(
+      (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'vol_regime'))
+      || (coefficients && Object.prototype.hasOwnProperty.call(coefficients, 'vol_regime'))
+    ),
   };
 
   /** Merged today points: Redis/cached (todayBySymbol) + current session (sessionChartPointsRef), sorted by ts. */
@@ -520,6 +527,24 @@ export default function StockServicePage() {
                   {formatSignalReason(dailySignals.reason)}
                 </p>
               )}
+              {(modelName || topCoefficientEntries.length > 0 || dailySignals.training_rows != null) && (
+                <div className="stock-service-model-diagnostics">
+                  <div className="stock-service-model-diag-row">
+                    <span>Feature set:</span>
+                    <span>
+                      rank features {featureAvailability.rankFeatures ? 'enabled' : 'n/a'}; vol regime {featureAvailability.volRegime ? 'enabled' : 'n/a'}
+                    </span>
+                  </div>
+                  {topCoefficientEntries.length > 0 && (
+                    <div className="stock-service-model-diag-row">
+                      <span>Top coefficients:</span>
+                      <span>
+                        {topCoefficientEntries.map((c) => `${c.key}=${c.value.toFixed(4)}`).join(', ')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               {dailySignals.data_available && (
                 <>
                   <div className="stock-service-signals-kpis">
@@ -533,24 +558,6 @@ export default function StockServicePage() {
                       <span>Backtest Sharpe(252): {Number(dailySignals.backtest.sharpe_252 || 0).toFixed(2)}</span>
                     )}
                   </div>
-                  {(modelName || topCoefficientEntries.length > 0) && (
-                    <div className="stock-service-model-diagnostics">
-                      <div className="stock-service-model-diag-row">
-                        <span>Feature set:</span>
-                        <span>
-                          rank features {featureAvailability.rankFeatures ? 'enabled' : 'n/a'}; vol regime {featureAvailability.volRegime ? 'enabled' : 'n/a'}
-                        </span>
-                      </div>
-                      {topCoefficientEntries.length > 0 && (
-                        <div className="stock-service-model-diag-row">
-                          <span>Top coefficients:</span>
-                          <span>
-                            {topCoefficientEntries.map((c) => `${c.key}=${c.value.toFixed(4)}`).join(', ')}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
                   <div className="stock-service-table-wrap">
                     <table className="stock-service-watchlist-table" aria-label="Daily strategy signals">
                       <thead>
