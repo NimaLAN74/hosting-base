@@ -381,6 +381,19 @@ export default function StockServicePage() {
       worstReturn: Math.min(...rets),
     };
   }, [paperTradeRecords]);
+  const paperTradeEquity = React.useMemo(() => {
+    const rows = (Array.isArray(paperTradeRecords) ? paperTradeRecords : []).slice().reverse();
+    if (!rows.length) return [];
+    let cumLn = 0;
+    return rows.map((r, idx) => {
+      cumLn += Number(r?.pnl_ln || 0);
+      return {
+        x: idx,
+        y: Math.exp(cumLn) - 1,
+        ts: Number(r?.execution_as_of_ts || 0),
+      };
+    });
+  }, [paperTradeRecords]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -694,6 +707,51 @@ export default function StockServicePage() {
                       <span>best={Number(paperTradeStats.bestReturn).toFixed(4)}</span>
                       <span>worst={Number(paperTradeStats.worstReturn).toFixed(4)}</span>
                     </div>
+                    {paperTradeEquity.length > 0 && (
+                      <div className="stock-service-paper-trade-equity">
+                        <p className="stock-service-chart-legend" style={{ marginBottom: '0.35rem' }}>
+                          Paper equity curve (cumulative return)
+                        </p>
+                        <svg
+                          className="stock-service-paper-trade-equity-svg"
+                          viewBox="0 0 560 130"
+                          preserveAspectRatio="none"
+                          role="img"
+                          aria-label="Paper trade equity curve"
+                        >
+                          {(() => {
+                            const W = 560;
+                            const H = 130;
+                            const L = 42;
+                            const R = 8;
+                            const T = 10;
+                            const B = 24;
+                            const PW = W - L - R;
+                            const PH = H - T - B;
+                            const vals = paperTradeEquity.map((p) => p.y);
+                            const min = Math.min(...vals, 0);
+                            const max = Math.max(...vals, 0);
+                            const range = Math.max(1e-9, max - min);
+                            const toX = (i) => L + (paperTradeEquity.length > 1 ? (i / (paperTradeEquity.length - 1)) * PW : 0);
+                            const toY = (v) => T + PH - ((v - min) / range) * PH;
+                            const line = paperTradeEquity
+                              .map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i)},${toY(p.y)}`)
+                              .join(' ');
+                            const area = `${line} L${toX(paperTradeEquity.length - 1)},${T + PH} L${toX(0)},${T + PH} Z`;
+                            return (
+                              <>
+                                <rect x="0" y="0" width={W} height={H} className="stock-service-chart-bg" />
+                                <line x1={L} y1={toY(0)} x2={L + PW} y2={toY(0)} className="stock-service-chart-grid" />
+                                <path d={area} className="stock-service-paper-trade-equity-area" />
+                                <path d={line} className="stock-service-paper-trade-equity-line" />
+                                <text x={L - 6} y={toY(max) + 4} className="stock-service-chart-axis" textAnchor="end">{(max * 100).toFixed(1)}%</text>
+                                <text x={L - 6} y={toY(min) + 4} className="stock-service-chart-axis" textAnchor="end">{(min * 100).toFixed(1)}%</text>
+                              </>
+                            );
+                          })()}
+                        </svg>
+                      </div>
+                    )}
                     {paperTradeRecords.slice(0, 3).map((exec) => (
                       <div key={exec.executed_at_ts} className="stock-service-paper-trade-exec">
                         <div className="stock-service-paper-trade-exec-meta">
