@@ -104,6 +104,11 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/paper-trade/records",
             get(paper_trade_records_handler),
         )
+        .route("/api/v1/paper-trade/backfill", post(paper_trade_backfill_handler))
+        .route(
+            "/api/v1/stock-service/paper-trade/backfill",
+            post(paper_trade_backfill_handler),
+        )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -658,6 +663,63 @@ async fn paper_trade_records_handler(
     let limit = q.limit.unwrap_or(10);
     match paper_trade::paper_trade_records(redis, limit).await {
         Ok(records) => (StatusCode::OK, Json(serde_json::json!({ "records": records }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaperTradeBackfillQuery {
+    days: Option<usize>,
+    quantile: Option<f64>,
+    short_enabled: Option<bool>,
+}
+
+async fn paper_trade_backfill_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaperTradeBackfillQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+    let redis = match state.redis.as_ref() {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Redis not configured (paper-trade requires redis)"})),
+            )
+                .into_response();
+        }
+    };
+    let resolved_conids = {
+        let g = state.watchlist_cache.read().await;
+        g.resolved_conids.clone()
+    };
+    let days = q.days.unwrap_or(30).max(5).min(250);
+    let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
+    let short_enabled = q.short_enabled.unwrap_or(true);
+    match paper_trade::paper_trade_backfill(
+        client,
+        &resolved_conids,
+        redis,
+        days,
+        quantile,
+        short_enabled,
+    )
+    .await
+    {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),

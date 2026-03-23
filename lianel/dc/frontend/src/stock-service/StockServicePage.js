@@ -13,6 +13,7 @@ const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train
 const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
+const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
@@ -109,6 +110,8 @@ export default function StockServicePage() {
   const [paperTradeRecords, setPaperTradeRecords] = useState(null);
   const [paperTradeRecordsLoading, setPaperTradeRecordsLoading] = useState(true);
   const [paperTradeRecordsError, setPaperTradeRecordsError] = useState(null);
+  const [paperTradeBackfillLoading, setPaperTradeBackfillLoading] = useState(false);
+  const [paperTradeBackfillMsg, setPaperTradeBackfillMsg] = useState('');
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -697,7 +700,39 @@ export default function StockServicePage() {
                       </>
                     )}
                   </span>
+                  <button
+                    type="button"
+                    className="stock-service-btn secondary"
+                    disabled={paperTradeBackfillLoading}
+                    onClick={async () => {
+                      setPaperTradeBackfillLoading(true);
+                      setPaperTradeBackfillMsg('');
+                      try {
+                        const r = await fetch(PAPER_TRADE_BACKFILL_URL, {
+                          method: 'POST',
+                          credentials: 'include',
+                          headers: { Accept: 'application/json' },
+                        });
+                        if (!r.ok) {
+                          throw new Error(`Backfill failed (${r.status})`);
+                        }
+                        const j = await r.json();
+                        setPaperTradeBackfillMsg(`Backfill ok: inserted=${Number(j.inserted_count || 0)}, skipped=${Number(j.skipped_existing_count || 0)}`);
+                        loadPaperTradeStatus();
+                        loadPaperTradeRecords();
+                      } catch {
+                        setPaperTradeBackfillMsg('Backfill failed. Try again later.');
+                      } finally {
+                        setPaperTradeBackfillLoading(false);
+                      }
+                    }}
+                  >
+                    {paperTradeBackfillLoading ? 'Backfilling…' : 'Backfill 60d'}
+                  </button>
                 </div>
+                {paperTradeBackfillMsg && (
+                  <p className="stock-service-explainer" style={{ margin: '0.35rem 0 0 0' }}>{paperTradeBackfillMsg}</p>
+                )}
 
                 {paperTradeRecords && paperTradeRecords.length > 0 && (
                   <div className="stock-service-paper-trade-records">
