@@ -17,6 +17,10 @@ pub struct SymbolFeatures {
     pub mom5: f64,
     pub mom20: f64,
     pub vol20: f64,
+    pub rank_mom5_cs: f64,
+    pub rank_mom20_cs: f64,
+    pub rank_vol20_cs: f64,
+    pub vol_regime: f64,
     /// Cross-sectional composite: z(mom5)+z(mom20)-z(vol20)
     pub score: f64,
 }
@@ -92,6 +96,39 @@ fn z_scores(vals: &[f64]) -> Vec<f64> {
         return vec![0.0; vals.len()];
     }
     vals.iter().map(|x| (x - m) / sd).collect()
+}
+
+fn percentile_ranks(vals: &[f64]) -> Vec<f64> {
+    let n = vals.len();
+    if n <= 1 {
+        return vec![0.5; n];
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        vals[a]
+            .partial_cmp(&vals[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut ranks = vec![0.5_f64; n];
+    let denom = (n - 1) as f64;
+    for (k, idx) in order.into_iter().enumerate() {
+        ranks[idx] = k as f64 / denom;
+    }
+    ranks
+}
+
+fn median(vals: &[f64]) -> f64 {
+    if vals.is_empty() {
+        return 0.0;
+    }
+    let mut v = vals.to_vec();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = v.len();
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        0.5 * (v[n / 2 - 1] + v[n / 2])
+    }
 }
 
 /// Sort by `t` ascending and keep one bar per timestamp (last wins).
@@ -214,39 +251,60 @@ fn prepare_symbol(symbol: String, bars: Vec<HistoryBar>, ts: &[u64]) -> Option<P
     })
 }
 
+#[derive(Clone)]
+struct DayFeatureRow {
+    symbol: String,
+    mom5: f64,
+    mom20: f64,
+    vol20: f64,
+    rank_mom5_cs: f64,
+    rank_mom20_cs: f64,
+    rank_vol20_cs: f64,
+    vol_regime: f64,
+    score: f64,
+}
+
 /// Cross-sectional composite scores at day index `i`.
-fn scores_at_day(prepared: &[PreparedSymbol], i: usize) -> Option<Vec<(String, f64, f64, f64, f64)>> {
+fn scores_at_day(prepared: &[PreparedSymbol], i: usize) -> Option<Vec<DayFeatureRow>> {
     let mut rows = Vec::new();
     for p in prepared {
         let f = features_at_index(&p.closes, &p.rets, i)?;
-        rows.push((p.symbol.clone(), f.0, f.1, f.2, 0.0));
+        rows.push((p.symbol.clone(), f.0, f.1, f.2));
     }
     if rows.is_empty() {
         return None;
     }
-    let mom5: Vec<f64> = rows.iter().map(|(_, m5, _, _, _)| *m5).collect();
-    let mom20: Vec<f64> = rows.iter().map(|(_, _, m20, _, _)| *m20).collect();
-    let vols: Vec<f64> = rows.iter().map(|(_, _, _, v, _)| *v).collect();
+    let mom5: Vec<f64> = rows.iter().map(|(_, m5, _, _)| *m5).collect();
+    let mom20: Vec<f64> = rows.iter().map(|(_, _, m20, _)| *m20).collect();
+    let vols: Vec<f64> = rows.iter().map(|(_, _, _, v)| *v).collect();
     let z5 = z_scores(&mom5);
     let z20 = z_scores(&mom20);
     let zv = z_scores(&vols);
+    let rank5 = percentile_ranks(&mom5);
+    let rank20 = percentile_ranks(&mom20);
+    let rankv = percentile_ranks(&vols);
+    let vol_median = median(&vols).max(1e-12);
     let mut out = Vec::new();
     for k in 0..rows.len() {
-        let score = z5[k] + z20[k] - zv[k];
-        out.push((
-            rows[k].0.clone(),
-            rows[k].1,
-            rows[k].2,
-            rows[k].3,
+        let score = z5[k] + z20[k] - zv[k] + (rank5[k] - rankv[k]);
+        out.push(DayFeatureRow {
+            symbol: rows[k].0.clone(),
+            mom5: rows[k].1,
+            mom20: rows[k].2,
+            vol20: rows[k].3,
+            rank_mom5_cs: rank5[k],
+            rank_mom20_cs: rank20[k],
+            rank_vol20_cs: rankv[k],
+            vol_regime: rows[k].3 / vol_median,
             score,
-        ));
+        });
     }
     Some(out)
 }
 
 /// Rank by score; long top `quantile`, short bottom `quantile`; vol-parity weights within side.
 fn signals_from_scores(
-    scores: &[(String, f64, f64, f64, f64)],
+    scores: &[DayFeatureRow],
     quantile: f64,
     short_enabled: bool,
 ) -> (Vec<SymbolFeatures>, Vec<DailySignal>) {
@@ -254,8 +312,8 @@ fn signals_from_scores(
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| {
         scores[a]
-            .4
-            .partial_cmp(&scores[b].4)
+            .score
+            .partial_cmp(&scores[b].score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let k = ((n as f64 * quantile).ceil() as usize).max(1).min(n);
@@ -263,18 +321,22 @@ fn signals_from_scores(
     let long_idx: Vec<usize> = order.iter().rev().take(k).copied().collect();
     let short_idx: Vec<usize> = order.iter().take(k).copied().collect();
 
-    let inv_vol = |i: usize| 1.0 / scores[i].3.max(1e-8);
+    let inv_vol = |i: usize| 1.0 / scores[i].vol20.max(1e-8);
     let long_w_raw: f64 = long_idx.iter().map(|&i| inv_vol(i)).sum();
     let short_w_raw: f64 = short_idx.iter().map(|&i| inv_vol(i)).sum();
 
     let mut features: Vec<SymbolFeatures> = scores
         .iter()
-        .map(|(sym, m5, m20, v, sc)| SymbolFeatures {
-            symbol: sym.clone(),
-            mom5: *m5,
-            mom20: *m20,
-            vol20: *v,
-            score: *sc,
+        .map(|row| SymbolFeatures {
+            symbol: row.symbol.clone(),
+            mom5: row.mom5,
+            mom20: row.mom20,
+            vol20: row.vol20,
+            rank_mom5_cs: row.rank_mom5_cs,
+            rank_mom20_cs: row.rank_mom20_cs,
+            rank_vol20_cs: row.rank_vol20_cs,
+            vol_regime: row.vol_regime,
+            score: row.score,
         })
         .collect();
 
@@ -288,10 +350,10 @@ fn signals_from_scores(
             1.0 / long_idx.len() as f64
         };
         signals.push(DailySignal {
-            symbol: scores[i].0.clone(),
+            symbol: scores[i].symbol.clone(),
             side: "LONG",
             weight: w,
-            score: scores[i].4,
+            score: scores[i].score,
         });
     }
     if short_enabled {
@@ -302,10 +364,10 @@ fn signals_from_scores(
                 1.0 / short_idx.len() as f64
             };
             signals.push(DailySignal {
-                symbol: scores[i].0.clone(),
+                symbol: scores[i].symbol.clone(),
                 side: "SHORT",
                 weight: w,
-                score: scores[i].4,
+                score: scores[i].score,
             });
         }
     }
@@ -523,6 +585,10 @@ pub struct ResearchRow {
     pub mom5: f64,
     pub mom20: f64,
     pub vol20: f64,
+    pub rank_mom5_cs: f64,
+    pub rank_mom20_cs: f64,
+    pub rank_vol20_cs: f64,
+    pub vol_regime: f64,
     pub score: f64,
     /// Label aligned with execution: ln(C[t+1] / O[t+1])
     pub y_oc_next: f64,
@@ -563,6 +629,10 @@ pub struct LinearModelCoefficients {
     pub mom5: f64,
     pub mom20: f64,
     pub vol20: f64,
+    pub rank_mom5_cs: f64,
+    pub rank_mom20_cs: f64,
+    pub rank_vol20_cs: f64,
+    pub vol_regime: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -585,12 +655,16 @@ pub struct Phase2ModelSignalsResponse {
     pub signals: Vec<DailySignal>,
 }
 
-fn solve_linear_system(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> Option<[f64; 4]> {
+fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
+    let n = a.len();
+    if n == 0 || b.len() != n || a.iter().any(|row| row.len() != n) {
+        return None;
+    }
     // Gaussian elimination with partial pivoting.
-    for col in 0..4 {
+    for col in 0..n {
         let mut pivot = col;
         let mut best = a[col][col].abs();
-        for r in (col + 1)..4 {
+        for r in (col + 1)..n {
             if a[r][col].abs() > best {
                 best = a[r][col].abs();
                 pivot = r;
@@ -605,12 +679,12 @@ fn solve_linear_system(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> Option<[f64; 4]
         }
 
         let diag = a[col][col];
-        for j in col..4 {
+        for j in col..n {
             a[col][j] /= diag;
         }
         b[col] /= diag;
 
-        for r in 0..4 {
+        for r in 0..n {
             if r == col {
                 continue;
             }
@@ -618,7 +692,7 @@ fn solve_linear_system(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> Option<[f64; 4]
             if factor.abs() < 1e-20 {
                 continue;
             }
-            for j in col..4 {
+            for j in col..n {
                 a[r][j] -= factor * a[col][j];
             }
             b[r] -= factor * b[col];
@@ -627,24 +701,34 @@ fn solve_linear_system(mut a: [[f64; 4]; 4], mut b: [f64; 4]) -> Option<[f64; 4]
     Some(b)
 }
 
-fn fit_linear_model(rows: &[ResearchRow], ridge: f64) -> Option<[f64; 4]> {
+fn fit_linear_model(rows: &[ResearchRow], ridge: f64) -> Option<Vec<f64>> {
     if rows.len() < 20 {
         return None;
     }
-    // X = [1, mom5, mom20, vol20]
-    let mut xtx = [[0.0_f64; 4]; 4];
-    let mut xty = [0.0_f64; 4];
+    // X = [1, mom5, mom20, vol20, rank_mom5_cs, rank_mom20_cs, rank_vol20_cs, vol_regime]
+    let dim = 8_usize;
+    let mut xtx = vec![vec![0.0_f64; dim]; dim];
+    let mut xty = vec![0.0_f64; dim];
     for r in rows {
-        let x = [1.0, r.mom5, r.mom20, r.vol20];
-        for i in 0..4 {
+        let x = [
+            1.0,
+            r.mom5,
+            r.mom20,
+            r.vol20,
+            r.rank_mom5_cs,
+            r.rank_mom20_cs,
+            r.rank_vol20_cs,
+            r.vol_regime,
+        ];
+        for i in 0..dim {
             xty[i] += x[i] * r.y_oc_next;
-            for j in 0..4 {
+            for j in 0..dim {
                 xtx[i][j] += x[i] * x[j];
             }
         }
     }
     // L2 regularization (ridge), skip intercept term.
-    for i in 1..4 {
+    for i in 1..dim {
         xtx[i][i] += ridge.max(0.0);
     }
     solve_linear_system(xtx, xty)
@@ -820,8 +904,8 @@ pub async fn compute_phase2_research(
             Some(v) => v,
             None => continue,
         };
-        for (symbol, mom5, mom20, vol20, score) in day_scores {
-            let p = match prepared.iter().find(|x| x.symbol == symbol) {
+        for row in day_scores {
+            let p = match prepared.iter().find(|x| x.symbol == row.symbol) {
                 Some(v) => v,
                 None => continue,
             };
@@ -831,11 +915,15 @@ pub async fn compute_phase2_research(
             };
             rows.push(ResearchRow {
                 ts: ts[i],
-                symbol,
-                mom5,
-                mom20,
-                vol20,
-                score,
+                symbol: row.symbol,
+                mom5: row.mom5,
+                mom20: row.mom20,
+                vol20: row.vol20,
+                rank_mom5_cs: row.rank_mom5_cs,
+                rank_mom20_cs: row.rank_mom20_cs,
+                rank_vol20_cs: row.rank_vol20_cs,
+                vol_regime: row.vol_regime,
+                score: row.score,
                 y_oc_next: y,
             });
         }
@@ -897,7 +985,7 @@ pub async fn compute_phase2_model_signals(
     let symbols_with_history = bars_by_symbol.len();
     if symbols_with_history < 3 {
         return Phase2ModelSignalsResponse {
-            model: "linear_regression_baseline",
+            model: "linear_regression_enhanced_v2",
             label: "ln(C[t+1]/O[t+1])",
             data_available: false,
             reason: Some("insufficient_symbols_with_history".to_string()),
@@ -917,7 +1005,7 @@ pub async fn compute_phase2_model_signals(
     let overlapping_days = ts.len();
     if ts.len() < 23 {
         return Phase2ModelSignalsResponse {
-            model: "linear_regression_baseline",
+            model: "linear_regression_enhanced_v2",
             label: "ln(C[t+1]/O[t+1])",
             data_available: false,
             reason: Some("insufficient_overlapping_history_for_features".to_string()),
@@ -941,7 +1029,7 @@ pub async fn compute_phase2_model_signals(
     }
     if prepared.len() < 3 {
         return Phase2ModelSignalsResponse {
-            model: "linear_regression_baseline",
+            model: "linear_regression_enhanced_v2",
             label: "ln(C[t+1]/O[t+1])",
             data_available: false,
             reason: Some("not_enough_symbols_after_alignment".to_string()),
@@ -967,8 +1055,8 @@ pub async fn compute_phase2_model_signals(
             Some(v) => v,
             None => continue,
         };
-        for (symbol, mom5, mom20, vol20, score) in day_scores {
-            let p = match prepared.iter().find(|x| x.symbol == symbol) {
+        for row in day_scores {
+            let p = match prepared.iter().find(|x| x.symbol == row.symbol) {
                 Some(v) => v,
                 None => continue,
             };
@@ -978,11 +1066,15 @@ pub async fn compute_phase2_model_signals(
             };
             train_rows.push(ResearchRow {
                 ts: ts[i],
-                symbol,
-                mom5,
-                mom20,
-                vol20,
-                score,
+                symbol: row.symbol,
+                mom5: row.mom5,
+                mom20: row.mom20,
+                vol20: row.vol20,
+                rank_mom5_cs: row.rank_mom5_cs,
+                rank_mom20_cs: row.rank_mom20_cs,
+                rank_vol20_cs: row.rank_vol20_cs,
+                vol_regime: row.vol_regime,
+                score: row.score,
                 y_oc_next: y,
             });
         }
@@ -992,7 +1084,7 @@ pub async fn compute_phase2_model_signals(
         Some(v) => v,
         None => {
             return Phase2ModelSignalsResponse {
-                model: "linear_regression_baseline",
+                model: "linear_regression_enhanced_v2",
                 label: "ln(C[t+1]/O[t+1])",
                 data_available: false,
                 reason: Some("model_fit_failed".to_string()),
@@ -1014,7 +1106,7 @@ pub async fn compute_phase2_model_signals(
         Some(v) => v,
         None => {
             return Phase2ModelSignalsResponse {
-                model: "linear_regression_baseline",
+                model: "linear_regression_enhanced_v2",
                 label: "ln(C[t+1]/O[t+1])",
                 data_available: false,
                 reason: Some("feature_computation_unavailable".to_string()),
@@ -1029,6 +1121,10 @@ pub async fn compute_phase2_model_signals(
                     mom5: beta[1],
                     mom20: beta[2],
                     vol20: beta[3],
+                    rank_mom5_cs: beta[4],
+                    rank_mom20_cs: beta[5],
+                    rank_vol20_cs: beta[6],
+                    vol_regime: beta[7],
                 }),
                 features: vec![],
                 signals: vec![],
@@ -1038,15 +1134,25 @@ pub async fn compute_phase2_model_signals(
 
     let predicted_scores = day_scores
         .into_iter()
-        .map(|(symbol, mom5, mom20, vol20, _)| {
-            let pred = beta[0] + beta[1] * mom5 + beta[2] * mom20 + beta[3] * vol20;
-            (symbol, mom5, mom20, vol20, pred)
+        .map(|row| {
+            let pred = beta[0]
+                + beta[1] * row.mom5
+                + beta[2] * row.mom20
+                + beta[3] * row.vol20
+                + beta[4] * row.rank_mom5_cs
+                + beta[5] * row.rank_mom20_cs
+                + beta[6] * row.rank_vol20_cs
+                + beta[7] * row.vol_regime;
+            DayFeatureRow {
+                score: pred,
+                ..row
+            }
         })
         .collect::<Vec<_>>();
 
     let (features, signals) = signals_from_scores(&predicted_scores, quantile, short_enabled);
     Phase2ModelSignalsResponse {
-        model: "linear_regression_baseline",
+        model: "linear_regression_enhanced_v2",
         label: "ln(C[t+1]/O[t+1])",
         data_available: true,
         reason: None,
@@ -1061,6 +1167,10 @@ pub async fn compute_phase2_model_signals(
             mom5: beta[1],
             mom20: beta[2],
             vol20: beta[3],
+            rank_mom5_cs: beta[4],
+            rank_mom20_cs: beta[5],
+            rank_vol20_cs: beta[6],
+            vol_regime: beta[7],
         }),
         features,
         signals,
