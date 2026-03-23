@@ -296,6 +296,8 @@ export default function StockServicePage() {
     ? dailySignals.features[0]
     : null;
   const coefficients = dailySignals?.coefficients || null;
+  const modelHealth = dailySignals?.model_health || null;
+  const publishSignals = dailySignals?.publish_signals ?? Boolean(dailySignals?.data_available);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -536,12 +538,29 @@ export default function StockServicePage() {
               )}
               {(modelName || topCoefficientEntries.length > 0 || dailySignals.training_rows != null) && (
                 <div className="stock-service-model-diagnostics">
+                  <div className="stock-service-status-row stock-service-model-publish-row">
+                    <span className="stock-service-status-label">Publish status:</span>
+                    <span className={`stock-service-badge ${publishSignals ? 'stock-service-badge-ok' : 'stock-service-badge-warn'}`}>
+                      {publishSignals ? 'PUBLISH' : 'DO NOT PUBLISH'}
+                    </span>
+                    {!publishSignals && dailySignals.reason && (
+                      <span>{formatSignalReason(dailySignals.reason)}</span>
+                    )}
+                  </div>
                   <div className="stock-service-model-diag-row">
                     <span>Feature set:</span>
                     <span>
                       rank features {featureAvailability.rankFeatures ? 'enabled' : 'n/a'}; vol regime {featureAvailability.volRegime ? 'enabled' : 'n/a'}
                     </span>
                   </div>
+                  {modelHealth && (
+                    <div className="stock-service-model-diag-row">
+                      <span>Model health:</span>
+                      <span>
+                        rows={Number(modelHealth.feature_row_count || 0)}, non-finite={Number(modelHealth.nan_or_inf_count || 0)}, coef-norm={Number(modelHealth.coef_norm || 0).toFixed(4)}, train-window-days={Number(modelHealth.train_window_days || 0)}
+                      </span>
+                    </div>
+                  )}
                   {topCoefficientEntries.length > 0 && (
                     <div className="stock-service-model-diag-row">
                       <span>Top coefficients:</span>
