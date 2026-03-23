@@ -14,6 +14,7 @@ use tower_http::trace::TraceLayer;
 use crate::auth::{KeycloakJwtValidator, UserId};
 use crate::daily_strategy;
 use crate::ibkr::IbkrOAuthClient;
+use crate::paper_trade;
 use crate::watchlist;
 use tokio::sync::RwLock;
 
@@ -86,6 +87,22 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/stock-service/daily-signals/research",
             get(daily_signals_research_handler),
+        )
+        // Paper trade (public) - decision store + next-day execution.
+        .route("/api/v1/paper-trade/run", post(paper_trade_run_handler))
+        .route(
+            "/api/v1/stock-service/paper-trade/run",
+            post(paper_trade_run_handler),
+        )
+        .route("/api/v1/paper-trade/status", get(paper_trade_status_handler))
+        .route(
+            "/api/v1/stock-service/paper-trade/status",
+            get(paper_trade_status_handler),
+        )
+        .route("/api/v1/paper-trade/records", get(paper_trade_records_handler))
+        .route(
+            "/api/v1/stock-service/paper-trade/records",
+            get(paper_trade_records_handler),
         )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
@@ -526,6 +543,127 @@ async fn daily_signals_model_handler(
     )
     .await;
     (StatusCode::OK, Json(resp)).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct PaperTradeRunQuery {
+    quantile: Option<f64>,
+    short_enabled: Option<bool>,
+    train_days: Option<usize>,
+}
+
+async fn paper_trade_run_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaperTradeRunQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    let redis = match state.redis.as_ref() {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Redis not configured (paper-trade requires redis)"})),
+            )
+                .into_response();
+        }
+    };
+
+    // Clone resolved conids so we can drop the RwLock before awaiting.
+    let resolved_conids = {
+        let g = state.watchlist_cache.read().await;
+        g.resolved_conids.clone()
+    };
+
+    let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
+    let short_enabled = q.short_enabled.unwrap_or_else(|| {
+        std::env::var("DAILY_STRATEGY_SHORT_ENABLED")
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+    });
+    let train_days = q.train_days.unwrap_or(120).max(60);
+
+    match paper_trade::paper_trade_run(
+        client,
+        &resolved_conids,
+        redis,
+        quantile,
+        short_enabled,
+        train_days,
+    )
+    .await
+    {
+        Ok(r) => (StatusCode::OK, Json(r)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn paper_trade_status_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let redis = match state.redis.as_ref() {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Redis not configured (paper-trade requires redis)"})),
+            )
+                .into_response();
+        }
+    };
+
+    match paper_trade::paper_trade_status(redis).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaperTradeRecordsQuery {
+    limit: Option<isize>,
+}
+
+async fn paper_trade_records_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaperTradeRecordsQuery>,
+) -> impl IntoResponse {
+    let redis = match state.redis.as_ref() {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Redis not configured (paper-trade requires redis)"})),
+            )
+                .into_response();
+        }
+    };
+
+    let limit = q.limit.unwrap_or(10);
+    match paper_trade::paper_trade_records(redis, limit).await {
+        Ok(records) => (StatusCode::OK, Json(serde_json::json!({ "records": records }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(serde::Deserialize)]
