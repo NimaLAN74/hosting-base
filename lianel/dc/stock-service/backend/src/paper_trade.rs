@@ -50,6 +50,12 @@ pub struct PaperLegPnl {
     pub side: String,
     pub weight: f64,
     pub y_oc_next: f64,
+    #[serde(default)]
+    pub contrib_gross: f64,
+    #[serde(default)]
+    pub cost_ln: f64,
+    #[serde(default)]
+    pub contrib_net: f64,
     pub contrib: f64,
 }
 
@@ -58,7 +64,17 @@ pub struct PaperExecution {
     pub decision_as_of_ts: u64,
     pub execution_as_of_ts: u64,
     pub executed_at_ts: u64,
+    #[serde(default)]
+    pub pnl_ln_gross: f64,
+    #[serde(default)]
+    pub cost_total_ln: f64,
+    #[serde(default)]
+    pub pnl_ln_net: f64,
     pub pnl_ln: f64,
+    #[serde(default)]
+    pub pnl_return_gross: f64,
+    #[serde(default)]
+    pub pnl_return_net: f64,
     pub pnl_return: f64,
     pub legs: Vec<PaperLegPnl>,
 }
@@ -88,8 +104,14 @@ const EXECUTION_KEY_PREFIX: &str = "paper:daily:execution:";
 const RECENT_EXECUTIONS_LIST_KEY: &str = "paper:daily:recent_executions";
 const LAST_EXECUTION_TS_KEY: &str = "paper:daily:last_execution_ts";
 const CUM_PNL_LN_KEY: &str = "paper:daily:cum_pnl_ln";
+const CUM_PNL_LN_GROSS_KEY: &str = "paper:daily:cum_pnl_ln_gross";
+const CUM_PNL_LN_NET_KEY: &str = "paper:daily:cum_pnl_ln_net";
 const EXECUTION_COUNT_KEY: &str = "paper:daily:execution_count";
 const RECENT_EXECUTIONS_LIMIT: isize = 20;
+
+const COST_SLIPPAGE_BPS_PER_SIDE: f64 = 5.0;
+const COST_COMMISSION_BPS_PER_SIDE: f64 = 1.0;
+const COST_SHORT_BORROW_BPS_DAILY: f64 = 2.0;
 
 fn now_ts() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -109,6 +131,30 @@ fn execution_key(ts: u64) -> String {
 
 fn day_bar_price_ok(x: f64) -> bool {
     x.is_finite() && x > 0.0
+}
+
+fn bps_to_ln_cost(bps: f64) -> f64 {
+    (bps * 1e-4).max(0.0)
+}
+
+fn normalize_legacy_execution(mut e: PaperExecution) -> PaperExecution {
+    if e.pnl_ln_gross == 0.0 && e.pnl_ln_net == 0.0 && e.pnl_ln != 0.0 {
+        e.pnl_ln_gross = e.pnl_ln;
+        e.pnl_ln_net = e.pnl_ln;
+        e.pnl_return_gross = e.pnl_return;
+        e.pnl_return_net = e.pnl_return;
+    }
+    if e.pnl_return_gross == 0.0 && e.pnl_return_net == 0.0 && e.pnl_return != 0.0 {
+        e.pnl_return_gross = e.pnl_return;
+        e.pnl_return_net = e.pnl_return;
+    }
+    for leg in &mut e.legs {
+        if leg.contrib_gross == 0.0 && leg.contrib_net == 0.0 && leg.contrib != 0.0 {
+            leg.contrib_gross = leg.contrib;
+            leg.contrib_net = leg.contrib;
+        }
+    }
+    e
 }
 
 fn rank_and_weight_by_score(
@@ -247,7 +293,8 @@ async fn execute_decision_for_ts(
 
     // Compute per-leg pnl using y_oc_next at `exec_ts`.
     let mut legs: Vec<PaperLegPnl> = Vec::new();
-    let mut pnl_ln = 0.0_f64;
+    let mut pnl_ln_gross = 0.0_f64;
+    let mut cost_total_ln = 0.0_f64;
     for sig in &decision.signals {
         let Some(bars) = bars_by_symbol.get(&sig.symbol) else {
             return Ok(None);
@@ -260,28 +307,46 @@ async fn execute_decision_for_ts(
             return Ok(None);
         }
         let y = (next_bar.close / next_bar.open).ln();
-        let contrib = match sig.side.as_str() {
+        let contrib_gross = match sig.side.as_str() {
             "LONG" => sig.weight * y,
             "SHORT" => -sig.weight * y,
             _ => 0.0,
         };
-        pnl_ln += contrib;
+        let mut leg_cost_ln = 2.0
+            * (bps_to_ln_cost(COST_SLIPPAGE_BPS_PER_SIDE) + bps_to_ln_cost(COST_COMMISSION_BPS_PER_SIDE))
+            * sig.weight;
+        if sig.side == "SHORT" {
+            leg_cost_ln += bps_to_ln_cost(COST_SHORT_BORROW_BPS_DAILY) * sig.weight;
+        }
+        let contrib_net = contrib_gross - leg_cost_ln;
+        pnl_ln_gross += contrib_gross;
+        cost_total_ln += leg_cost_ln;
         legs.push(PaperLegPnl {
             symbol: sig.symbol.clone(),
             side: sig.side.clone(),
             weight: sig.weight,
             y_oc_next: y,
-            contrib,
+            contrib_gross,
+            cost_ln: leg_cost_ln,
+            contrib_net,
+            contrib: contrib_net,
         });
     }
 
-    let pnl_return = (pnl_ln.exp() - 1.0).max(-1.0); // avoid absurd negatives
+    let pnl_ln_net = pnl_ln_gross - cost_total_ln;
+    let pnl_return_gross = (pnl_ln_gross.exp() - 1.0).max(-1.0);
+    let pnl_return_net = (pnl_ln_net.exp() - 1.0).max(-1.0);
     let execution = PaperExecution {
         decision_as_of_ts: decision.decision_as_of_ts,
         execution_as_of_ts: exec_ts,
         executed_at_ts: now_ts(),
-        pnl_ln,
-        pnl_return,
+        pnl_ln_gross,
+        cost_total_ln,
+        pnl_ln_net,
+        pnl_ln: pnl_ln_net,
+        pnl_return_gross,
+        pnl_return_net,
+        pnl_return: pnl_return_net,
         legs,
     };
     Ok(Some(execution))
@@ -322,8 +387,18 @@ pub async fn paper_trade_run(
                 let _: () = conn
                     .set(LAST_EXECUTION_TS_KEY, execution.decision_as_of_ts)
                     .await?;
-                let prev_cum: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
-                let _: () = conn.set(CUM_PNL_LN_KEY, prev_cum + execution.pnl_ln).await?;
+                let prev_cum_legacy: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+                let _: () = conn
+                    .set(CUM_PNL_LN_KEY, prev_cum_legacy + execution.pnl_ln_net)
+                    .await?;
+                let prev_cum_gross: f64 = conn.get(CUM_PNL_LN_GROSS_KEY).await.unwrap_or(0.0);
+                let _: () = conn
+                    .set(CUM_PNL_LN_GROSS_KEY, prev_cum_gross + execution.pnl_ln_gross)
+                    .await?;
+                let prev_cum_net: f64 = conn.get(CUM_PNL_LN_NET_KEY).await.unwrap_or(0.0);
+                let _: () = conn
+                    .set(CUM_PNL_LN_NET_KEY, prev_cum_net + execution.pnl_ln_net)
+                    .await?;
                 let prev_cnt: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
                 let _: () = conn.set(EXECUTION_COUNT_KEY, prev_cnt + 1).await?;
                 let _: () = conn
@@ -400,18 +475,26 @@ pub async fn paper_trade_status(
         .ok();
     let pending_after: usize = conn.scard(PENDING_SET_KEY).await.unwrap_or(0usize);
     let cumulative_pnl_ln: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+    let cumulative_pnl_ln_gross: f64 = conn.get(CUM_PNL_LN_GROSS_KEY).await.unwrap_or(0.0);
+    let cumulative_pnl_ln_net: f64 = conn.get(CUM_PNL_LN_NET_KEY).await.unwrap_or(cumulative_pnl_ln);
     let execution_count: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
     let cumulative_pnl_return = cumulative_pnl_ln.exp() - 1.0;
+    let cumulative_pnl_return_gross = cumulative_pnl_ln_gross.exp() - 1.0;
+    let cumulative_pnl_return_net = cumulative_pnl_ln_net.exp() - 1.0;
 
     if let Some(ts) = last_ts {
         let raw: Option<String> = conn.get(execution_key(ts)).await.ok();
         if let Some(raw) = raw {
-            let exec: PaperExecution = serde_json::from_str(&raw)?;
+            let exec: PaperExecution = normalize_legacy_execution(serde_json::from_str(&raw)?);
             return Ok(serde_json::json!({
                 "pending_after": pending_after,
                 "execution_count": execution_count,
                 "cumulative_pnl_ln": cumulative_pnl_ln,
                 "cumulative_pnl_return": cumulative_pnl_return,
+                "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
+                "cumulative_pnl_return_gross": cumulative_pnl_return_gross,
+                "cumulative_pnl_ln_net": cumulative_pnl_ln_net,
+                "cumulative_pnl_return_net": cumulative_pnl_return_net,
                 "last_execution": exec,
             }));
         }
@@ -422,6 +505,10 @@ pub async fn paper_trade_status(
         "execution_count": execution_count,
         "cumulative_pnl_ln": cumulative_pnl_ln,
         "cumulative_pnl_return": cumulative_pnl_return,
+        "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
+        "cumulative_pnl_return_gross": cumulative_pnl_return_gross,
+        "cumulative_pnl_ln_net": cumulative_pnl_ln_net,
+        "cumulative_pnl_return_net": cumulative_pnl_return_net,
         "last_execution": null,
     }))
 }
@@ -445,6 +532,7 @@ pub async fn paper_trade_records(
         let raw: Option<String> = conn.get(execution_key(ts)).await.ok();
         if let Some(raw) = raw {
             if let Ok(exec) = serde_json::from_str::<PaperExecution>(&raw) {
+                let exec = normalize_legacy_execution(exec);
                 out.push(exec);
             }
         }
@@ -534,33 +622,52 @@ pub async fn paper_trade_backfill(
             continue;
         }
         let mut legs = Vec::new();
-        let mut pnl_ln = 0.0;
+        let mut pnl_ln_gross = 0.0;
+        let mut cost_total_ln = 0.0;
         for s in &sigs {
             if let Some(r) = day_rows.iter().find(|r| r.symbol == s.symbol) {
-                let contrib = if s.side == "LONG" {
+                let contrib_gross = if s.side == "LONG" {
                     s.weight * r.y_oc_next
                 } else {
                     -s.weight * r.y_oc_next
                 };
-                pnl_ln += contrib;
+                let mut leg_cost_ln = 2.0
+                    * (bps_to_ln_cost(COST_SLIPPAGE_BPS_PER_SIDE)
+                        + bps_to_ln_cost(COST_COMMISSION_BPS_PER_SIDE))
+                    * s.weight;
+                if s.side == "SHORT" {
+                    leg_cost_ln += bps_to_ln_cost(COST_SHORT_BORROW_BPS_DAILY) * s.weight;
+                }
+                let contrib_net = contrib_gross - leg_cost_ln;
+                pnl_ln_gross += contrib_gross;
+                cost_total_ln += leg_cost_ln;
                 legs.push(PaperLegPnl {
                     symbol: s.symbol.clone(),
                     side: s.side.clone(),
                     weight: s.weight,
                     y_oc_next: r.y_oc_next,
-                    contrib,
+                    contrib_gross,
+                    cost_ln: leg_cost_ln,
+                    contrib_net,
+                    contrib: contrib_net,
                 });
             }
         }
         if legs.is_empty() {
             continue;
         }
+        let pnl_ln_net = pnl_ln_gross - cost_total_ln;
         let exec = PaperExecution {
             decision_as_of_ts: decision_ts,
             execution_as_of_ts: exec_ts,
             executed_at_ts: now_ts(),
-            pnl_ln,
-            pnl_return: pnl_ln.exp() - 1.0,
+            pnl_ln_gross,
+            cost_total_ln,
+            pnl_ln_net,
+            pnl_ln: pnl_ln_net,
+            pnl_return_gross: pnl_ln_gross.exp() - 1.0,
+            pnl_return_net: pnl_ln_net.exp() - 1.0,
+            pnl_return: pnl_ln_net.exp() - 1.0,
             legs,
         };
         let raw = serde_json::to_string(&exec)?;
@@ -574,8 +681,14 @@ pub async fn paper_trade_backfill(
             )
             .await?;
         let _: () = conn.set(LAST_EXECUTION_TS_KEY, decision_ts).await?;
-        let prev_cum: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
-        let _: () = conn.set(CUM_PNL_LN_KEY, prev_cum + pnl_ln).await?;
+        let prev_cum_legacy: f64 = conn.get(CUM_PNL_LN_KEY).await.unwrap_or(0.0);
+        let _: () = conn.set(CUM_PNL_LN_KEY, prev_cum_legacy + pnl_ln_net).await?;
+        let prev_cum_gross: f64 = conn.get(CUM_PNL_LN_GROSS_KEY).await.unwrap_or(0.0);
+        let _: () = conn
+            .set(CUM_PNL_LN_GROSS_KEY, prev_cum_gross + pnl_ln_gross)
+            .await?;
+        let prev_cum_net: f64 = conn.get(CUM_PNL_LN_NET_KEY).await.unwrap_or(0.0);
+        let _: () = conn.set(CUM_PNL_LN_NET_KEY, prev_cum_net + pnl_ln_net).await?;
         let prev_cnt: u64 = conn.get(EXECUTION_COUNT_KEY).await.unwrap_or(0);
         let _: () = conn.set(EXECUTION_COUNT_KEY, prev_cnt + 1).await?;
         inserted_count += 1;

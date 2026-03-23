@@ -112,6 +112,7 @@ export default function StockServicePage() {
   const [paperTradeRecordsError, setPaperTradeRecordsError] = useState(null);
   const [paperTradeBackfillLoading, setPaperTradeBackfillLoading] = useState(false);
   const [paperTradeBackfillMsg, setPaperTradeBackfillMsg] = useState('');
+  const [paperTradePnlMode, setPaperTradePnlMode] = useState('net'); // 'net' | 'gross'
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -373,7 +374,11 @@ export default function StockServicePage() {
         worstReturn: 0,
       };
     }
-    const rets = rows.map((r) => Number(r?.pnl_return || 0));
+    const rets = rows.map((r) => Number(
+      paperTradePnlMode === 'gross'
+        ? (r?.pnl_return_gross ?? r?.pnl_return ?? 0)
+        : (r?.pnl_return_net ?? r?.pnl_return ?? 0)
+    ));
     const wins = rets.filter((x) => x > 0).length;
     const avg = rets.reduce((a, b) => a + b, 0) / rets.length;
     return {
@@ -383,20 +388,25 @@ export default function StockServicePage() {
       bestReturn: Math.max(...rets),
       worstReturn: Math.min(...rets),
     };
-  }, [paperTradeRecords]);
+  }, [paperTradeRecords, paperTradePnlMode]);
   const paperTradeEquity = React.useMemo(() => {
     const rows = (Array.isArray(paperTradeRecords) ? paperTradeRecords : []).slice().reverse();
     if (!rows.length) return [];
     let cumLn = 0;
     return rows.map((r, idx) => {
-      cumLn += Number(r?.pnl_ln || 0);
+      const thisLn = Number(
+        paperTradePnlMode === 'gross'
+          ? (r?.pnl_ln_gross ?? r?.pnl_ln ?? 0)
+          : (r?.pnl_ln_net ?? r?.pnl_ln ?? 0)
+      );
+      cumLn += thisLn;
       return {
         x: idx,
         y: Math.exp(cumLn) - 1,
         ts: Number(r?.execution_as_of_ts || 0),
       };
     });
-  }, [paperTradeRecords]);
+  }, [paperTradeRecords, paperTradePnlMode]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -677,7 +687,11 @@ export default function StockServicePage() {
                     <>
                       pending={Number(paperTradeStatus?.pending_after || 0)}
                       ; exec-count={Number(paperTradeStatus?.execution_count || 0)}
-                      ; cum-pnl={Number(paperTradeStatus?.cumulative_pnl_return || 0).toFixed(4)}
+                      ; cum-pnl-{paperTradePnlMode}={Number(
+                        paperTradePnlMode === 'gross'
+                          ? (paperTradeStatus?.cumulative_pnl_return_gross ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
+                          : (paperTradeStatus?.cumulative_pnl_return_net ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
+                      ).toFixed(4)}
                       {paperTradeStatus?.last_execution ? (
                         <>
                           ; last pnl_return={Number(paperTradeStatus.last_execution.pnl_return || 0).toFixed(4)}
@@ -737,6 +751,25 @@ export default function StockServicePage() {
                 {paperTradeRecords && paperTradeRecords.length > 0 && (
                   <div className="stock-service-paper-trade-records">
                     <div className="stock-service-paper-trade-summary">
+                      <span>
+                        mode:
+                        <button
+                          type="button"
+                          className={`stock-service-btn secondary ${paperTradePnlMode === 'net' ? 'stock-service-btn-active' : ''}`}
+                          style={{ marginLeft: '0.35rem' }}
+                          onClick={() => setPaperTradePnlMode('net')}
+                        >
+                          Net
+                        </button>
+                        <button
+                          type="button"
+                          className={`stock-service-btn secondary ${paperTradePnlMode === 'gross' ? 'stock-service-btn-active' : ''}`}
+                          style={{ marginLeft: '0.3rem' }}
+                          onClick={() => setPaperTradePnlMode('gross')}
+                        >
+                          Gross
+                        </button>
+                      </span>
                       <span>win-rate={Number(paperTradeStats.winRate * 100).toFixed(1)}%</span>
                       <span>avg={Number(paperTradeStats.avgReturn).toFixed(4)}</span>
                       <span>best={Number(paperTradeStats.bestReturn).toFixed(4)}</span>
@@ -745,7 +778,7 @@ export default function StockServicePage() {
                     {paperTradeEquity.length > 0 && (
                       <div className="stock-service-paper-trade-equity">
                         <p className="stock-service-chart-legend" style={{ marginBottom: '0.35rem' }}>
-                          Paper equity curve (cumulative return)
+                          Paper equity curve ({paperTradePnlMode}, cumulative return)
                         </p>
                         <svg
                           className="stock-service-paper-trade-equity-svg"
@@ -796,8 +829,10 @@ export default function StockServicePage() {
                           <span>
                             exec-ts={exec.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.execution_as_of_ts) * 1000).toISOString()) : '—'}
                           </span>
-                          <span>pnl_ln={Number(exec.pnl_ln || 0).toFixed(5)}</span>
-                          <span>pnl_return={Number(exec.pnl_return || 0).toFixed(4)}</span>
+                          <span>pnl_ln_gross={Number(exec.pnl_ln_gross ?? exec.pnl_ln ?? 0).toFixed(5)}</span>
+                          <span>pnl_ln_net={Number(exec.pnl_ln_net ?? exec.pnl_ln ?? 0).toFixed(5)}</span>
+                          <span>pnl_return_gross={Number(exec.pnl_return_gross ?? exec.pnl_return ?? 0).toFixed(4)}</span>
+                          <span>pnl_return_net={Number(exec.pnl_return_net ?? exec.pnl_return ?? 0).toFixed(4)}</span>
                         </div>
 
                         <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
