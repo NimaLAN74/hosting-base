@@ -680,113 +680,113 @@ export default function StockServicePage() {
                   )}
                 </div>
               )}
-              <div className="stock-service-model-diag-row">
-                <span>Paper trade:</span>
-                <span>
-                  {paperTradeLoading ? 'loading…' : (
-                    <>
-                      pending={Number(paperTradeStatus?.pending_after || 0)}
-                      ; exec-count={Number(paperTradeStatus?.execution_count || 0)}
-                      ; cum-pnl-{paperTradePnlMode}={Number(
+              <div className="stock-service-paper-card">
+                <div className="stock-service-paper-header">
+                  <h3 className="stock-service-paper-title">Paper trade</h3>
+                  <div className="stock-service-paper-mode">
+                    <span className="stock-service-paper-mode-label">PnL:</span>
+                    <button
+                      type="button"
+                      className={`stock-service-paper-mode-btn ${paperTradePnlMode === 'net' ? 'active' : ''}`}
+                      onClick={() => setPaperTradePnlMode('net')}
+                    >
+                      Net
+                    </button>
+                    <button
+                      type="button"
+                      className={`stock-service-paper-mode-btn ${paperTradePnlMode === 'gross' ? 'active' : ''}`}
+                      onClick={() => setPaperTradePnlMode('gross')}
+                    >
+                      Gross
+                    </button>
+                  </div>
+                </div>
+
+                <div className="stock-service-paper-grid">
+                  <div className="stock-service-paper-kpi">
+                    <div className="stock-service-paper-kpi-label">Pending</div>
+                    <div className="stock-service-paper-kpi-value">{paperTradeLoading ? '—' : Number(paperTradeStatus?.pending_after || 0)}</div>
+                  </div>
+                  <div className="stock-service-paper-kpi">
+                    <div className="stock-service-paper-kpi-label">Executions</div>
+                    <div className="stock-service-paper-kpi-value">{paperTradeLoading ? '—' : Number(paperTradeStatus?.execution_count || 0)}</div>
+                  </div>
+                  <div className="stock-service-paper-kpi">
+                    <div className="stock-service-paper-kpi-label">Cumulative ({paperTradePnlMode})</div>
+                    <div className="stock-service-paper-kpi-value">
+                      {paperTradeLoading ? '—' : `${(Number(
                         paperTradePnlMode === 'gross'
                           ? (paperTradeStatus?.cumulative_pnl_return_gross ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
                           : (paperTradeStatus?.cumulative_pnl_return_net ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
-                      ).toFixed(4)}
-                      {paperTradeStatus?.cost_assumptions && (
-                        <>
-                          ; costs(slip/comm/borrow bps)=
-                          {Number(paperTradeStatus.cost_assumptions.slippage_bps_per_side || 0).toFixed(1)}/
-                          {Number(paperTradeStatus.cost_assumptions.commission_bps_per_side || 0).toFixed(1)}/
-                          {Number(paperTradeStatus.cost_assumptions.short_borrow_bps_daily || 0).toFixed(1)}
-                        </>
-                      )}
-                      {paperTradeStatus?.last_execution ? (
-                        <>
-                          ; last pnl_return={Number(paperTradeStatus.last_execution.pnl_return || 0).toFixed(4)}
-                          ; as-of={paperTradeStatus.last_execution.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(paperTradeStatus.last_execution.execution_as_of_ts) * 1000).toISOString()) : '—'}
-                        </>
-                      ) : (
-                        '; last execution=—'
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
-              <div className="stock-service-paper-trade-records-wrap">
-                <div className="stock-service-model-diag-row">
-                  <span>Last executions:</span>
-                  <span>
-                    {paperTradeRecordsLoading ? 'loading…' : (
-                      <>
-                        {paperTradeRecords?.length ? `${paperTradeRecords.length} rec` : 'none'}
-                      </>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    className="stock-service-btn secondary"
-                    disabled={paperTradeBackfillLoading}
-                    onClick={async () => {
-                      setPaperTradeBackfillLoading(true);
-                      setPaperTradeBackfillMsg('');
-                      try {
-                        const r = await fetch(PAPER_TRADE_BACKFILL_URL, {
-                          method: 'POST',
-                          credentials: 'include',
-                          headers: { Accept: 'application/json' },
-                        });
-                        if (!r.ok) {
-                          throw new Error(`Backfill failed (${r.status})`);
-                        }
-                        const j = await r.json();
-                        setPaperTradeBackfillMsg(`Backfill ok: inserted=${Number(j.inserted_count || 0)}, skipped=${Number(j.skipped_existing_count || 0)}`);
-                        loadPaperTradeStatus();
-                        loadPaperTradeRecords();
-                      } catch {
-                        setPaperTradeBackfillMsg('Backfill failed. Try again later.');
-                      } finally {
-                        setPaperTradeBackfillLoading(false);
-                      }
-                    }}
-                  >
-                    {paperTradeBackfillLoading ? 'Backfilling…' : 'Backfill 60d'}
-                  </button>
+                      ) * 100).toFixed(2)}%`}
+                    </div>
+                  </div>
+                  <div className="stock-service-paper-kpi">
+                    <div className="stock-service-paper-kpi-label">Last day ({paperTradePnlMode})</div>
+                    <div className="stock-service-paper-kpi-value">
+                      {paperTradeLoading
+                        ? '—'
+                        : (paperTradeStatus?.last_execution
+                          ? `${(Number(
+                            paperTradePnlMode === 'gross'
+                              ? (paperTradeStatus.last_execution.pnl_return_gross ?? paperTradeStatus.last_execution.pnl_return ?? 0)
+                              : (paperTradeStatus.last_execution.pnl_return_net ?? paperTradeStatus.last_execution.pnl_return ?? 0)
+                          ) * 100).toFixed(2)}%`
+                          : '—')}
+                    </div>
+                  </div>
                 </div>
-                {paperTradeBackfillMsg && (
-                  <p className="stock-service-explainer" style={{ margin: '0.35rem 0 0 0' }}>{paperTradeBackfillMsg}</p>
+
+                {paperTradeStatus?.cost_assumptions && (
+                  <div className="stock-service-paper-costs">
+                    Costs (bps): slippage/side <b>{Number(paperTradeStatus.cost_assumptions.slippage_bps_per_side || 0).toFixed(1)}</b>, commission/side <b>{Number(paperTradeStatus.cost_assumptions.commission_bps_per_side || 0).toFixed(1)}</b>, borrow/day <b>{Number(paperTradeStatus.cost_assumptions.short_borrow_bps_daily || 0).toFixed(1)}</b>
+                  </div>
                 )}
 
                 {paperTradeRecords && paperTradeRecords.length > 0 && (
-                  <div className="stock-service-paper-trade-records">
-                    <div className="stock-service-paper-trade-summary">
-                      <span>
-                        mode:
-                        <button
-                          type="button"
-                          className={`stock-service-btn secondary ${paperTradePnlMode === 'net' ? 'stock-service-btn-active' : ''}`}
-                          style={{ marginLeft: '0.35rem' }}
-                          onClick={() => setPaperTradePnlMode('net')}
-                        >
-                          Net
-                        </button>
-                        <button
-                          type="button"
-                          className={`stock-service-btn secondary ${paperTradePnlMode === 'gross' ? 'stock-service-btn-active' : ''}`}
-                          style={{ marginLeft: '0.3rem' }}
-                          onClick={() => setPaperTradePnlMode('gross')}
-                        >
-                          Gross
-                        </button>
-                      </span>
-                      <span>win-rate={Number(paperTradeStats.winRate * 100).toFixed(1)}%</span>
-                      <span>avg={Number(paperTradeStats.avgReturn).toFixed(4)}</span>
-                      <span>best={Number(paperTradeStats.bestReturn).toFixed(4)}</span>
-                      <span>worst={Number(paperTradeStats.worstReturn).toFixed(4)}</span>
+                  <div className="stock-service-paper-equity">
+                    <div className="stock-service-paper-equity-top">
+                      <div className="stock-service-paper-equity-stats">
+                        <span>Win-rate: <b>{Number(paperTradeStats.winRate * 100).toFixed(1)}%</b></span>
+                        <span>Avg: <b>{Number(paperTradeStats.avgReturn * 100).toFixed(2)}%</b></span>
+                        <span>Best: <b>{Number(paperTradeStats.bestReturn * 100).toFixed(2)}%</b></span>
+                        <span>Worst: <b>{Number(paperTradeStats.worstReturn * 100).toFixed(2)}%</b></span>
+                      </div>
+                      <button
+                        type="button"
+                        className="stock-service-paper-action"
+                        disabled={paperTradeBackfillLoading}
+                        onClick={async () => {
+                          setPaperTradeBackfillLoading(true);
+                          setPaperTradeBackfillMsg('');
+                          try {
+                            const r = await fetch(PAPER_TRADE_BACKFILL_URL, {
+                              method: 'POST',
+                              credentials: 'include',
+                              headers: { Accept: 'application/json' },
+                            });
+                            if (!r.ok) throw new Error(`Backfill failed (${r.status})`);
+                            const j = await r.json();
+                            setPaperTradeBackfillMsg(`Backfill: inserted ${Number(j.inserted_count || 0)}, skipped ${Number(j.skipped_existing_count || 0)}`);
+                            loadPaperTradeStatus();
+                            loadPaperTradeRecords();
+                          } catch {
+                            setPaperTradeBackfillMsg('Backfill failed. Try again later.');
+                          } finally {
+                            setPaperTradeBackfillLoading(false);
+                          }
+                        }}
+                      >
+                        {paperTradeBackfillLoading ? 'Backfilling…' : 'Backfill history'}
+                      </button>
                     </div>
+                    {paperTradeBackfillMsg && (
+                      <div className="stock-service-paper-note">{paperTradeBackfillMsg}</div>
+                    )}
                     {paperTradeEquity.length > 0 && (
                       <div className="stock-service-paper-trade-equity">
                         <p className="stock-service-chart-legend" style={{ marginBottom: '0.35rem' }}>
-                          Paper equity curve ({paperTradePnlMode}, cumulative return)
+                          Equity curve ({paperTradePnlMode})
                         </p>
                         <svg
                           className="stock-service-paper-trade-equity-svg"
@@ -828,59 +828,65 @@ export default function StockServicePage() {
                         </svg>
                       </div>
                     )}
-                    {paperTradeRecords.slice(0, 3).map((exec) => (
-                      <div key={exec.executed_at_ts} className="stock-service-paper-trade-exec">
-                        <div className="stock-service-paper-trade-exec-meta">
-                          <span>
-                            decision-as-of={exec.decision_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.decision_as_of_ts) * 1000).toISOString()) : '—'}
-                          </span>
-                          <span>
-                            exec-ts={exec.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.execution_as_of_ts) * 1000).toISOString()) : '—'}
-                          </span>
-                          <span>pnl_ln_gross={Number(exec.pnl_ln_gross ?? exec.pnl_ln ?? 0).toFixed(5)}</span>
-                          <span>pnl_ln_net={Number(exec.pnl_ln_net ?? exec.pnl_ln ?? 0).toFixed(5)}</span>
-                          <span>pnl_return_gross={Number(exec.pnl_return_gross ?? exec.pnl_return ?? 0).toFixed(4)}</span>
-                          <span>pnl_return_net={Number(exec.pnl_return_net ?? exec.pnl_return ?? 0).toFixed(4)}</span>
-                        </div>
-
-                        <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
-                          <table className="stock-service-watchlist-table" aria-label="Paper trade execution legs">
-                            <thead>
-                              <tr>
-                                <th>Symbol</th>
-                                <th>Side</th>
-                                <th className="stock-service-th-number">Weight</th>
-                                <th className="stock-service-th-number">y_oc_next</th>
-                                <th className="stock-service-th-number">contrib</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(exec.legs || []).map((leg) => (
-                                <tr key={`${leg.symbol}-${leg.side}-${leg.y_oc_next}`}>
-                                  <td className="stock-service-wl-symbol">{leg.symbol}</td>
-                                  <td>
-                                    <span className={leg.side === 'LONG' ? 'stock-service-signal-long' : 'stock-service-signal-short'}>
-                                      {leg.side}
-                                    </span>
-                                  </td>
-                                  <td className="stock-service-td-number">{Number(leg.weight || 0).toFixed(3)}</td>
-                                  <td className="stock-service-td-number">{Number(leg.y_oc_next || 0).toFixed(5)}</td>
-                                  <td className="stock-service-td-number">{Number(leg.contrib || 0).toFixed(5)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 )}
 
-                {!paperTradeRecordsLoading && paperTradeRecords && paperTradeRecords.length === 0 && (
-                  <p className="stock-service-explainer" style={{ margin: '0.5rem 0 0 0' }}>
-                    No paper-trade executions recorded yet.
-                  </p>
-                )}
+                <details className="stock-service-paper-details">
+                  <summary className="stock-service-paper-summary">
+                    Recent executions {paperTradeRecordsLoading ? '(loading…) ' : ''}{paperTradeRecords?.length ? `(${paperTradeRecords.length})` : ''}
+                  </summary>
+                  {paperTradeRecords && paperTradeRecords.length > 0 ? (
+                    <div className="stock-service-paper-trade-records">
+                      {paperTradeRecords.slice(0, 3).map((exec) => (
+                        <div key={exec.executed_at_ts} className="stock-service-paper-trade-exec">
+                          <div className="stock-service-paper-trade-exec-meta">
+                            <span>Decision: <b>{exec.decision_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.decision_as_of_ts) * 1000).toISOString()) : '—'}</b></span>
+                            <span>Exec: <b>{exec.execution_as_of_ts ? formatSvDateTime24h(new Date(Number(exec.execution_as_of_ts) * 1000).toISOString()) : '—'}</b></span>
+                            <span>Gross: <b>{(Number(exec.pnl_return_gross ?? exec.pnl_return ?? 0) * 100).toFixed(2)}%</b></span>
+                            <span>Net: <b>{(Number(exec.pnl_return_net ?? exec.pnl_return ?? 0) * 100).toFixed(2)}%</b></span>
+                            <span>Cost ln: <b>{Number(exec.cost_total_ln ?? 0).toFixed(4)}</b></span>
+                          </div>
+                          <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
+                            <table className="stock-service-watchlist-table" aria-label="Paper trade execution legs">
+                              <thead>
+                                <tr>
+                                  <th>Symbol</th>
+                                  <th>Side</th>
+                                  <th className="stock-service-th-number">Weight</th>
+                                  <th className="stock-service-th-number">y_oc_next</th>
+                                  <th className="stock-service-th-number">Gross</th>
+                                  <th className="stock-service-th-number">Cost</th>
+                                  <th className="stock-service-th-number">Net</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(exec.legs || []).map((leg) => (
+                                  <tr key={`${leg.symbol}-${leg.side}-${leg.y_oc_next}`}>
+                                    <td className="stock-service-wl-symbol">{leg.symbol}</td>
+                                    <td>
+                                      <span className={leg.side === 'LONG' ? 'stock-service-signal-long' : 'stock-service-signal-short'}>
+                                        {leg.side}
+                                      </span>
+                                    </td>
+                                    <td className="stock-service-td-number">{Number(leg.weight || 0).toFixed(3)}</td>
+                                    <td className="stock-service-td-number">{Number(leg.y_oc_next || 0).toFixed(5)}</td>
+                                    <td className="stock-service-td-number">{Number(leg.contrib_gross ?? 0).toFixed(5)}</td>
+                                    <td className="stock-service-td-number">{Number(leg.cost_ln ?? 0).toFixed(5)}</td>
+                                    <td className="stock-service-td-number">{Number(leg.contrib_net ?? leg.contrib ?? 0).toFixed(5)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="stock-service-explainer" style={{ margin: '0.5rem 0 0 0' }}>
+                      {paperTradeRecordsLoading ? 'Loading executions…' : 'No executions yet.'}
+                    </p>
+                  )}
+                </details>
               </div>
               {dailySignals.data_available && (
                 <>
