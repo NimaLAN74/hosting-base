@@ -15,6 +15,54 @@
   color: #1a1a1a;
 }
 
+.stock-service-readiness {
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  margin: 0.5rem 0 0.75rem 0;
+}
+
+.stock-service-readiness.ok {
+  border-color: #86efac;
+  background: #ecfdf5;
+}
+
+.stock-service-readiness.warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.stock-service-readiness-title {
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+}
+
+.stock-service-readiness-items {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.stock-service-readiness-items span.ok {
+  color: #065f46;
+  font-weight: 700;
+}
+
+.stock-service-readiness-items span.bad {
+  color: #92400e;
+  font-weight: 700;
+}
+
+.stock-service-readiness-note {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
 .stock-service-card-title {
   margin: 0 0 0.75rem 0;
   font-size: 1.1rem;
