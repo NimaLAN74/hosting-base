@@ -109,9 +109,37 @@ const CUM_PNL_LN_NET_KEY: &str = "paper:daily:cum_pnl_ln_net";
 const EXECUTION_COUNT_KEY: &str = "paper:daily:execution_count";
 const RECENT_EXECUTIONS_LIMIT: isize = 20;
 
-const COST_SLIPPAGE_BPS_PER_SIDE: f64 = 5.0;
-const COST_COMMISSION_BPS_PER_SIDE: f64 = 1.0;
-const COST_SHORT_BORROW_BPS_DAILY: f64 = 2.0;
+const COST_SLIPPAGE_BPS_PER_SIDE_DEFAULT: f64 = 5.0;
+const COST_COMMISSION_BPS_PER_SIDE_DEFAULT: f64 = 1.0;
+const COST_SHORT_BORROW_BPS_DAILY_DEFAULT: f64 = 2.0;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaperCostAssumptions {
+    pub slippage_bps_per_side: f64,
+    pub commission_bps_per_side: f64,
+    pub short_borrow_bps_daily: f64,
+}
+
+fn read_env_f64(name: &str) -> Option<f64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+}
+
+fn cost_assumptions_from_env() -> PaperCostAssumptions {
+    PaperCostAssumptions {
+        slippage_bps_per_side: read_env_f64("PAPER_COST_SLIPPAGE_BPS_PER_SIDE")
+            .unwrap_or(COST_SLIPPAGE_BPS_PER_SIDE_DEFAULT)
+            .max(0.0),
+        commission_bps_per_side: read_env_f64("PAPER_COST_COMMISSION_BPS_PER_SIDE")
+            .unwrap_or(COST_COMMISSION_BPS_PER_SIDE_DEFAULT)
+            .max(0.0),
+        short_borrow_bps_daily: read_env_f64("PAPER_COST_SHORT_BORROW_BPS_DAILY")
+            .unwrap_or(COST_SHORT_BORROW_BPS_DAILY_DEFAULT)
+            .max(0.0),
+    }
+}
 
 fn now_ts() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -257,6 +285,7 @@ async fn execute_decision_for_ts(
     decision_ts: u64,
 ) -> Result<Option<PaperExecution>> {
     let mut conn = redis.clone();
+    let cost = cost_assumptions_from_env();
     let raw: Option<String> = conn.get(decision_key(decision_ts)).await.ok();
     let Some(raw) = raw else {
         return Ok(None);
@@ -313,10 +342,11 @@ async fn execute_decision_for_ts(
             _ => 0.0,
         };
         let mut leg_cost_ln = 2.0
-            * (bps_to_ln_cost(COST_SLIPPAGE_BPS_PER_SIDE) + bps_to_ln_cost(COST_COMMISSION_BPS_PER_SIDE))
+            * (bps_to_ln_cost(cost.slippage_bps_per_side)
+                + bps_to_ln_cost(cost.commission_bps_per_side))
             * sig.weight;
         if sig.side == "SHORT" {
-            leg_cost_ln += bps_to_ln_cost(COST_SHORT_BORROW_BPS_DAILY) * sig.weight;
+            leg_cost_ln += bps_to_ln_cost(cost.short_borrow_bps_daily) * sig.weight;
         }
         let contrib_net = contrib_gross - leg_cost_ln;
         pnl_ln_gross += contrib_gross;
@@ -469,6 +499,7 @@ pub async fn paper_trade_status(
     redis: &redis::aio::ConnectionManager,
 ) -> Result<serde_json::Value> {
     let mut conn = redis.clone();
+    let cost = cost_assumptions_from_env();
     let last_ts: Option<u64> = conn
         .get(LAST_EXECUTION_TS_KEY)
         .await
@@ -489,6 +520,7 @@ pub async fn paper_trade_status(
             return Ok(serde_json::json!({
                 "pending_after": pending_after,
                 "execution_count": execution_count,
+                "cost_assumptions": cost,
                 "cumulative_pnl_ln": cumulative_pnl_ln,
                 "cumulative_pnl_return": cumulative_pnl_return,
                 "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
@@ -503,6 +535,7 @@ pub async fn paper_trade_status(
     Ok(serde_json::json!({
         "pending_after": pending_after,
         "execution_count": execution_count,
+        "cost_assumptions": cost,
         "cumulative_pnl_ln": cumulative_pnl_ln,
         "cumulative_pnl_return": cumulative_pnl_return,
         "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
@@ -549,6 +582,7 @@ pub async fn paper_trade_backfill(
     short_enabled: bool,
     overwrite: bool,
 ) -> Result<PaperTradeBackfillResult> {
+    let cost = cost_assumptions_from_env();
     let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
         .iter()
         .filter_map(|s| {
@@ -644,11 +678,11 @@ pub async fn paper_trade_backfill(
                     -s.weight * r.y_oc_next
                 };
                 let mut leg_cost_ln = 2.0
-                    * (bps_to_ln_cost(COST_SLIPPAGE_BPS_PER_SIDE)
-                        + bps_to_ln_cost(COST_COMMISSION_BPS_PER_SIDE))
+                    * (bps_to_ln_cost(cost.slippage_bps_per_side)
+                        + bps_to_ln_cost(cost.commission_bps_per_side))
                     * s.weight;
                 if s.side == "SHORT" {
-                    leg_cost_ln += bps_to_ln_cost(COST_SHORT_BORROW_BPS_DAILY) * s.weight;
+                    leg_cost_ln += bps_to_ln_cost(cost.short_borrow_bps_daily) * s.weight;
                 }
                 let contrib_net = contrib_gross - leg_cost_ln;
                 pnl_ln_gross += contrib_gross;
