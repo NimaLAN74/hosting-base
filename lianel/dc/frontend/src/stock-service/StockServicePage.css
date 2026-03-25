@@ -254,6 +254,170 @@
   padding: 0.45rem 0.55rem;
 }
 
+.stock-service-paper-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.85rem 0.9rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.stock-service-paper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.stock-service-paper-title {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.stock-service-paper-mode {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.stock-service-paper-mode-label {
+  font-size: 0.85rem;
+  color: #475569;
+  font-weight: 600;
+}
+
+.stock-service-paper-mode-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.stock-service-paper-mode-btn.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.stock-service-paper-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+@media (max-width: 880px) {
+  .stock-service-paper-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stock-service-paper-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  background: #f8fafc;
+}
+
+.stock-service-paper-kpi-label {
+  font-size: 0.78rem;
+  color: #475569;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.stock-service-paper-kpi-value {
+  font-size: 1rem;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.stock-service-paper-costs {
+  margin-top: 0.65rem;
+  font-size: 0.85rem;
+  color: #334155;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+}
+
+.stock-service-paper-equity {
+  margin-top: 0.75rem;
+}
+
+.stock-service-paper-equity-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.55rem;
+}
+
+.stock-service-paper-equity-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.stock-service-paper-action {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.stock-service-paper-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.stock-service-paper-note {
+  margin: 0.25rem 0 0.6rem 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.stock-service-paper-details {
+  margin-top: 0.85rem;
+}
+
+.stock-service-paper-summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.stock-service-paper-trade-exec {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+}
+
+.stock-service-paper-trade-exec-meta {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
 .stock-service-paper-trade-equity {
   background: #ffffff;
   border: 1px solid #e2e8f0;
