@@ -52,8 +52,10 @@ def main() -> int:
     ]:
         if not val or not os.path.isfile(val) if "PATH" in name else not val:
             if "PATH" in name and not os.path.isfile(val):
-                print(f"ERROR: missing or not a file: {name}={val}", file=sys.stderr)
+                # Avoid leaking filesystem paths (and any secrets embedded in them) into logs.
+                print(f"ERROR: missing or not a file: {name}", file=sys.stderr)
             elif "PATH" not in name and not val:
+                # Avoid echoing sensitive env values into logs.
                 print(f"ERROR: missing env {name}", file=sys.stderr)
             sys.exit(2)
 
