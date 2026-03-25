@@ -14,9 +14,11 @@ const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=t
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
 const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true&overwrite=true';
+const PAPER_TRADE_ORDER_PLAN_URL = '/api/v1/stock-service/paper-trade/order-plan?quantile=0.2&short_enabled=true&train_days=120';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
+const ORDER_PLAN_REFRESH_MS = 5 * 60_000;
 
 /* ViewBox coordinates — SVG scales to 100% width of container via CSS */
 const CHART_WIDTH = 960;
@@ -113,6 +115,10 @@ export default function StockServicePage() {
   const [paperTradeBackfillLoading, setPaperTradeBackfillLoading] = useState(false);
   const [paperTradeBackfillMsg, setPaperTradeBackfillMsg] = useState('');
   const [paperTradePnlMode, setPaperTradePnlMode] = useState('net'); // 'net' | 'gross'
+
+  const [paperTradeOrderPlan, setPaperTradeOrderPlan] = useState(null);
+  const [paperTradeOrderPlanLoading, setPaperTradeOrderPlanLoading] = useState(false);
+  const [paperTradeOrderPlanError, setPaperTradeOrderPlanError] = useState(null);
 
   const loadWatchlist = useCallback(() => {
     setWatchlistLoading(true);
@@ -454,36 +460,114 @@ export default function StockServicePage() {
     return { cap, grossLong, grossShort, minNotional, roundMode, lotSize, rows };
   }, [dailySignals, watchlist, paperTradeStatus]);
 
+  const orderPlanView = React.useMemo(() => {
+    const serverRows = Array.isArray(paperTradeOrderPlan?.rows) ? paperTradeOrderPlan.rows : null;
+    const usingServer = Array.isArray(serverRows) && serverRows.length > 0;
+    if (usingServer) {
+      const s = paperTradeOrderPlan?.sizing_assumptions || {};
+      return {
+        source: 'server',
+        watchlistAsOf: paperTradeOrderPlan?.watchlist_as_of || null,
+        cap: Number(s.capital_usd || 0),
+        grossLong: Number(s.gross_long || 0),
+        grossShort: Number(s.gross_short || 0),
+        minNotional: Number(s.min_notional_usd || 0),
+        roundMode: String(s.share_rounding || 'none'),
+        lotSize: Number(s.lot_size || 1),
+        rows: serverRows.map((r) => ({
+          symbol: r.symbol,
+          side: r.side,
+          weight: Number(r.weight || 0),
+          price_est: r.price_est ?? null,
+          notional_target: Number(r.target_usd || 0),
+          notional_used: Number(r.used_usd || 0),
+          shares: Number(r.shares || 0),
+          skipped: !!r.skipped,
+        })),
+      };
+    }
+    return {
+      source: 'estimate',
+      watchlistAsOf: watchlist?.as_of || null,
+      ...orderPlan,
+    };
+  }, [orderPlan, paperTradeOrderPlan, watchlist]);
+
+  const loadPaperTradeOrderPlan = useCallback(() => {
+    setPaperTradeOrderPlanLoading(true);
+    setPaperTradeOrderPlanError(null);
+    fetch(PAPER_TRADE_ORDER_PLAN_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+        return j;
+      })
+      .then((j) => setPaperTradeOrderPlan(j))
+      .catch((e) => setPaperTradeOrderPlanError(String(e?.message || e)))
+      .finally(() => setPaperTradeOrderPlanLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadPaperTradeOrderPlan();
+    const t = setInterval(loadPaperTradeOrderPlan, ORDER_PLAN_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [loadPaperTradeOrderPlan]);
+
   const orderPlanExport = React.useMemo(() => {
-    const rows = orderPlan?.rows || [];
-    const longUsed = rows.filter((r) => r.side === 'LONG' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
-    const shortUsed = rows.filter((r) => r.side === 'SHORT' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
-    const net = longUsed - shortUsed;
-    const gross = longUsed + shortUsed;
+    const serverRows = Array.isArray(paperTradeOrderPlan?.rows) ? paperTradeOrderPlan.rows : null;
+    const localRows = orderPlan?.rows || [];
+    const usingServer = Array.isArray(serverRows) && serverRows.length > 0;
+
+    const longUsed = usingServer
+      ? Number(paperTradeOrderPlan?.totals?.long_used_usd || 0)
+      : localRows.filter((r) => r.side === 'LONG' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
+    const shortUsed = usingServer
+      ? Number(paperTradeOrderPlan?.totals?.short_used_usd || 0)
+      : localRows.filter((r) => r.side === 'SHORT' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
+    const net = usingServer
+      ? Number(paperTradeOrderPlan?.totals?.net_exposure_usd || 0)
+      : longUsed - shortUsed;
+    const gross = usingServer
+      ? Number(paperTradeOrderPlan?.totals?.gross_exposure_usd || 0)
+      : longUsed + shortUsed;
+
     const payload = {
       generated_at: new Date().toISOString(),
-      capital_usd: Number(orderPlan?.cap || 0),
-      gross_long: Number(orderPlan?.grossLong || 0),
-      gross_short: Number(orderPlan?.grossShort || 0),
-      share_rounding: orderPlan?.roundMode || 'none',
-      lot_size: Number(orderPlan?.lotSize || 1),
-      min_notional_usd: Number(orderPlan?.minNotional || 0),
+      source: usingServer ? 'server' : 'estimate',
+      watchlist_as_of: usingServer ? (paperTradeOrderPlan?.watchlist_as_of || null) : (watchlist?.as_of || null),
+      capital_usd: usingServer ? Number(paperTradeOrderPlan?.sizing_assumptions?.capital_usd || 0) : Number(orderPlan?.cap || 0),
+      gross_long: usingServer ? Number(paperTradeOrderPlan?.sizing_assumptions?.gross_long || 0) : Number(orderPlan?.grossLong || 0),
+      gross_short: usingServer ? Number(paperTradeOrderPlan?.sizing_assumptions?.gross_short || 0) : Number(orderPlan?.grossShort || 0),
+      share_rounding: usingServer ? (paperTradeOrderPlan?.sizing_assumptions?.share_rounding || 'none') : (orderPlan?.roundMode || 'none'),
+      lot_size: usingServer ? Number(paperTradeOrderPlan?.sizing_assumptions?.lot_size || 1) : Number(orderPlan?.lotSize || 1),
+      min_notional_usd: usingServer ? Number(paperTradeOrderPlan?.sizing_assumptions?.min_notional_usd || 0) : Number(orderPlan?.minNotional || 0),
       totals: {
         long_used_usd: longUsed,
         short_used_usd: shortUsed,
         net_exposure_usd: net,
         gross_exposure_usd: gross,
       },
-      rows: rows.map((r) => ({
-        symbol: r.symbol,
-        side: r.side,
-        weight: Number(r.weight || 0),
-        est_price: r.price_est,
-        target_usd: Number(r.notional_target || 0),
-        used_usd: r.notional_used,
-        est_shares: r.shares,
-        status: r.skipped ? 'skip' : 'ok',
-      })),
+      rows: usingServer
+        ? serverRows.map((r) => ({
+          symbol: r.symbol,
+          side: r.side,
+          weight: Number(r.weight || 0),
+          est_price: r.price_est ?? null,
+          target_usd: Number(r.target_usd || 0),
+          used_usd: Number(r.used_usd || 0),
+          est_shares: Number(r.shares || 0),
+          status: r.skipped ? 'skip' : 'ok',
+        }))
+        : localRows.map((r) => ({
+          symbol: r.symbol,
+          side: r.side,
+          weight: Number(r.weight || 0),
+          est_price: r.price_est,
+          target_usd: Number(r.notional_target || 0),
+          used_usd: r.notional_used,
+          est_shares: r.shares,
+          status: r.skipped ? 'skip' : 'ok',
+        })),
     };
 
     const esc = (v) => {
@@ -507,7 +591,7 @@ export default function StockServicePage() {
       csv: lines.join('\n') + '\n',
       totals: { longUsed, shortUsed, net, gross },
     };
-  }, [orderPlan]);
+  }, [orderPlan, paperTradeOrderPlan, watchlist]);
 
   const liveReadiness = React.useMemo(() => {
     const wlAsOf = watchlist?.as_of ? new Date(watchlist.as_of) : null;
@@ -1045,12 +1129,14 @@ export default function StockServicePage() {
                       <span>Backtest Sharpe(252): {Number(dailySignals.backtest.sharpe_252 || 0).toFixed(2)}</span>
                     )}
                   </div>
-                  {orderPlan?.rows?.length > 0 && (
+                  {orderPlanView?.rows?.length > 0 && (
                     <div className="stock-service-paper-plan">
                       <div className="stock-service-paper-plan-head">
-                        <span className="stock-service-paper-plan-title">Order plan (estimate)</span>
+                                <span className="stock-service-paper-plan-title">
+                                  Order plan {Array.isArray(paperTradeOrderPlan?.rows) && paperTradeOrderPlan.rows.length > 0 ? <span style={{ opacity: 0.75 }}>(server)</span> : <span style={{ opacity: 0.75 }}>(estimate)</span>}
+                                </span>
                         <span className="stock-service-paper-plan-sub">
-                          capital=${Number(orderPlan.cap || 0).toFixed(0)}, gross long={Number(orderPlan.grossLong || 0).toFixed(2)}, gross short={Number(orderPlan.grossShort || 0).toFixed(2)}, rounding={orderPlan.roundMode}{orderPlan.roundMode === 'lot' ? `(${Number(orderPlan.lotSize || 1)})` : ''}, min notional=${Number(orderPlan.minNotional || 0).toFixed(0)}
+                          capital=${Number(orderPlanView.cap || 0).toFixed(0)}, gross long={Number(orderPlanView.grossLong || 0).toFixed(2)}, gross short={Number(orderPlanView.grossShort || 0).toFixed(2)}, rounding={orderPlanView.roundMode}{orderPlanView.roundMode === 'lot' ? `(${Number(orderPlanView.lotSize || 1)})` : ''}, min notional=${Number(orderPlanView.minNotional || 0).toFixed(0)}
                         </span>
                       </div>
                       <div className="stock-service-paper-plan-actions">
@@ -1124,7 +1210,7 @@ export default function StockServicePage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {orderPlan.rows.map((r) => (
+                            {orderPlanView.rows.map((r) => (
                               <tr key={`${r.symbol}-${r.side}`}>
                                 <td className="stock-service-wl-symbol">{r.symbol}</td>
                                 <td>
@@ -1142,7 +1228,9 @@ export default function StockServicePage() {
                         </table>
                       </div>
                       <p className="stock-service-explainer" style={{ marginTop: '0.35rem' }}>
-                        Uses current watchlist price as estimate; actual fills are computed from next-session open/close.
+                        {orderPlanView.source === 'server'
+                          ? `Server-computed using latest watchlist snapshot (${orderPlanView.watchlistAsOf || '—'}).`
+                          : 'Uses current watchlist price as estimate; actual fills are computed from next-session open/close.'}
                       </p>
                     </div>
                   )}

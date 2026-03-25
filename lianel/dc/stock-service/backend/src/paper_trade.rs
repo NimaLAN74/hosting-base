@@ -126,6 +126,36 @@ pub struct PaperTradeBackfillResult {
     pub source_rows: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PaperOrderPlanRow {
+    pub symbol: String,
+    pub side: String,
+    pub weight: f64,
+    pub price_est: Option<f64>,
+    pub target_usd: f64,
+    pub used_usd: f64,
+    pub shares: f64,
+    pub skipped: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaperOrderPlanTotals {
+    pub long_used_usd: f64,
+    pub short_used_usd: f64,
+    pub net_exposure_usd: f64,
+    pub gross_exposure_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaperOrderPlanResponse {
+    pub generated_at_ts: u64,
+    pub watchlist_as_of: String,
+    pub model_as_of_ts: Option<u64>,
+    pub sizing_assumptions: PaperSizingAssumptions,
+    pub rows: Vec<PaperOrderPlanRow>,
+    pub totals: PaperOrderPlanTotals,
+}
+
 const PENDING_SET_KEY: &str = "paper:daily:pending";
 const DECISION_KEY_PREFIX: &str = "paper:daily:decision:";
 const EXECUTION_KEY_PREFIX: &str = "paper:daily:execution:";
@@ -172,7 +202,7 @@ fn read_env_bool(name: &str) -> Option<bool> {
     })
 }
 
-fn sizing_assumptions_from_env() -> PaperSizingAssumptions {
+pub(crate) fn sizing_assumptions_from_env() -> PaperSizingAssumptions {
     let capital_usd = read_env_f64("PAPER_CAPITAL_USD").unwrap_or(10_000.0).max(0.0);
     let gross_long = read_env_f64("PAPER_GROSS_LONG").unwrap_or(0.5).max(0.0);
     let gross_short = read_env_f64("PAPER_GROSS_SHORT").unwrap_or(0.5).max(0.0);
@@ -214,6 +244,62 @@ fn round_shares(raw: f64, sizing: &PaperSizingAssumptions) -> f64 {
         }
         _ => raw,
     }
+}
+
+pub fn build_order_plan(
+    signals: &[(String, String, f64)], // (symbol, side, weight)
+    price_by_symbol: &HashMap<String, f64>,
+    sizing: &PaperSizingAssumptions,
+) -> (Vec<PaperOrderPlanRow>, PaperOrderPlanTotals) {
+    let mut rows = Vec::new();
+    for (symbol, side, weight) in signals {
+        let px = price_by_symbol.get(symbol).copied();
+        let gross_side = if side == "SHORT" {
+            sizing.gross_short
+        } else {
+            sizing.gross_long
+        };
+        let target_usd = sizing.capital_usd * gross_side * (*weight);
+        let raw_shares = if let Some(p) = px {
+            if p > 0.0 {
+                target_usd / p
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let shares = round_shares(raw_shares, sizing);
+        let used_usd = px.unwrap_or(0.0) * shares;
+        let skipped = used_usd < sizing.min_notional_usd || px.is_none() || shares <= 0.0;
+        rows.push(PaperOrderPlanRow {
+            symbol: symbol.clone(),
+            side: side.clone(),
+            weight: *weight,
+            price_est: px,
+            target_usd,
+            used_usd: if skipped { 0.0 } else { used_usd },
+            shares: if skipped { 0.0 } else { shares },
+            skipped,
+        });
+    }
+    let long_used = rows
+        .iter()
+        .filter(|r| r.side == "LONG" && !r.skipped)
+        .map(|r| r.used_usd)
+        .sum::<f64>();
+    let short_used = rows
+        .iter()
+        .filter(|r| r.side == "SHORT" && !r.skipped)
+        .map(|r| r.used_usd)
+        .sum::<f64>();
+    let totals = PaperOrderPlanTotals {
+        long_used_usd: long_used,
+        short_used_usd: short_used,
+        net_exposure_usd: long_used - short_used,
+        gross_exposure_usd: long_used + short_used,
+    };
+    (rows, totals)
 }
 
 fn cost_assumptions_from_env() -> PaperCostAssumptions {

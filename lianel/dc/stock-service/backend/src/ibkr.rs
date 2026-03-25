@@ -18,6 +18,7 @@ use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -271,13 +272,36 @@ impl IbkrOAuthClient {
     pub async fn get_session_for_cookie(&self) -> Result<String> {
         if self.config.is_ibkr_gateway_cookie_mode() {
             if let Some(ref path) = self.config.ibkr_gateway_session_cookie_file {
-                if std::path::Path::new(path).exists() {
-                    let cookie = tokio::fs::read_to_string(path)
-                        .await
-                        .context("read IBKR_GATEWAY_SESSION_COOKIE_FILE")?;
-                    let cookie = cookie.trim();
-                    if !cookie.is_empty() {
-                        return Ok(cookie.to_string());
+                // Defense-in-depth: treat env/config paths as untrusted.
+                // Only allow reading from known safe directories to prevent path traversal and satisfy CodeQL.
+                let p = path.trim();
+                if !p.is_empty() {
+                    let pth = Path::new(p);
+                    if pth.is_absolute() {
+                        // Canonicalize resolves `..` and symlinks, so `starts_with` checks are meaningful.
+                        if let Ok(canon) = tokio::fs::canonicalize(pth).await {
+                            let allowed_prefixes = [
+                                Path::new("/run/secrets"),
+                                Path::new("/var/run/secrets"),
+                                Path::new("/etc/stock-service"),
+                                Path::new("/var/lib/stock-service"),
+                                Path::new("/tmp"),
+                            ];
+                            if allowed_prefixes.iter().any(|base| canon.starts_with(base)) {
+                                if let Ok(cookie) = tokio::fs::read_to_string(&canon).await {
+                                    let cookie = cookie.trim();
+                                    if !cookie.is_empty() {
+                                        return Ok(cookie.to_string());
+                                    }
+                                }
+                            } else {
+                                tracing::warn!("Ignoring IBKR_GATEWAY_SESSION_COOKIE_FILE outside allowed directories");
+                            }
+                        } else {
+                            tracing::warn!("Ignoring IBKR_GATEWAY_SESSION_COOKIE_FILE (canonicalize failed)");
+                        }
+                    } else {
+                        tracing::warn!("Ignoring IBKR_GATEWAY_SESSION_COOKIE_FILE (not absolute)");
                     }
                 }
             }
