@@ -453,6 +453,61 @@ export default function StockServicePage() {
       });
     return { cap, grossLong, grossShort, minNotional, roundMode, lotSize, rows };
   }, [dailySignals, watchlist, paperTradeStatus]);
+
+  const orderPlanExport = React.useMemo(() => {
+    const rows = orderPlan?.rows || [];
+    const longUsed = rows.filter((r) => r.side === 'LONG' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
+    const shortUsed = rows.filter((r) => r.side === 'SHORT' && !r.skipped && r.notional_used != null).reduce((a, r) => a + Number(r.notional_used || 0), 0);
+    const net = longUsed - shortUsed;
+    const gross = longUsed + shortUsed;
+    const payload = {
+      generated_at: new Date().toISOString(),
+      capital_usd: Number(orderPlan?.cap || 0),
+      gross_long: Number(orderPlan?.grossLong || 0),
+      gross_short: Number(orderPlan?.grossShort || 0),
+      share_rounding: orderPlan?.roundMode || 'none',
+      lot_size: Number(orderPlan?.lotSize || 1),
+      min_notional_usd: Number(orderPlan?.minNotional || 0),
+      totals: {
+        long_used_usd: longUsed,
+        short_used_usd: shortUsed,
+        net_exposure_usd: net,
+        gross_exposure_usd: gross,
+      },
+      rows: rows.map((r) => ({
+        symbol: r.symbol,
+        side: r.side,
+        weight: Number(r.weight || 0),
+        est_price: r.price_est,
+        target_usd: Number(r.notional_target || 0),
+        used_usd: r.notional_used,
+        est_shares: r.shares,
+        status: r.skipped ? 'skip' : 'ok',
+      })),
+    };
+
+    const esc = (v) => {
+      const s = v == null ? '' : String(v);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) return `"${s.replaceAll('"', '""')}"`;
+      return s;
+    };
+    const header = ['symbol', 'side', 'weight', 'est_price', 'target_usd', 'used_usd', 'est_shares', 'status'];
+    const lines = [header.join(',')];
+    for (const r of payload.rows) {
+      lines.push(header.map((k) => esc(r[k])).join(','));
+    }
+    // Add totals as comment-style lines (still valid CSV-ish for humans).
+    lines.push(`# totals_long_used_usd,${longUsed.toFixed(2)}`);
+    lines.push(`# totals_short_used_usd,${shortUsed.toFixed(2)}`);
+    lines.push(`# totals_net_exposure_usd,${net.toFixed(2)}`);
+    lines.push(`# totals_gross_exposure_usd,${gross.toFixed(2)}`);
+
+    return {
+      payload,
+      csv: lines.join('\n') + '\n',
+      totals: { longUsed, shortUsed, net, gross },
+    };
+  }, [orderPlan]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -954,6 +1009,59 @@ export default function StockServicePage() {
                         <span className="stock-service-paper-plan-sub">
                           capital=${Number(orderPlan.cap || 0).toFixed(0)}, gross long={Number(orderPlan.grossLong || 0).toFixed(2)}, gross short={Number(orderPlan.grossShort || 0).toFixed(2)}, rounding={orderPlan.roundMode}{orderPlan.roundMode === 'lot' ? `(${Number(orderPlan.lotSize || 1)})` : ''}, min notional=${Number(orderPlan.minNotional || 0).toFixed(0)}
                         </span>
+                      </div>
+                      <div className="stock-service-paper-plan-actions">
+                        <div className="stock-service-paper-plan-totals">
+                          <span>Long used: <b>${Number(orderPlanExport?.totals?.longUsed || 0).toFixed(0)}</b></span>
+                          <span>Short used: <b>${Number(orderPlanExport?.totals?.shortUsed || 0).toFixed(0)}</b></span>
+                          <span>Net: <b>${Number(orderPlanExport?.totals?.net || 0).toFixed(0)}</b></span>
+                          <span>Gross: <b>${Number(orderPlanExport?.totals?.gross || 0).toFixed(0)}</b></span>
+                        </div>
+                        <div className="stock-service-paper-plan-buttons">
+                          <button
+                            type="button"
+                            className="stock-service-btn secondary"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(orderPlanExport.csv);
+                              } catch {
+                                // silent
+                              }
+                            }}
+                          >
+                            Copy CSV
+                          </button>
+                          <button
+                            type="button"
+                            className="stock-service-btn secondary"
+                            onClick={() => {
+                              const blob = new Blob([orderPlanExport.csv], { type: 'text/csv;charset=utf-8' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = 'order-plan.csv';
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            Download CSV
+                          </button>
+                          <button
+                            type="button"
+                            className="stock-service-btn secondary"
+                            onClick={() => {
+                              const blob = new Blob([JSON.stringify(orderPlanExport.payload, null, 2)], { type: 'application/json;charset=utf-8' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = 'order-plan.json';
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            Download JSON
+                          </button>
+                        </div>
                       </div>
                       <div className="stock-service-table-wrap">
                         <table className="stock-service-watchlist-table" aria-label="Order plan">
