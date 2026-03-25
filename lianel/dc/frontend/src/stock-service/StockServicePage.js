@@ -692,6 +692,14 @@ export default function StockServicePage() {
                           ? (paperTradeStatus?.cumulative_pnl_return_gross ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
                           : (paperTradeStatus?.cumulative_pnl_return_net ?? paperTradeStatus?.cumulative_pnl_return ?? 0)
                       ).toFixed(4)}
+                      {paperTradeStatus?.cost_assumptions && (
+                        <>
+                          ; costs(slip/comm/borrow bps)=
+                          {Number(paperTradeStatus.cost_assumptions.slippage_bps_per_side || 0).toFixed(1)}/
+                          {Number(paperTradeStatus.cost_assumptions.commission_bps_per_side || 0).toFixed(1)}/
+                          {Number(paperTradeStatus.cost_assumptions.short_borrow_bps_daily || 0).toFixed(1)}
+                        </>
+                      )}
                       {paperTradeStatus?.last_execution ? (
                         <>
                           ; last pnl_return={Number(paperTradeStatus.last_execution.pnl_return || 0).toFixed(4)}
