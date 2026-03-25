@@ -508,6 +508,26 @@ export default function StockServicePage() {
       totals: { longUsed, shortUsed, net, gross },
     };
   }, [orderPlan]);
+
+  const liveReadiness = React.useMemo(() => {
+    const wlAsOf = watchlist?.as_of ? new Date(watchlist.as_of) : null;
+    const wlAgeMs = wlAsOf && !Number.isNaN(wlAsOf.getTime()) ? Date.now() - wlAsOf.getTime() : null;
+    const wlFresh = wlAgeMs != null ? wlAgeMs < 3 * 60_000 : false;
+    const wlHasPrices = Array.isArray(watchlist?.symbols) ? watchlist.symbols.some((s) => s?.price != null && !s?.error) : false;
+    const orderPlanReady = Boolean(wlFresh && wlHasPrices);
+    const publishReady = Boolean(dailySignals?.publish_signals ?? dailySignals?.data_available);
+    const paperOk = Boolean((paperTradeStatus?.execution_count ?? 0) >= 0);
+    const ok = orderPlanReady && publishReady && paperOk;
+    return {
+      ok,
+      orderPlanReady,
+      publishReady,
+      paperOk,
+      wlFresh,
+      wlHasPrices,
+      wlAgeMs,
+    };
+  }, [watchlist, dailySignals, paperTradeStatus]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -722,6 +742,29 @@ export default function StockServicePage() {
           <p className="stock-service-explainer">
             Decision at close, then execute at next session open and exit at close.
           </p>
+          {!watchlistLoading && (
+            <div className={`stock-service-readiness ${liveReadiness.ok ? 'ok' : 'warn'}`}>
+              <div className="stock-service-readiness-title">
+                Live readiness: {liveReadiness.ok ? 'OK' : 'CHECK'}
+              </div>
+              <div className="stock-service-readiness-items">
+                <span className={liveReadiness.orderPlanReady ? 'ok' : 'bad'}>
+                  prices {liveReadiness.wlFresh ? 'fresh' : 'stale'} / {liveReadiness.wlHasPrices ? 'available' : 'missing'}
+                </span>
+                <span className={liveReadiness.publishReady ? 'ok' : 'bad'}>
+                  publish {liveReadiness.publishReady ? 'ready' : 'blocked'}
+                </span>
+                <span className={liveReadiness.paperOk ? 'ok' : 'bad'}>
+                  paper loop {liveReadiness.paperOk ? 'ok' : 'n/a'}
+                </span>
+              </div>
+              {!liveReadiness.orderPlanReady && (
+                <div className="stock-service-readiness-note">
+                  Order plan exports are disabled until prices are fresh and available.
+                </div>
+              )}
+            </div>
+          )}
           {dailySignalsLoading && <p className="stock-service-loading">Loading signals…</p>}
           {!dailySignalsLoading && dailySignalsError && (
             <p className="stock-service-error" role="alert">{dailySignalsError}</p>
@@ -1021,6 +1064,7 @@ export default function StockServicePage() {
                           <button
                             type="button"
                             className="stock-service-btn secondary"
+                            disabled={!liveReadiness.orderPlanReady}
                             onClick={async () => {
                               try {
                                 await navigator.clipboard.writeText(orderPlanExport.csv);
@@ -1034,6 +1078,7 @@ export default function StockServicePage() {
                           <button
                             type="button"
                             className="stock-service-btn secondary"
+                            disabled={!liveReadiness.orderPlanReady}
                             onClick={() => {
                               const blob = new Blob([orderPlanExport.csv], { type: 'text/csv;charset=utf-8' });
                               const url = URL.createObjectURL(blob);
@@ -1049,6 +1094,7 @@ export default function StockServicePage() {
                           <button
                             type="button"
                             className="stock-service-btn secondary"
+                            disabled={!liveReadiness.orderPlanReady}
                             onClick={() => {
                               const blob = new Blob([JSON.stringify(orderPlanExport.payload, null, 2)], { type: 'application/json;charset=utf-8' });
                               const url = URL.createObjectURL(blob);
