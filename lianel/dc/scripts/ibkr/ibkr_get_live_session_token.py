@@ -52,11 +52,10 @@ def main() -> int:
     ]:
         if not val or not os.path.isfile(val) if "PATH" in name else not val:
             if "PATH" in name and not os.path.isfile(val):
-                # Avoid leaking filesystem paths (and any secrets embedded in them) into logs.
-                print(f"ERROR: missing or not a file: {name}", file=sys.stderr)
+                # Avoid leaking any config details into logs (CodeQL treats these as sensitive).
+                print("ERROR: missing required OAuth key/cert file path (check env vars)", file=sys.stderr)
             elif "PATH" not in name and not val:
-                # Avoid echoing sensitive env values into logs.
-                print(f"ERROR: missing env {name}", file=sys.stderr)
+                print("ERROR: missing required OAuth env var (check env vars)", file=sys.stderr)
             sys.exit(2)
 
     # Load DH parameters (PEM: DH PARAMETERS or PKCS#8 RSA as fallback for old format)
