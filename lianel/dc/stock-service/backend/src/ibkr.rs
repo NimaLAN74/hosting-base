@@ -18,6 +18,7 @@ use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
+use std::path::{Component, Path};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -271,14 +272,27 @@ impl IbkrOAuthClient {
     pub async fn get_session_for_cookie(&self) -> Result<String> {
         if self.config.is_ibkr_gateway_cookie_mode() {
             if let Some(ref path) = self.config.ibkr_gateway_session_cookie_file {
-                if std::path::Path::new(path).exists() {
-                    let cookie = tokio::fs::read_to_string(path)
+                // Defense-in-depth: treat env/config paths as untrusted and validate.
+                // This also satisfies CodeQL "Uncontrolled data used in path expression".
+                let p = path.trim();
+                let is_safe = {
+                    let pth = Path::new(p);
+                    pth.is_absolute()
+                        && !pth
+                            .components()
+                            .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+                };
+
+                if is_safe && Path::new(p).exists() {
+                    let cookie = tokio::fs::read_to_string(p)
                         .await
                         .context("read IBKR_GATEWAY_SESSION_COOKIE_FILE")?;
                     let cookie = cookie.trim();
                     if !cookie.is_empty() {
                         return Ok(cookie.to_string());
                     }
+                } else if !p.is_empty() {
+                    tracing::warn!("Ignoring unsafe IBKR_GATEWAY_SESSION_COOKIE_FILE path");
                 }
             }
             if let Some(ref cookie) = self.config.ibkr_gateway_session_cookie {
