@@ -418,6 +418,33 @@
   color: #334155;
 }
 
+.stock-service-paper-plan {
+  margin-top: 0.75rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+
+.stock-service-paper-plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.stock-service-paper-plan-title {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.stock-service-paper-plan-sub {
+  font-size: 0.85rem;
+  color: #475569;
+}
+
 .stock-service-paper-trade-equity {
   background: #ffffff;
   border: 1px solid #e2e8f0;

@@ -407,6 +407,34 @@ export default function StockServicePage() {
       };
     });
   }, [paperTradeRecords, paperTradePnlMode]);
+
+  const orderPlan = React.useMemo(() => {
+    const signals = dailySignals?.signals || [];
+    const prices = {};
+    (watchlist?.symbols || []).forEach((s) => {
+      if (s?.symbol && s?.price != null) prices[s.symbol] = Number(s.price);
+    });
+    const cap = Number(paperTradeStatus?.sizing_assumptions?.capital_usd || 10_000);
+    const grossLong = Number(paperTradeStatus?.sizing_assumptions?.gross_long || 0.5);
+    const grossShort = Number(paperTradeStatus?.sizing_assumptions?.gross_short || 0.5);
+    const rows = signals
+      .filter((s) => s && (s.side === 'LONG' || s.side === 'SHORT'))
+      .map((s) => {
+        const px = prices[s.symbol] || null;
+        const grossSide = s.side === 'SHORT' ? grossShort : grossLong;
+        const notional = cap * grossSide * Number(s.weight || 0);
+        const shares = px && px > 0 ? notional / px : null;
+        return {
+          symbol: s.symbol,
+          side: s.side,
+          weight: Number(s.weight || 0),
+          price_est: px,
+          notional,
+          shares,
+        };
+      });
+    return { cap, grossLong, grossShort, rows };
+  }, [dailySignals, watchlist, paperTradeStatus]);
   const featureAvailability = {
     rankFeatures: Boolean(
       (firstFeature && Object.prototype.hasOwnProperty.call(firstFeature, 'rank_mom5_cs'))
@@ -901,6 +929,47 @@ export default function StockServicePage() {
                       <span>Backtest Sharpe(252): {Number(dailySignals.backtest.sharpe_252 || 0).toFixed(2)}</span>
                     )}
                   </div>
+                  {orderPlan?.rows?.length > 0 && (
+                    <div className="stock-service-paper-plan">
+                      <div className="stock-service-paper-plan-head">
+                        <span className="stock-service-paper-plan-title">Order plan (estimate)</span>
+                        <span className="stock-service-paper-plan-sub">
+                          capital=${Number(orderPlan.cap || 0).toFixed(0)}, gross long={Number(orderPlan.grossLong || 0).toFixed(2)}, gross short={Number(orderPlan.grossShort || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="stock-service-table-wrap">
+                        <table className="stock-service-watchlist-table" aria-label="Order plan">
+                          <thead>
+                            <tr>
+                              <th>Symbol</th>
+                              <th>Side</th>
+                              <th className="stock-service-th-number">Weight</th>
+                              <th className="stock-service-th-number">Est price</th>
+                              <th className="stock-service-th-number">Notional</th>
+                              <th className="stock-service-th-number">Est shares</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orderPlan.rows.map((r) => (
+                              <tr key={`${r.symbol}-${r.side}`}>
+                                <td className="stock-service-wl-symbol">{r.symbol}</td>
+                                <td>
+                                  <span className={r.side === 'LONG' ? 'stock-service-signal-long' : 'stock-service-signal-short'}>{r.side}</span>
+                                </td>
+                                <td className="stock-service-td-number">{Number(r.weight || 0).toFixed(3)}</td>
+                                <td className="stock-service-td-number">{r.price_est != null ? Number(r.price_est).toFixed(2) : '—'}</td>
+                                <td className="stock-service-td-number">${Number(r.notional || 0).toFixed(0)}</td>
+                                <td className="stock-service-td-number">{r.shares != null ? Number(r.shares).toFixed(2) : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="stock-service-explainer" style={{ marginTop: '0.35rem' }}>
+                        Uses current watchlist price as estimate; actual fills are computed from next-session open/close.
+                      </p>
+                    </div>
+                  )}
                   <div className="stock-service-table-wrap">
                     <table className="stock-service-watchlist-table" aria-label="Daily strategy signals">
                       <thead>
