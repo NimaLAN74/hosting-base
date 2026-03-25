@@ -15,6 +15,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
+from urllib.parse import urljoin
 
 import requests
 
@@ -25,7 +26,20 @@ def fetch_json_post(url: str, timeout_s: int, insecure_ssl: bool) -> Dict[str, A
         import urllib3
 
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    r = requests.post(url, timeout=timeout_s, verify=verify)
+
+    def post_once(target: str) -> requests.Response:
+        # Do NOT auto-follow redirects: requests may change POST->GET on 301/302.
+        return requests.post(target, timeout=timeout_s, verify=verify, allow_redirects=False)
+
+    r = post_once(url)
+    # Preserve method over redirects (handle both absolute + relative locations).
+    for _ in range(5):
+        if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("Location"):
+            nxt = urljoin(r.url, r.headers["Location"])
+            r = post_once(nxt)
+            continue
+        break
+
     r.raise_for_status()
     return r.json()
 
