@@ -417,23 +417,41 @@ export default function StockServicePage() {
     const cap = Number(paperTradeStatus?.sizing_assumptions?.capital_usd || 10_000);
     const grossLong = Number(paperTradeStatus?.sizing_assumptions?.gross_long || 0.5);
     const grossShort = Number(paperTradeStatus?.sizing_assumptions?.gross_short || 0.5);
+    const minNotional = Number(paperTradeStatus?.sizing_assumptions?.min_notional_usd || 0);
+    const roundMode = String(paperTradeStatus?.sizing_assumptions?.share_rounding || 'none');
+    const lotSize = Number(paperTradeStatus?.sizing_assumptions?.lot_size || 1);
+    const roundShares = (raw) => {
+      const x = Number(raw || 0);
+      if (!Number.isFinite(x) || x <= 0) return 0;
+      if (roundMode === 'whole') return Math.floor(x);
+      if (roundMode === 'lot') {
+        const lot = Math.max(1, lotSize || 1);
+        return Math.floor(x / lot) * lot;
+      }
+      return x;
+    };
     const rows = signals
       .filter((s) => s && (s.side === 'LONG' || s.side === 'SHORT'))
       .map((s) => {
         const px = prices[s.symbol] || null;
         const grossSide = s.side === 'SHORT' ? grossShort : grossLong;
-        const notional = cap * grossSide * Number(s.weight || 0);
-        const shares = px && px > 0 ? notional / px : null;
+        const notionalTarget = cap * grossSide * Number(s.weight || 0);
+        const sharesRaw = px && px > 0 ? notionalTarget / px : null;
+        const shares = sharesRaw != null ? roundShares(sharesRaw) : null;
+        const notionalUsed = px && px > 0 && shares != null ? shares * px : null;
+        const skipped = notionalUsed != null && minNotional > 0 ? notionalUsed < minNotional : false;
         return {
           symbol: s.symbol,
           side: s.side,
           weight: Number(s.weight || 0),
           price_est: px,
-          notional,
+          notional_target: notionalTarget,
+          notional_used: notionalUsed,
           shares,
+          skipped,
         };
       });
-    return { cap, grossLong, grossShort, rows };
+    return { cap, grossLong, grossShort, minNotional, roundMode, lotSize, rows };
   }, [dailySignals, watchlist, paperTradeStatus]);
   const featureAvailability = {
     rankFeatures: Boolean(
@@ -934,7 +952,7 @@ export default function StockServicePage() {
                       <div className="stock-service-paper-plan-head">
                         <span className="stock-service-paper-plan-title">Order plan (estimate)</span>
                         <span className="stock-service-paper-plan-sub">
-                          capital=${Number(orderPlan.cap || 0).toFixed(0)}, gross long={Number(orderPlan.grossLong || 0).toFixed(2)}, gross short={Number(orderPlan.grossShort || 0).toFixed(2)}
+                          capital=${Number(orderPlan.cap || 0).toFixed(0)}, gross long={Number(orderPlan.grossLong || 0).toFixed(2)}, gross short={Number(orderPlan.grossShort || 0).toFixed(2)}, rounding={orderPlan.roundMode}{orderPlan.roundMode === 'lot' ? `(${Number(orderPlan.lotSize || 1)})` : ''}, min notional=${Number(orderPlan.minNotional || 0).toFixed(0)}
                         </span>
                       </div>
                       <div className="stock-service-table-wrap">
@@ -945,8 +963,10 @@ export default function StockServicePage() {
                               <th>Side</th>
                               <th className="stock-service-th-number">Weight</th>
                               <th className="stock-service-th-number">Est price</th>
-                              <th className="stock-service-th-number">Notional</th>
+                              <th className="stock-service-th-number">Target $</th>
+                              <th className="stock-service-th-number">Used $</th>
                               <th className="stock-service-th-number">Est shares</th>
+                              <th>Status</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -958,8 +978,10 @@ export default function StockServicePage() {
                                 </td>
                                 <td className="stock-service-td-number">{Number(r.weight || 0).toFixed(3)}</td>
                                 <td className="stock-service-td-number">{r.price_est != null ? Number(r.price_est).toFixed(2) : '—'}</td>
-                                <td className="stock-service-td-number">${Number(r.notional || 0).toFixed(0)}</td>
+                                <td className="stock-service-td-number">${Number(r.notional_target || 0).toFixed(0)}</td>
+                                <td className="stock-service-td-number">{r.notional_used != null ? `$${Number(r.notional_used || 0).toFixed(0)}` : '—'}</td>
                                 <td className="stock-service-td-number">{r.shares != null ? Number(r.shares).toFixed(2) : '—'}</td>
+                                <td>{r.skipped ? 'skip (too small)' : 'ok'}</td>
                               </tr>
                             ))}
                           </tbody>

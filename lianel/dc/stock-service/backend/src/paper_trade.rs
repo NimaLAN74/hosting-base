@@ -65,6 +65,8 @@ pub struct PaperLegPnl {
     #[serde(default)]
     pub pnl_usd_net: Option<f64>,
     #[serde(default)]
+    pub skipped: bool,
+    #[serde(default)]
     pub contrib_gross: f64,
     #[serde(default)]
     pub cost_ln: f64,
@@ -151,7 +153,9 @@ pub struct PaperSizingAssumptions {
     pub capital_usd: f64,
     pub gross_long: f64,
     pub gross_short: f64,
-    pub round_shares: bool,
+    pub min_notional_usd: f64,
+    pub share_rounding: String, // none | whole | lot
+    pub lot_size: f64,
 }
 
 fn read_env_f64(name: &str) -> Option<f64> {
@@ -172,12 +176,43 @@ fn sizing_assumptions_from_env() -> PaperSizingAssumptions {
     let capital_usd = read_env_f64("PAPER_CAPITAL_USD").unwrap_or(10_000.0).max(0.0);
     let gross_long = read_env_f64("PAPER_GROSS_LONG").unwrap_or(0.5).max(0.0);
     let gross_short = read_env_f64("PAPER_GROSS_SHORT").unwrap_or(0.5).max(0.0);
-    let round_shares = read_env_bool("PAPER_ROUND_SHARES").unwrap_or(false);
+    let min_notional_usd = read_env_f64("PAPER_MIN_NOTIONAL_USD").unwrap_or(25.0).max(0.0);
+    let lot_size = read_env_f64("PAPER_LOT_SIZE").unwrap_or(1.0).max(1.0);
+    // Back-compat: PAPER_ROUND_SHARES=true => whole shares
+    let legacy_round = read_env_bool("PAPER_ROUND_SHARES").unwrap_or(false);
+    let share_rounding = std::env::var("PAPER_SHARE_ROUNDING")
+        .ok()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| if legacy_round { "whole".to_string() } else { "none".to_string() });
+    let share_rounding = match share_rounding.as_str() {
+        "none" | "raw" => "none",
+        "whole" | "shares" | "ints" | "int" => "whole",
+        "lot" | "lots" => "lot",
+        _ => "none",
+    }
+    .to_string();
     PaperSizingAssumptions {
         capital_usd,
         gross_long,
         gross_short,
-        round_shares,
+        min_notional_usd,
+        share_rounding,
+        lot_size,
+    }
+}
+
+fn round_shares(raw: f64, sizing: &PaperSizingAssumptions) -> f64 {
+    if !raw.is_finite() || raw <= 0.0 {
+        return 0.0;
+    }
+    match sizing.share_rounding.as_str() {
+        "whole" => raw.floor().max(0.0),
+        "lot" => {
+            let lot = sizing.lot_size.max(1.0);
+            ((raw / lot).floor() * lot).max(0.0)
+        }
+        _ => raw,
     }
 }
 
@@ -414,17 +449,17 @@ async fn execute_decision_for_ts(
         } else {
             (sizing.gross_long, 1.0)
         };
-        let notional = sizing.capital_usd * gross_side * sig.weight;
-        let mut shares = if next_bar.open > 0.0 {
-            notional / next_bar.open
+        let notional_target = sizing.capital_usd * gross_side * sig.weight;
+        let raw_shares = if next_bar.open > 0.0 {
+            notional_target / next_bar.open
         } else {
             0.0
         };
-        if sizing.round_shares && shares.is_finite() && shares > 0.0 {
-            shares = shares.floor().max(0.0);
-        }
-        let pnl_usd_gross = side_sign * notional * r_simple;
-        let cost_usd = notional * leg_cost_ln;
+        let shares = round_shares(raw_shares, &sizing);
+        let notional_used = shares * next_bar.open;
+        let skipped = notional_used < sizing.min_notional_usd;
+        let pnl_usd_gross = if skipped { 0.0 } else { side_sign * notional_used * r_simple };
+        let cost_usd = if skipped { 0.0 } else { notional_used * leg_cost_ln };
         let pnl_usd_net = pnl_usd_gross - cost_usd;
         legs.push(PaperLegPnl {
             symbol: sig.symbol.clone(),
@@ -433,11 +468,12 @@ async fn execute_decision_for_ts(
             y_oc_next: y,
             entry_open: Some(next_bar.open),
             exit_close: Some(next_bar.close),
-            notional_usd: Some(notional),
+            notional_usd: Some(if skipped { 0.0 } else { notional_used }),
             shares: Some(shares),
             pnl_usd_gross: Some(pnl_usd_gross),
             cost_usd: Some(cost_usd),
             pnl_usd_net: Some(pnl_usd_net),
+            skipped,
             contrib_gross,
             cost_ln: leg_cost_ln,
             contrib_net,
@@ -805,6 +841,7 @@ pub async fn paper_trade_backfill(
                     pnl_usd_gross: Some(pnl_usd_gross),
                     cost_usd: Some(cost_usd),
                     pnl_usd_net: Some(pnl_usd_net),
+                    skipped: notional < sizing.min_notional_usd,
                     contrib_gross,
                     cost_ln: leg_cost_ln,
                     contrib_net,
