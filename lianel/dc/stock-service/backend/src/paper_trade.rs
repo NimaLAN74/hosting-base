@@ -51,6 +51,20 @@ pub struct PaperLegPnl {
     pub weight: f64,
     pub y_oc_next: f64,
     #[serde(default)]
+    pub entry_open: Option<f64>,
+    #[serde(default)]
+    pub exit_close: Option<f64>,
+    #[serde(default)]
+    pub notional_usd: Option<f64>,
+    #[serde(default)]
+    pub shares: Option<f64>,
+    #[serde(default)]
+    pub pnl_usd_gross: Option<f64>,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    #[serde(default)]
+    pub pnl_usd_net: Option<f64>,
+    #[serde(default)]
     pub contrib_gross: f64,
     #[serde(default)]
     pub cost_ln: f64,
@@ -71,6 +85,18 @@ pub struct PaperExecution {
     #[serde(default)]
     pub pnl_ln_net: f64,
     pub pnl_ln: f64,
+    #[serde(default)]
+    pub capital_usd: Option<f64>,
+    #[serde(default)]
+    pub gross_long: Option<f64>,
+    #[serde(default)]
+    pub gross_short: Option<f64>,
+    #[serde(default)]
+    pub pnl_usd_gross: Option<f64>,
+    #[serde(default)]
+    pub cost_usd_total: Option<f64>,
+    #[serde(default)]
+    pub pnl_usd_net: Option<f64>,
     #[serde(default)]
     pub pnl_return_gross: f64,
     #[serde(default)]
@@ -120,11 +146,39 @@ pub struct PaperCostAssumptions {
     pub short_borrow_bps_daily: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaperSizingAssumptions {
+    pub capital_usd: f64,
+    pub gross_long: f64,
+    pub gross_short: f64,
+    pub round_shares: bool,
+}
+
 fn read_env_f64(name: &str) -> Option<f64> {
     std::env::var(name)
         .ok()
         .and_then(|s| s.trim().parse::<f64>().ok())
         .filter(|v| v.is_finite())
+}
+
+fn read_env_bool(name: &str) -> Option<bool> {
+    std::env::var(name).ok().map(|s| {
+        let v = s.trim().to_ascii_lowercase();
+        v == "1" || v == "true" || v == "yes" || v == "y" || v == "on"
+    })
+}
+
+fn sizing_assumptions_from_env() -> PaperSizingAssumptions {
+    let capital_usd = read_env_f64("PAPER_CAPITAL_USD").unwrap_or(10_000.0).max(0.0);
+    let gross_long = read_env_f64("PAPER_GROSS_LONG").unwrap_or(0.5).max(0.0);
+    let gross_short = read_env_f64("PAPER_GROSS_SHORT").unwrap_or(0.5).max(0.0);
+    let round_shares = read_env_bool("PAPER_ROUND_SHARES").unwrap_or(false);
+    PaperSizingAssumptions {
+        capital_usd,
+        gross_long,
+        gross_short,
+        round_shares,
+    }
 }
 
 fn cost_assumptions_from_env() -> PaperCostAssumptions {
@@ -286,6 +340,7 @@ async fn execute_decision_for_ts(
 ) -> Result<Option<PaperExecution>> {
     let mut conn = redis.clone();
     let cost = cost_assumptions_from_env();
+    let sizing = sizing_assumptions_from_env();
     let raw: Option<String> = conn.get(decision_key(decision_ts)).await.ok();
     let Some(raw) = raw else {
         return Ok(None);
@@ -336,6 +391,7 @@ async fn execute_decision_for_ts(
             return Ok(None);
         }
         let y = (next_bar.close / next_bar.open).ln();
+        let r_simple = (next_bar.close / next_bar.open) - 1.0;
         let contrib_gross = match sig.side.as_str() {
             "LONG" => sig.weight * y,
             "SHORT" => -sig.weight * y,
@@ -351,11 +407,37 @@ async fn execute_decision_for_ts(
         let contrib_net = contrib_gross - leg_cost_ln;
         pnl_ln_gross += contrib_gross;
         cost_total_ln += leg_cost_ln;
+
+        // Dollar sizing (approx): allocate within each side using weights.
+        let (gross_side, side_sign) = if sig.side == "SHORT" {
+            (sizing.gross_short, -1.0)
+        } else {
+            (sizing.gross_long, 1.0)
+        };
+        let notional = sizing.capital_usd * gross_side * sig.weight;
+        let mut shares = if next_bar.open > 0.0 {
+            notional / next_bar.open
+        } else {
+            0.0
+        };
+        if sizing.round_shares && shares.is_finite() && shares > 0.0 {
+            shares = shares.floor().max(0.0);
+        }
+        let pnl_usd_gross = side_sign * notional * r_simple;
+        let cost_usd = notional * leg_cost_ln;
+        let pnl_usd_net = pnl_usd_gross - cost_usd;
         legs.push(PaperLegPnl {
             symbol: sig.symbol.clone(),
             side: sig.side.clone(),
             weight: sig.weight,
             y_oc_next: y,
+            entry_open: Some(next_bar.open),
+            exit_close: Some(next_bar.close),
+            notional_usd: Some(notional),
+            shares: Some(shares),
+            pnl_usd_gross: Some(pnl_usd_gross),
+            cost_usd: Some(cost_usd),
+            pnl_usd_net: Some(pnl_usd_net),
             contrib_gross,
             cost_ln: leg_cost_ln,
             contrib_net,
@@ -366,6 +448,9 @@ async fn execute_decision_for_ts(
     let pnl_ln_net = pnl_ln_gross - cost_total_ln;
     let pnl_return_gross = (pnl_ln_gross.exp() - 1.0).max(-1.0);
     let pnl_return_net = (pnl_ln_net.exp() - 1.0).max(-1.0);
+    let pnl_usd_gross = legs.iter().filter_map(|l| l.pnl_usd_gross).sum::<f64>();
+    let cost_usd_total = legs.iter().filter_map(|l| l.cost_usd).sum::<f64>();
+    let pnl_usd_net = legs.iter().filter_map(|l| l.pnl_usd_net).sum::<f64>();
     let execution = PaperExecution {
         decision_as_of_ts: decision.decision_as_of_ts,
         execution_as_of_ts: exec_ts,
@@ -374,6 +459,12 @@ async fn execute_decision_for_ts(
         cost_total_ln,
         pnl_ln_net,
         pnl_ln: pnl_ln_net,
+        capital_usd: Some(sizing.capital_usd),
+        gross_long: Some(sizing.gross_long),
+        gross_short: Some(sizing.gross_short),
+        pnl_usd_gross: Some(pnl_usd_gross),
+        cost_usd_total: Some(cost_usd_total),
+        pnl_usd_net: Some(pnl_usd_net),
         pnl_return_gross,
         pnl_return_net,
         pnl_return: pnl_return_net,
@@ -500,6 +591,7 @@ pub async fn paper_trade_status(
 ) -> Result<serde_json::Value> {
     let mut conn = redis.clone();
     let cost = cost_assumptions_from_env();
+    let sizing = sizing_assumptions_from_env();
     let last_ts: Option<u64> = conn
         .get(LAST_EXECUTION_TS_KEY)
         .await
@@ -521,6 +613,7 @@ pub async fn paper_trade_status(
                 "pending_after": pending_after,
                 "execution_count": execution_count,
                 "cost_assumptions": cost,
+                "sizing_assumptions": sizing,
                 "cumulative_pnl_ln": cumulative_pnl_ln,
                 "cumulative_pnl_return": cumulative_pnl_return,
                 "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
@@ -536,6 +629,7 @@ pub async fn paper_trade_status(
         "pending_after": pending_after,
         "execution_count": execution_count,
         "cost_assumptions": cost,
+        "sizing_assumptions": sizing,
         "cumulative_pnl_ln": cumulative_pnl_ln,
         "cumulative_pnl_return": cumulative_pnl_return,
         "cumulative_pnl_ln_gross": cumulative_pnl_ln_gross,
@@ -583,6 +677,7 @@ pub async fn paper_trade_backfill(
     overwrite: bool,
 ) -> Result<PaperTradeBackfillResult> {
     let cost = cost_assumptions_from_env();
+    let sizing = sizing_assumptions_from_env();
     let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
         .iter()
         .filter_map(|s| {
@@ -677,6 +772,7 @@ pub async fn paper_trade_backfill(
                 } else {
                     -s.weight * r.y_oc_next
                 };
+                let r_simple = r.y_oc_next.exp() - 1.0;
                 let mut leg_cost_ln = 2.0
                     * (bps_to_ln_cost(cost.slippage_bps_per_side)
                         + bps_to_ln_cost(cost.commission_bps_per_side))
@@ -687,11 +783,28 @@ pub async fn paper_trade_backfill(
                 let contrib_net = contrib_gross - leg_cost_ln;
                 pnl_ln_gross += contrib_gross;
                 cost_total_ln += leg_cost_ln;
+
+                let (gross_side, side_sign) = if s.side == "SHORT" {
+                    (sizing.gross_short, -1.0)
+                } else {
+                    (sizing.gross_long, 1.0)
+                };
+                let notional = sizing.capital_usd * gross_side * s.weight;
+                let pnl_usd_gross = side_sign * notional * r_simple;
+                let cost_usd = notional * leg_cost_ln;
+                let pnl_usd_net = pnl_usd_gross - cost_usd;
                 legs.push(PaperLegPnl {
                     symbol: s.symbol.clone(),
                     side: s.side.clone(),
                     weight: s.weight,
                     y_oc_next: r.y_oc_next,
+                    entry_open: None,
+                    exit_close: None,
+                    notional_usd: Some(notional),
+                    shares: None,
+                    pnl_usd_gross: Some(pnl_usd_gross),
+                    cost_usd: Some(cost_usd),
+                    pnl_usd_net: Some(pnl_usd_net),
                     contrib_gross,
                     cost_ln: leg_cost_ln,
                     contrib_net,
@@ -703,6 +816,9 @@ pub async fn paper_trade_backfill(
             continue;
         }
         let pnl_ln_net = pnl_ln_gross - cost_total_ln;
+        let pnl_usd_gross = legs.iter().filter_map(|l| l.pnl_usd_gross).sum::<f64>();
+        let cost_usd_total = legs.iter().filter_map(|l| l.cost_usd).sum::<f64>();
+        let pnl_usd_net = legs.iter().filter_map(|l| l.pnl_usd_net).sum::<f64>();
         let exec = PaperExecution {
             decision_as_of_ts: decision_ts,
             execution_as_of_ts: exec_ts,
@@ -711,6 +827,12 @@ pub async fn paper_trade_backfill(
             cost_total_ln,
             pnl_ln_net,
             pnl_ln: pnl_ln_net,
+            capital_usd: Some(sizing.capital_usd),
+            gross_long: Some(sizing.gross_long),
+            gross_short: Some(sizing.gross_short),
+            pnl_usd_gross: Some(pnl_usd_gross),
+            cost_usd_total: Some(cost_usd_total),
+            pnl_usd_net: Some(pnl_usd_net),
             pnl_return_gross: pnl_ln_gross.exp() - 1.0,
             pnl_return_net: pnl_ln_net.exp() - 1.0,
             pnl_return: pnl_ln_net.exp() - 1.0,
