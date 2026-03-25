@@ -109,6 +109,11 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/paper-trade/backfill",
             post(paper_trade_backfill_handler),
         )
+        .route("/api/v1/paper-trade/order-plan", get(paper_trade_order_plan_handler))
+        .route(
+            "/api/v1/stock-service/paper-trade/order-plan",
+            get(paper_trade_order_plan_handler),
+        )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -729,6 +734,91 @@ async fn paper_trade_backfill_handler(
         )
             .into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct PaperTradeOrderPlanQuery {
+    quantile: Option<f64>,
+    short_enabled: Option<bool>,
+    train_days: Option<usize>,
+}
+
+async fn paper_trade_order_plan_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaperTradeOrderPlanQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
+    let short_enabled = q.short_enabled.unwrap_or(true);
+    let train_days = q.train_days.unwrap_or(120).max(60);
+
+    // Snapshot watchlist prices + conids without holding the lock over awaits.
+    let (resolved_conids, watchlist_as_of, price_by_symbol) = {
+        let g = state.watchlist_cache.read().await;
+        let mut price_by_symbol = std::collections::HashMap::<String, f64>::new();
+        for (sym, q) in &g.quotes {
+            if let Some(px) = q.price {
+                price_by_symbol.insert(sym.clone(), px);
+            }
+        }
+        (g.resolved_conids.clone(), g.as_of.clone(), price_by_symbol)
+    };
+
+    let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
+        .iter()
+        .filter_map(|s| {
+            let n = s.trim().to_ascii_uppercase();
+            resolved_conids
+                .get(&n)
+                .copied()
+                .or_else(|| watchlist::get_conid_for_symbol(&n))
+                .map(|c| (s.to_string(), c))
+        })
+        .collect();
+
+    let model = daily_strategy::compute_phase2_model_signals(
+        client,
+        &pairs,
+        quantile,
+        short_enabled,
+        train_days,
+    )
+    .await;
+
+    let sizing = crate::paper_trade::sizing_assumptions_from_env();
+    let signals = model
+        .signals
+        .iter()
+        .filter(|s| s.side == "LONG" || s.side == "SHORT")
+        .map(|s| (s.symbol.clone(), s.side.to_string(), s.weight))
+        .collect::<Vec<_>>();
+    let (rows, totals) = crate::paper_trade::build_order_plan(&signals, &price_by_symbol, &sizing);
+
+    (
+        StatusCode::OK,
+        Json(crate::paper_trade::PaperOrderPlanResponse {
+            generated_at_ts: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            watchlist_as_of,
+            model_as_of_ts: model.as_of_ts,
+            sizing_assumptions: sizing,
+            rows,
+            totals,
+        }),
+    )
+        .into_response()
 }
 
 #[derive(serde::Deserialize)]
