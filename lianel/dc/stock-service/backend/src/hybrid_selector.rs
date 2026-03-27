@@ -35,6 +35,10 @@ pub struct HybridSelectionResponse {
     pub model_as_of_ts: Option<u64>,
     pub universe_size: usize,
     pub selected_size: usize,
+    pub missing_price_count: usize,
+    pub missing_price_ratio: f64,
+    pub promotion_ready: bool,
+    pub promotion_gate_failures: Vec<String>,
     pub price_priority_usd: f64,
     pub weights: HybridWeights,
     pub selected: Vec<HybridCandidate>,
@@ -194,6 +198,26 @@ pub async fn build_hybrid_selection(
     let selected_n = top_n.max(3).min(candidates.len().max(3));
     let selected = candidates.iter().take(selected_n).cloned().collect::<Vec<_>>();
     let top_candidates = candidates.iter().take(30).cloned().collect::<Vec<_>>();
+    let missing_price_count = selected
+        .iter()
+        .filter(|c| match c.price {
+            Some(v) => !(v.is_finite() && v > 0.0),
+            None => true,
+        })
+        .count();
+    let missing_price_ratio = if selected.is_empty() {
+        1.0
+    } else {
+        missing_price_count as f64 / selected.len() as f64
+    };
+    let mut promotion_gate_failures = Vec::new();
+    if selected.len() < 8 {
+        promotion_gate_failures.push("selected_size_below_min_8".to_string());
+    }
+    if missing_price_ratio > 0.35 {
+        promotion_gate_failures.push("missing_price_ratio_above_35pct".to_string());
+    }
+    let promotion_ready = promotion_gate_failures.is_empty();
 
     HybridSelectionResponse {
         model: "hybrid_daily_intraday_priority",
@@ -202,6 +226,10 @@ pub async fn build_hybrid_selection(
         model_as_of_ts: model.as_of_ts,
         universe_size: symbol_conids.len(),
         selected_size: selected.len(),
+        missing_price_count,
+        missing_price_ratio,
+        promotion_ready,
+        promotion_gate_failures,
         price_priority_usd: threshold,
         weights,
         selected,

@@ -970,7 +970,7 @@ export default function StockServicePage() {
                   <span className="stock-service-paper-plan-title">Dynamic Selection (hybrid)</span>
                   {!selectionLoading && selection && (
                     <span className="stock-service-paper-plan-sub">
-                      universe={Number(selection.universe_size || 0)} selected={Number(selection.selected_size || 0)} price-priority&lt;=${Number(selection.price_priority_usd || 50).toFixed(0)}
+                      universe={Number(selection.universe_size || 0)} selected={Number(selection.selected_size || 0)} price-priority&lt;=${Number(selection.price_priority_usd || 50).toFixed(0)} gate={selection.promotion_ready ? 'ready' : 'degraded'}
                     </span>
                   )}
                 </div>
@@ -985,6 +985,13 @@ export default function StockServicePage() {
                       <span>wIntraday: <b>{Number(selection?.weights?.intraday || 0).toFixed(2)}</b></span>
                       <span>wUnder50: <b>{Number(selection?.weights?.under50 || 0).toFixed(2)}</b></span>
                       <span>wRisk: <b>{Number(selection?.weights?.risk || 0).toFixed(2)}</b></span>
+                    </div>
+                    <div className="stock-service-model-diag-row" style={{ marginTop: '0.4rem' }}>
+                      <span>Promotion gates:</span>
+                      <span>
+                        {selection.promotion_ready ? 'ready' : 'degraded'}; missing-price={Number(selection.missing_price_count || 0)}/{Number(selection.selected_size || 0)} ({(Number(selection.missing_price_ratio || 0) * 100).toFixed(1)}%)
+                        {Array.isArray(selection.promotion_gate_failures) && selection.promotion_gate_failures.length > 0 ? `; fails=${selection.promotion_gate_failures.join(', ')}` : ''}
+                      </span>
                     </div>
                     <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
                       <table className="stock-service-watchlist-table" aria-label="Dynamic hybrid selected symbols">
