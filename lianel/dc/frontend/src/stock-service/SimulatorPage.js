@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PageTemplate from '../PageTemplate';
 import './SimulatorPage.css';
 
@@ -78,6 +78,7 @@ export default function SimulatorPage() {
   const [startMsg, setStartMsg] = useState('');
   const [controlLoading, setControlLoading] = useState(false);
   const [controlMsg, setControlMsg] = useState('');
+  const readinessUnavailableRunsRef = useRef(new Set());
 
   const exchanges = useMemo(() => {
     const set = new Set();
@@ -134,6 +135,7 @@ export default function SimulatorPage() {
     const ordersUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/orders?limit=500`;
     const riskUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/risk?limit=500`;
     const readinessUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/readiness`;
+    const shouldQueryReadiness = !readinessUnavailableRunsRef.current.has(selectedRunId);
 
     const [statusRes, timelineRes, biasRes, ordersRes, riskRes, readinessRes] = await Promise.allSettled([
       fetchJson(statusUrl),
@@ -141,7 +143,7 @@ export default function SimulatorPage() {
       fetchJson(biasUrl),
       fetchJson(ordersUrl),
       fetchJson(riskUrl),
-      fetchJson(readinessUrl),
+      shouldQueryReadiness ? fetchJson(readinessUrl) : Promise.resolve(null),
     ]);
 
     if (statusRes.status === 'fulfilled') {
@@ -189,12 +191,23 @@ export default function SimulatorPage() {
       setRiskError(String(riskRes.reason?.message || riskRes.reason || 'Failed to load risk'));
     }
 
-    if (readinessRes.status === 'fulfilled') {
+    if (!shouldQueryReadiness) {
+      setReadiness(null);
+      setReadinessError('');
+    } else if (readinessRes.status === 'fulfilled') {
       setReadiness(readinessRes.value || null);
       setReadinessError('');
     } else {
-      setReadiness(null);
-      setReadinessError(String(readinessRes.reason?.message || readinessRes.reason || 'Failed to load readiness'));
+      const msg = String(readinessRes.reason?.message || readinessRes.reason || '');
+      if (/Failed \(404\)|not found/i.test(msg)) {
+        // Older simulator runs may not have persisted readiness artifacts.
+        readinessUnavailableRunsRef.current.add(selectedRunId);
+        setReadiness(null);
+        setReadinessError('');
+      } else {
+        setReadiness(null);
+        setReadinessError(msg || 'Failed to load readiness');
+      }
     }
 
     setLastRefreshTs(Date.now());
