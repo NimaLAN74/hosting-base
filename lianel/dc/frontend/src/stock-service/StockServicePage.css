@@ -821,6 +821,25 @@
   line-height: 1.4;
 }
 
+.stock-service-today-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin: 0 0 0.45rem 0;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.stock-service-today-metrics .up {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.stock-service-today-metrics .down {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .stock-service-chart-bar {
   cursor: pointer;
 }
@@ -964,4 +983,14 @@
 
 .stock-service-history-row td[colspan] {
   padding: 1rem 1.25rem 1.25rem;
+}
+
+.stock-service-history-coverage-note {
+  margin: 0.45rem 0 0 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  border-radius: 8px;
+  color: #92400e;
+  font-size: 0.82rem;
 }

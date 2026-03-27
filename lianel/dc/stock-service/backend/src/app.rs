@@ -227,6 +227,8 @@ struct HistoryQuery {
     symbol: String,
     #[serde(default)]
     days: Option<u32>,
+    #[serde(default)]
+    range: Option<String>, // 7d | 1m | 3m | 1y
 }
 
 #[derive(serde::Deserialize)]
@@ -307,7 +309,13 @@ async fn history_handler(
                 .into_response()
         }
     };
-    let days = q.days.unwrap_or(7).min(365);
+    let days = match q.range.as_deref().map(|s| s.trim().to_ascii_lowercase()) {
+        Some(r) if r == "7d" => 7,
+        Some(r) if r == "1m" => 30,
+        Some(r) if r == "3m" => 90,
+        Some(r) if r == "1y" => 365,
+        _ => q.days.unwrap_or(7).min(365),
+    };
     // IBKR CP history: use week/month/year strings so the span matches the UI (7d→1w, 30d→1m, …).
     let period = match days {
         7 => "1w".to_string(),

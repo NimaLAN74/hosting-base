@@ -14,6 +14,7 @@ const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=t
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
 const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true&overwrite=true';
+const PAPER_TRADE_RUN_URL = '/api/v1/stock-service/paper-trade/run?quantile=0.2&short_enabled=true&train_days=120';
 const PAPER_TRADE_ORDER_PLAN_URL = '/api/v1/stock-service/paper-trade/order-plan?quantile=0.2&short_enabled=true&train_days=120';
 const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
@@ -93,10 +94,10 @@ export default function StockServicePage() {
   const lastPricesRef = useRef({});
   const sessionChartPointsRef = useRef({});
   const [expandedSymbol, setExpandedSymbol] = useState(null);
+  const [historyRangeBySymbol, setHistoryRangeBySymbol] = useState({});
   const [historyBySymbol, setHistoryBySymbol] = useState({});
   const [historyLoading, setHistoryLoading] = useState(null);
   const [historyError, setHistoryError] = useState(null);
-  const [historyRange, setHistoryRange] = useState('7d'); // '7d' | '1m' | '3m' | '1y'
   const [todayBySymbol, setTodayBySymbol] = useState({});
   const [chartHover, setChartHover] = useState({ symbol: null, barIndex: null });
   const [dailySignals, setDailySignals] = useState(null);
@@ -114,6 +115,8 @@ export default function StockServicePage() {
   const [paperTradeRecordsError, setPaperTradeRecordsError] = useState(null);
   const [paperTradeBackfillLoading, setPaperTradeBackfillLoading] = useState(false);
   const [paperTradeBackfillMsg, setPaperTradeBackfillMsg] = useState('');
+  const [paperTradeRunLoading, setPaperTradeRunLoading] = useState(false);
+  const [paperTradeRunMsg, setPaperTradeRunMsg] = useState('');
   const [paperTradePnlMode, setPaperTradePnlMode] = useState('net'); // 'net' | 'gross'
 
   const [paperTradeOrderPlan, setPaperTradeOrderPlan] = useState(null);
@@ -279,13 +282,26 @@ export default function StockServicePage() {
     }
   }, [watchlist]);
 
-  // When a row is expanded, fetch IBKR history for that symbol (once per symbol).
+  const getRangeForSymbol = useCallback(
+    (symbol) => historyRangeBySymbol[symbol] || '7d',
+    [historyRangeBySymbol]
+  );
+
+  const expectedBarsMinByRange = {
+    '7d': 3,
+    '1m': 18,
+    '3m': 45,
+    '1y': 180,
+  };
+
+  // When a row is expanded, fetch IBKR history for that symbol/range (cached per symbol+range).
   useEffect(() => {
     if (!expandedSymbol) return;
-    const existing = historyBySymbol[expandedSymbol];
-    if (existing && existing.range === historyRange) return; // already loaded for this range
     const sym = expandedSymbol;
-    const range = historyRange;
+    const range = getRangeForSymbol(sym);
+    const key = `${sym}:${range}`;
+    const existing = historyBySymbol[key];
+    if (existing) return;
     const rangeToDays = (r) => {
       switch (r) {
         case '1m':
@@ -302,33 +318,34 @@ export default function StockServicePage() {
     const days = rangeToDays(range);
     setHistoryLoading(sym);
     setHistoryError(null);
-    const url = `${HISTORY_URL}?symbol=${encodeURIComponent(sym)}&days=${encodeURIComponent(days)}`;
+    const url = `${HISTORY_URL}?symbol=${encodeURIComponent(sym)}&range=${encodeURIComponent(range)}&days=${encodeURIComponent(days)}`;
     fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((res) => {
         if (res && res.error) {
-          setHistoryBySymbol((prev) => ({ ...prev, [sym]: null }));
+          setHistoryBySymbol((prev) => ({ ...prev, [key]: null }));
           setHistoryError(res.error);
         } else {
           const data = Array.isArray(res?.data) ? res.data : [];
           setHistoryBySymbol((prev) => ({
             ...prev,
-            [sym]: {
+            [key]: {
               range,
               data,
               period: res.period,
               barCount: typeof res.bars === 'number' ? res.bars : data.length,
+              expectedBarsMin: expectedBarsMinByRange[range] || 0,
             },
           }));
           setHistoryError(null);
         }
       })
       .catch((err) => {
-        setHistoryBySymbol((prev) => ({ ...prev, [sym]: null }));
+        setHistoryBySymbol((prev) => ({ ...prev, [key]: null }));
         setHistoryError(err.message || 'Failed to load history');
       })
       .finally(() => setHistoryLoading((prev) => (prev === sym ? null : prev)));
-  }, [expandedSymbol, historyRange, historyBySymbol]);
+  }, [expandedSymbol, getRangeForSymbol, historyBySymbol]);
 
   // When a row is expanded, fetch today's cached points from backend (Redis) for that symbol.
   useEffect(() => {
@@ -757,6 +774,10 @@ export default function StockServicePage() {
     const values = pts.map((p) => p.price);
     const min = Math.min(...values);
     const max = Math.max(...values);
+    const first = pts[0].price;
+    const last = pts[pts.length - 1].price;
+    const abs = last - first;
+    const pct = first > 0 ? (abs / first) * 100 : 0;
     const range = max - min || 1;
     const n = pts.length;
     const stepX = n > 1 ? PLOT_W / (n - 1) : PLOT_W;
@@ -785,6 +806,14 @@ export default function StockServicePage() {
     const gradId = `todayGradient-${symbol}`;
     return (
       <div className="stock-service-chart-card stock-service-chart-card--full">
+        <div className="stock-service-today-metrics">
+          <span>Open-ish: {first.toFixed(2)}</span>
+          <span>High: {max.toFixed(2)}</span>
+          <span>Low: {min.toFixed(2)}</span>
+          <span className={abs >= 0 ? 'up' : 'down'}>
+            Session: {abs >= 0 ? '+' : ''}{abs.toFixed(2)} ({abs >= 0 ? '+' : ''}{pct.toFixed(2)}%)
+          </span>
+        </div>
         <p className="stock-service-chart-legend">
           {sessionOnly ? 'Intraday today (live only — set REDIS_URL on server to persist across restarts)' : 'Intraday today (server cache + live updates)'}
         </p>
@@ -983,6 +1012,37 @@ export default function StockServicePage() {
                       <button
                         type="button"
                         className="stock-service-paper-action"
+                        disabled={paperTradeRunLoading}
+                        onClick={async () => {
+                          setPaperTradeRunLoading(true);
+                          setPaperTradeRunMsg('');
+                          try {
+                            const r = await fetch(PAPER_TRADE_RUN_URL, {
+                              method: 'POST',
+                              credentials: 'include',
+                              headers: { Accept: 'application/json' },
+                            });
+                            const j = await r.json().catch(() => null);
+                            if (!r.ok) throw new Error(j?.error || `Run failed (${r.status})`);
+                            setPaperTradeRunMsg(
+                              `Run done: executed ${Number(j?.executed_count || 0)}, pending ${Number(j?.pending_after || 0)}, stored ${j?.stored_decision ? 'yes' : 'no'}`
+                            );
+                            loadDailySignals();
+                            loadPaperTradeStatus();
+                            loadPaperTradeRecords();
+                            loadPaperTradeOrderPlan();
+                          } catch (e) {
+                            setPaperTradeRunMsg(`Run failed: ${String(e?.message || e)}`);
+                          } finally {
+                            setPaperTradeRunLoading(false);
+                          }
+                        }}
+                      >
+                        {paperTradeRunLoading ? 'Running…' : 'Run paper loop now'}
+                      </button>
+                      <button
+                        type="button"
+                        className="stock-service-paper-action"
                         disabled={paperTradeBackfillLoading}
                         onClick={async () => {
                           setPaperTradeBackfillLoading(true);
@@ -1008,6 +1068,9 @@ export default function StockServicePage() {
                         {paperTradeBackfillLoading ? 'Backfilling…' : 'Backfill history'}
                       </button>
                     </div>
+                    {paperTradeRunMsg && (
+                      <div className="stock-service-paper-note">{paperTradeRunMsg}</div>
+                    )}
                     {paperTradeBackfillMsg && (
                       <div className="stock-service-paper-note">{paperTradeBackfillMsg}</div>
                     )}
@@ -1347,13 +1410,21 @@ export default function StockServicePage() {
                     {watchlist.symbols.map((row) => {
                       const change = getChangeIndicator(row.symbol, row.price);
                       const isExpanded = expandedSymbol === row.symbol;
-                      const historyEntry = historyBySymbol[row.symbol];
+                      const symbolRange = getRangeForSymbol(row.symbol);
+                      const historyEntry = historyBySymbol[`${row.symbol}:${symbolRange}`];
                       return (
                         <React.Fragment key={row.symbol}>
                           <tr
                             className="stock-service-row-clickable"
                             onClick={() =>
-                              setExpandedSymbol((prev) => (prev === row.symbol ? null : row.symbol))
+                              setExpandedSymbol((prev) => {
+                                if (prev === row.symbol) return null;
+                                setHistoryRangeBySymbol((ranges) => ({
+                                  ...ranges,
+                                  [row.symbol]: ranges[row.symbol] || '7d',
+                                }));
+                                return row.symbol;
+                              })
                             }
                           >
                             <td className="stock-service-wl-symbol">
@@ -1413,12 +1484,17 @@ export default function StockServicePage() {
                                         key={opt.key}
                                         type="button"
                                         className={
-                                          historyRange === opt.key
+                                          symbolRange === opt.key
                                             ? 'stock-service-history-range-btn active'
                                             : 'stock-service-history-range-btn'
                                         }
-                                        aria-pressed={historyRange === opt.key}
-                                        onClick={() => setHistoryRange(opt.key)}
+                                        aria-pressed={symbolRange === opt.key}
+                                        onClick={() =>
+                                          setHistoryRangeBySymbol((ranges) => ({
+                                            ...ranges,
+                                            [row.symbol]: opt.key,
+                                          }))
+                                        }
                                       >
                                         {opt.label}
                                       </button>
@@ -1471,7 +1547,10 @@ export default function StockServicePage() {
                                               }).format(d);
                                         const up = abs >= 0;
                                         const rangeLabels = { '7d': '7d', '1m': '1m', '3m': '3m', '1y': '1y' };
-                                        const changeLabel = `${rangeLabels[historyRange] || historyRange} change (close)`;
+                                        const changeLabel = `${rangeLabels[symbolRange] || symbolRange} change (close)`;
+                                        const barsCoverageMsg = historyEntry.expectedBarsMin && historyEntry.barCount < historyEntry.expectedBarsMin
+                                          ? `Coverage is limited (${historyEntry.barCount} bars). This usually means recent IPO/holiday/IBKR data availability for this symbol.`
+                                          : '';
                                         return (
                                           <>
                                             <div className="stock-service-history-metrics-row" role="group" aria-label="Period summary">
@@ -1499,6 +1578,9 @@ export default function StockServicePage() {
                                             <div className="stock-service-history-chart-wrap stock-service-history-chart-wrap--full">
                                               {renderHistoryChart(bars, up, row.symbol)}
                                             </div>
+                                            {barsCoverageMsg && (
+                                              <p className="stock-service-history-coverage-note">{barsCoverageMsg}</p>
+                                            )}
                                           </>
                                         );
                                       })()}
