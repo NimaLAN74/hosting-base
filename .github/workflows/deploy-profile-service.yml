@@ -14,6 +14,9 @@ on:
       - '.github/workflows/deploy-profile-service.yml'
   workflow_dispatch:  # Allow manual trigger
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
 

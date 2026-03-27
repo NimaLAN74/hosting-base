@@ -472,11 +472,10 @@ pub async fn refresh_from_ibkr(
     if let Ok(r) = reauth_req.send().await {
         let status = r.status();
         if !status.is_success() {
-            let body = r.text().await.unwrap_or_default();
+            let _ = r.text().await;
             tracing::warn!(
-                "Watchlist IBKR /iserver/reauthenticate returned {}: {}",
-                status,
-                body.trim_start().chars().take(200).collect::<String>()
+                "Watchlist IBKR /iserver/reauthenticate returned {}",
+                status
             );
         }
     }
@@ -496,12 +495,11 @@ pub async fn refresh_from_ibkr(
     match accounts_req.send().await {
         Ok(r) => {
             let status = r.status();
-            let body = r.text().await.unwrap_or_default();
+            let _ = r.text().await;
             if !status.is_success() {
                 tracing::warn!(
-                    "Watchlist IBKR /accounts pre-call failed ({}): {}",
-                    status,
-                    body.trim_start().chars().take(200).collect::<String>()
+                    "Watchlist IBKR /accounts pre-call failed ({})",
+                    status
                 );
                 let mut next = WatchlistCache::default();
                 next.as_of = as_of.clone();
@@ -514,9 +512,8 @@ pub async fn refresh_from_ibkr(
                             currency: Some("USD".to_string()),
                             updated_at: Some(as_of.clone()),
                             error: Some(format!(
-                                "IBKR /accounts failed {}: {}",
-                                status,
-                                body.trim_start().chars().take(200).collect::<String>()
+                                "IBKR /accounts failed {}",
+                                status
                             )),
                         },
                     );
@@ -897,8 +894,8 @@ pub async fn fetch_snapshot_raw_for_conids(
     let accounts_resp = accounts_req.send().await.map_err(|e| format!("IBKR /accounts req failed: {e}"))?;
     if !accounts_resp.status().is_success() {
         let status = accounts_resp.status();
-        let body = accounts_resp.text().await.unwrap_or_default();
-        return Err(format!("IBKR /accounts failed ({status}): {body}"));
+        let _ = accounts_resp.text().await;
+        return Err(format!("IBKR /accounts failed ({status})"));
     }
 
     let req = http_client

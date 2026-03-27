@@ -6,6 +6,9 @@ name: Sync Nginx (Fix Login)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: Validate secrets and SSH connectivity. Re-run if connection fails.

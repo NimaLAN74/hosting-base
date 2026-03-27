@@ -254,11 +254,15 @@ impl IbkrOAuthClient {
 
     /// Build HTTP client for IBKR API (optionally skips TLS verify for local Client Portal Gateway).
     pub fn http_client(&self) -> Result<reqwest::Client> {
-        let mut b = reqwest::Client::builder().timeout(Duration::from_secs(15));
         if self.config.ibkr_insecure_skip_tls_verify {
-            b = b.danger_accept_invalid_certs(true);
+            tracing::warn!(
+                "IBKR_INSECURE_SKIP_TLS_VERIFY is set, but insecure TLS bypass is disabled by policy."
+            );
         }
-        b.build().context("reqwest client")
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("reqwest client")
     }
 
     /// True when using Gateway with a pre-set session cookie (no OAuth/tickle).
