@@ -67,6 +67,16 @@ function Services() {
       enabled: true,
       gradient: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
       category: 'Analytics'
+    },
+    {
+      name: 'Comp AI',
+      description: 'AI-powered analysis is currently paused to save server resources',
+      icon: '🤖',
+      url: '/comp-ai',
+      status: 'paused',
+      enabled: false,
+      gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+      category: 'AI Services'
     }
   ];
 

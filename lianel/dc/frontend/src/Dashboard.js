@@ -119,11 +119,11 @@ function Dashboard() {
     },
     {
       name: 'Comp AI',
-      description: 'AI-powered analysis, insights, and request processing',
+      description: 'AI-powered analysis is currently paused to save server resources',
       icon: '🤖',
       url: '/comp-ai',
-      status: 'active',
-      enabled: true,
+      status: 'paused',
+      enabled: false,
       gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
       category: 'AI Services'
     },
