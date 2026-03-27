@@ -442,7 +442,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .collect();
 
     let run_id_cloned = run_id.clone();
+    let meta_for_task = meta.clone();
     tokio::spawn(async move {
+        let mut meta = meta_for_task;
         let mut equity = req.initial_capital_usd;
         let mut findings: Vec<SimBiasFinding> = Vec::new();
         let mut exchange_leg_count: HashMap<String, usize> = HashMap::new();
