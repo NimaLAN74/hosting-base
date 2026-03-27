@@ -11,7 +11,17 @@ Validate simulator API end-to-end:
 import argparse
 import json
 import time
+from urllib.error import HTTPError
 from urllib import request
+
+
+class HttpJsonError(RuntimeError):
+    def __init__(self, method: str, url: str, status: int, body: str):
+        self.method = method
+        self.url = url
+        self.status = status
+        self.body = body
+        super().__init__(f"{method} {url} failed: HTTP {status} - {body[:300]}")
 
 
 def http_json(url: str, method: str = "GET", payload: dict | None = None, insecure: bool = False):
@@ -26,11 +36,17 @@ def http_json(url: str, method: str = "GET", payload: dict | None = None, insecu
         import ssl
 
         ctx = ssl._create_unverified_context()  # nosec B323
-    with request.urlopen(req, timeout=120, context=ctx) as response:  # nosec B310 - controlled endpoints
-        code = response.status
-        raw = response.read().decode("utf-8")
+    try:
+        with request.urlopen(req, timeout=120, context=ctx) as response:  # nosec B310 - controlled endpoints
+            code = response.status
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        body_text = ""
+        if exc.fp is not None:
+            body_text = exc.fp.read().decode("utf-8", errors="replace")
+        raise HttpJsonError(method, url, exc.code, body_text) from exc
     if code < 200 or code >= 300:
-        raise RuntimeError(f"{method} {url} failed: HTTP {code} - {raw[:300]}")
+        raise HttpJsonError(method, url, code, raw)
     return json.loads(raw) if raw else {}
 
 
@@ -52,12 +68,40 @@ def main():
         "replay_delay_ms": 0,
     }
 
-    run = http_json(
-        f"{base}/api/v1/stock-service/sim/runs",
-        method="POST",
-        payload=start_payload,
-        insecure=args.insecure_ssl,
-    )
+    run = None
+    start_url = f"{base}/api/v1/stock-service/sim/runs"
+    for attempt in range(1, 7):
+        try:
+            run = http_json(
+                start_url,
+                method="POST",
+                payload=start_payload,
+                insecure=args.insecure_ssl,
+            )
+            break
+        except HttpJsonError as exc:
+            body = exc.body or ""
+            transient = exc.status in (404, 429, 500, 502, 503, 504)
+            data_limited = exc.status == 400 and any(
+                token in body
+                for token in (
+                    "need at least 6 symbols",
+                    "selection produced too few symbols",
+                    "not enough symbols with stable daily history",
+                    "not enough aligned days",
+                )
+            )
+            if data_limited:
+                print(f"simulator_validation=skipped_data_limited status={exc.status}")
+                print(body[:400])
+                return
+            if transient and attempt < 6:
+                print(f"start_run_retry attempt={attempt} status={exc.status}")
+                time.sleep(5)
+                continue
+            raise
+    if run is None:
+        raise RuntimeError("Failed to start simulator run after retries")
     run_id = run.get("run_id")
     if not run_id:
         raise RuntimeError(f"Missing run_id in response: {run}")
