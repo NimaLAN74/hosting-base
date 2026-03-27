@@ -79,6 +79,8 @@ pub struct SimDecisionTrace {
     pub hybrid_score: f64,
     pub features: serde_json::Value,
     pub rationale: Vec<String>,
+    #[serde(default)]
+    pub short_explanation: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,8 +94,34 @@ pub struct SimFillLedgerRow {
     pub qty_notional_usd: f64,
     pub open_px: f64,
     pub close_px: f64,
+    #[serde(default)]
+    pub buy_px: f64,
+    #[serde(default)]
+    pub sell_px: f64,
+    #[serde(default)]
+    pub buy_ts: u64,
+    #[serde(default)]
+    pub sell_ts: u64,
+    #[serde(default)]
+    pub buy_session_time_utc: String,
+    #[serde(default)]
+    pub sell_session_time_utc: String,
+    #[serde(default)]
+    pub market_data_source: String,
     pub ret_simple: f64,
     pub fee_usd: f64,
+    #[serde(default)]
+    pub ibkr_commission_usd: f64,
+    #[serde(default)]
+    pub exchange_fee_usd: f64,
+    #[serde(default)]
+    pub clearing_fee_usd: f64,
+    #[serde(default)]
+    pub regulatory_fee_usd: f64,
+    #[serde(default)]
+    pub fx_fee_usd: f64,
+    #[serde(default)]
+    pub tax_usd: f64,
     pub slippage_usd: f64,
     pub pnl_usd: f64,
     pub latency_ms: u64,
@@ -105,6 +133,8 @@ pub struct SimFillLedgerRow {
     pub borrow_fee_usd: f64,
     #[serde(default)]
     pub market_impact_usd: f64,
+    #[serde(default)]
+    pub total_cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,11 +602,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .ok_or_else(|| "IBKR not configured".to_string())?
         .clone();
 
-    req.days = req.days.max(5).min(30);
+    req.days = req.days.max(30).min(365);
     req.top = req.top.max(6).min(40);
     req.quantile = req.quantile.clamp(0.05, 0.45);
     req.initial_capital_usd = req.initial_capital_usd.max(25.0);
-    req.readiness_min_days = req.readiness_min_days.max(30).min(365 * 3);
+    // User requirement: never evaluate readiness below six months.
+    req.readiness_min_days = req.readiness_min_days.max(126).min(365 * 3);
     req.max_cycles = req.max_cycles.max(req.readiness_min_days).min(20_000);
 
     let run_id = generate_run_id();
@@ -846,6 +877,19 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "is_halt": is_halt,
                     }),
                     rationale: rationale_extended,
+                    short_explanation: format!(
+                        "{} {} using real market bar prices (buy {:.4} at {} UTC, sell {:.4} at {} UTC) because momentum {:.4} and hybrid score {:.4} favored {} on {}.",
+                        if side == "LONG" { "Buy" } else { "Sell short" },
+                        sym,
+                        next_bar.open,
+                        exchange.session_open_utc,
+                        next_bar.close,
+                        exchange.session_close_utc,
+                        ret_prev,
+                        hybrid_score,
+                        if side == "LONG" { "upside" } else { "downside" },
+                        exchange.code
+                    ),
                 };
                 decision_rows.push(trace.clone());
                 total_decisions += 1;
@@ -892,7 +936,18 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 let direction = if side == "LONG" { 1.0 } else { -1.0 };
                 let filled_notional = per_leg_notional * fill_ratio;
                 let remaining_notional = (per_leg_notional - filled_notional).max(0.0);
-                let fee_usd = filled_notional * (exchange.fee_bps / 10_000.0);
+                let ibkr_commission_usd = filled_notional * (exchange.ibkr_commission_bps / 10_000.0);
+                let exchange_fee_usd = filled_notional * (exchange.exchange_fee_bps / 10_000.0);
+                let clearing_fee_usd = filled_notional * (exchange.clearing_fee_bps / 10_000.0);
+                let regulatory_fee_usd = filled_notional * (exchange.regulatory_fee_bps / 10_000.0);
+                let fx_fee_usd = filled_notional * (exchange.fx_fee_bps / 10_000.0);
+                let tax_usd = filled_notional * (exchange.tax_bps / 10_000.0);
+                let fee_usd = ibkr_commission_usd
+                    + exchange_fee_usd
+                    + clearing_fee_usd
+                    + regulatory_fee_usd
+                    + fx_fee_usd
+                    + tax_usd;
                 let spread_cost_usd = filled_notional * (exchange.spread_bps / 10_000.0);
                 let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
                 let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
@@ -907,6 +962,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     - spread_cost_usd
                     - impact_usd
                     - borrow_fee_usd;
+                let total_cost_usd = fee_usd + slippage_usd + spread_cost_usd + impact_usd + borrow_fee_usd;
                 let status = if short_blocked {
                     "rejected"
                 } else if fill_ratio < 0.999 {
@@ -942,8 +998,21 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     qty_notional_usd: filled_notional,
                     open_px: next_bar.open,
                     close_px: next_bar.close,
+                    buy_px: next_bar.open,
+                    sell_px: next_bar.close,
+                    buy_ts: exec_ts,
+                    sell_ts: exec_ts,
+                    buy_session_time_utc: exchange.session_open_utc.to_string(),
+                    sell_session_time_utc: exchange.session_close_utc.to_string(),
+                    market_data_source: "IBKR_HISTORY_REAL_BAR".to_string(),
                     ret_simple,
                     fee_usd,
+                    ibkr_commission_usd,
+                    exchange_fee_usd,
+                    clearing_fee_usd,
+                    regulatory_fee_usd,
+                    fx_fee_usd,
+                    tax_usd,
                     slippage_usd,
                     pnl_usd,
                     latency_ms: exchange.latency_ms,
@@ -951,6 +1020,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     fill_ratio,
                     borrow_fee_usd,
                     market_impact_usd: impact_usd + spread_cost_usd,
+                    total_cost_usd,
                 });
             }
 
@@ -968,6 +1038,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "weight": d.weight,
                         "hybrid_score": d.hybrid_score,
                         "features": d.features,
+                        "short_explanation": d.short_explanation,
                     }),
                 )
                 .await;
@@ -1016,10 +1087,24 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "decision_id": f.decision_id,
                         "symbol": f.symbol,
                         "pnl_usd": f.pnl_usd,
+                        "buy_px": f.buy_px,
+                        "sell_px": f.sell_px,
+                        "buy_ts": f.buy_ts,
+                        "sell_ts": f.sell_ts,
+                        "buy_session_time_utc": f.buy_session_time_utc,
+                        "sell_session_time_utc": f.sell_session_time_utc,
+                        "market_data_source": f.market_data_source,
                         "fee_usd": f.fee_usd,
+                        "ibkr_commission_usd": f.ibkr_commission_usd,
+                        "exchange_fee_usd": f.exchange_fee_usd,
+                        "clearing_fee_usd": f.clearing_fee_usd,
+                        "regulatory_fee_usd": f.regulatory_fee_usd,
+                        "fx_fee_usd": f.fx_fee_usd,
+                        "tax_usd": f.tax_usd,
                         "slippage_usd": f.slippage_usd,
                         "borrow_fee_usd": f.borrow_fee_usd,
                         "market_impact_usd": f.market_impact_usd,
+                        "total_cost_usd": f.total_cost_usd,
                         "fill_ratio": f.fill_ratio,
                         "order_id": f.order_id,
                         "latency_ms": f.latency_ms,
@@ -1107,11 +1192,10 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             )
             .await;
             if risk.drawdown >= 0.55 || risk.leverage >= 3.0 || risk.var_95_1d >= 0.2 {
-                stop_reason = "RISK_KILL_SWITCH".to_string();
                 let _ = push_event(
                     &redis,
                     &run_id_cloned,
-                    "RiskKillSwitchTriggered",
+                    "RiskThresholdBreached",
                     None,
                     json!({
                         "drawdown": risk.drawdown,
@@ -1120,7 +1204,6 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     }),
                 )
                 .await;
-                break;
             }
             cycle_idx += 1;
             meta.cycles_completed = cycle_idx;
@@ -1144,10 +1227,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 let raw = serde_json::to_string(&readiness).unwrap_or_else(|_| "{}".to_string());
                 conn.set::<_, _, ()>(run_readiness_key(&run_id_cloned), raw).await
             };
-            if readiness.pass {
-                stop_reason = "READY_FOR_LIVE".to_string();
-                break;
-            }
+            // Do not auto-stop on readiness pass; continue simulation until bankroll is depleted
+            // (or manually stopped), while continuously tracking readiness.
             if equity <= 0.0 {
                 stop_reason = "BANKRUPT".to_string();
                 break;
