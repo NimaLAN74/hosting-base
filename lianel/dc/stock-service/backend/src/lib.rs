@@ -4,6 +4,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod daily_strategy;
+pub mod hybrid_selector;
 pub mod ibkr;
 pub mod paper_trade;
 pub mod today_cache;

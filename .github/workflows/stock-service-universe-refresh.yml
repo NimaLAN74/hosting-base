@@ -1,0 +1,51 @@
+name: Stock Service Dynamic Universe Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Frequent refresh during weekdays; lightweight quality gate.
+    - cron: "15 * * * 1-5"
+
+permissions:
+  contents: read
+
+env:
+  STOCK_SERVICE_BASE_URL: ${{ secrets.STOCK_SERVICE_BASE_URL || format('http://{0}', secrets.REMOTE_HOST) }}
+  QUANTILE: "0.2"
+  TRAIN_DAYS: "120"
+  SHORT_ENABLED: "true"
+  TOP: "20"
+  MIN_SELECTED: "8"
+  MAX_MISSING_PRICE_RATIO: "0.35"
+  INSECURE_SSL: "true"
+
+jobs:
+  refresh_and_validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Validate dynamic selection gates
+        run: |
+          python lianel/dc/stock-service/scripts/validate_dynamic_selection.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --quantile "$QUANTILE" \
+            --short "$SHORT_ENABLED" \
+            --train-days "$TRAIN_DAYS" \
+            --top "$TOP" \
+            --min-selected "$MIN_SELECTED" \
+            --max-missing-price-ratio "$MAX_MISSING_PRICE_RATIO" \
+            --insecure-ssl
+

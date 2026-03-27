@@ -598,6 +598,7 @@ async fn execute_decision_for_ts(
 pub async fn paper_trade_run(
     client: &IbkrOAuthClient,
     resolved_conids: &HashMap<String, u64>,
+    universe_symbols: &[String],
     redis: &redis::aio::ConnectionManager,
     quantile: f64,
     short_enabled: bool,
@@ -654,7 +655,7 @@ pub async fn paper_trade_run(
     }
 
     // Store latest published decision, if we haven't already.
-    let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
+    let pairs: Vec<(String, u64)> = universe_symbols
         .iter()
         .filter_map(|s| {
             let n = s.trim().to_ascii_uppercase();
@@ -792,6 +793,7 @@ pub async fn paper_trade_records(
 pub async fn paper_trade_backfill(
     client: &IbkrOAuthClient,
     resolved_conids: &HashMap<String, u64>,
+    universe_symbols: &[String],
     redis: &redis::aio::ConnectionManager,
     days: usize,
     quantile: f64,
@@ -800,7 +802,7 @@ pub async fn paper_trade_backfill(
 ) -> Result<PaperTradeBackfillResult> {
     let cost = cost_assumptions_from_env();
     let sizing = sizing_assumptions_from_env();
-    let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
+    let pairs: Vec<(String, u64)> = universe_symbols
         .iter()
         .filter_map(|s| {
             let n = s.trim().to_ascii_uppercase();

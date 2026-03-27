@@ -13,6 +13,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth::{KeycloakJwtValidator, UserId};
 use crate::daily_strategy;
+use crate::hybrid_selector;
 use crate::ibkr::IbkrOAuthClient;
 use crate::paper_trade;
 use crate::watchlist;
@@ -88,6 +89,8 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/daily-signals/research",
             get(daily_signals_research_handler),
         )
+        .route("/api/v1/selection", get(selection_handler))
+        .route("/api/v1/stock-service/selection", get(selection_handler))
         // Paper trade (public) - decision store + next-day execution.
         .route("/api/v1/paper-trade/run", post(paper_trade_run_handler))
         .route(
@@ -405,6 +408,61 @@ fn default_sample_rows() -> usize {
     300
 }
 
+fn default_top_selection_size() -> usize {
+    std::env::var("STOCK_DYNAMIC_TRADE_UNIVERSE_SIZE")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(20)
+}
+
+#[derive(serde::Deserialize)]
+struct SelectionQuery {
+    #[serde(default = "default_signal_quantile")]
+    quantile: f64,
+    #[serde(default)]
+    short: Option<bool>,
+    #[serde(default = "default_train_days")]
+    train_days: usize,
+    #[serde(default = "default_top_selection_size")]
+    top: usize,
+}
+
+async fn resolve_universe_pairs(state: &AppState) -> Vec<(String, u64)> {
+    let g = state.watchlist_cache.read().await;
+    watchlist::active_symbol_conid_pairs(&g)
+}
+
+async fn resolve_hybrid_selected_symbols(
+    state: &AppState,
+    quantile: f64,
+    short_enabled: bool,
+    train_days: usize,
+    top: usize,
+) -> Result<Vec<String>, String> {
+    let client = state
+        .ibkr_client
+        .as_ref()
+        .ok_or_else(|| "IBKR not configured".to_string())?;
+    let g = state.watchlist_cache.read().await;
+    let pairs = watchlist::active_symbol_conid_pairs(&g);
+    let selection = hybrid_selector::build_hybrid_selection(
+        client,
+        state.redis.as_ref(),
+        &pairs,
+        &g.quotes,
+        quantile,
+        short_enabled,
+        train_days,
+        top,
+    )
+    .await;
+    Ok(selection
+        .selected
+        .into_iter()
+        .map(|c| c.symbol)
+        .collect::<Vec<_>>())
+}
+
 async fn daily_signals_handler(
     State(state): State<AppState>,
     Query(q): Query<DailySignalsQuery>,
@@ -428,16 +486,7 @@ async fn daily_signals_handler(
     });
     let include_backtest = q.backtest.unwrap_or(false);
 
-    let pairs: Vec<(String, u64)> = {
-        let g = state.watchlist_cache.read().await;
-        watchlist::DEFAULT_SYMBOLS
-            .iter()
-            .filter_map(|s| {
-                let sym = s.to_string();
-                watchlist::get_conid_with_cache(s, &g).map(|c| (sym, c))
-            })
-            .collect()
-    };
+    let pairs = resolve_universe_pairs(&state).await;
 
     if pairs.len() < 3 {
         return (
@@ -488,13 +537,7 @@ async fn daily_signals_research_handler(
             .unwrap_or(true)
     });
 
-    let pairs: Vec<(String, u64)> = {
-        let g = state.watchlist_cache.read().await;
-        watchlist::DEFAULT_SYMBOLS
-            .iter()
-            .filter_map(|s| watchlist::get_conid_with_cache(s, &g).map(|c| (s.to_string(), c)))
-            .collect()
-    };
+    let pairs = resolve_universe_pairs(&state).await;
     if pairs.len() < 3 {
         return (
             StatusCode::BAD_REQUEST,
@@ -537,13 +580,7 @@ async fn daily_signals_model_handler(
             .unwrap_or(true)
     });
 
-    let pairs: Vec<(String, u64)> = {
-        let g = state.watchlist_cache.read().await;
-        watchlist::DEFAULT_SYMBOLS
-            .iter()
-            .filter_map(|s| watchlist::get_conid_with_cache(s, &g).map(|c| (s.to_string(), c)))
-            .collect()
-    };
+    let pairs = resolve_universe_pairs(&state).await;
     if pairs.len() < 3 {
         return (
             StatusCode::BAD_REQUEST,
@@ -563,11 +600,54 @@ async fn daily_signals_model_handler(
     (StatusCode::OK, Json(resp)).into_response()
 }
 
+async fn selection_handler(
+    State(state): State<AppState>,
+    Query(q): Query<SelectionQuery>,
+) -> impl IntoResponse {
+    let client = match state.ibkr_client.as_ref() {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "IBKR not configured"})),
+            )
+                .into_response();
+        }
+    };
+    let quantile = q.quantile.clamp(0.05, 0.45);
+    let short_enabled = q.short.unwrap_or(true);
+    let train_days = q.train_days.max(60);
+    let top = q.top.max(3);
+
+    let g = state.watchlist_cache.read().await;
+    let pairs = watchlist::active_symbol_conid_pairs(&g);
+    if pairs.len() < 3 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "need at least 3 symbols with conids"})),
+        )
+            .into_response();
+    }
+    let resp = hybrid_selector::build_hybrid_selection(
+        client,
+        state.redis.as_ref(),
+        &pairs,
+        &g.quotes,
+        quantile,
+        short_enabled,
+        train_days,
+        top,
+    )
+    .await;
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
 #[derive(serde::Deserialize)]
 struct PaperTradeRunQuery {
     quantile: Option<f64>,
     short_enabled: Option<bool>,
     train_days: Option<usize>,
+    top: Option<usize>,
 }
 
 async fn paper_trade_run_handler(
@@ -609,10 +689,23 @@ async fn paper_trade_run_handler(
             .unwrap_or(true)
     });
     let train_days = q.train_days.unwrap_or(120).max(60);
+    let top = q.top.unwrap_or(default_top_selection_size()).max(3);
+    let selected_symbols =
+        match resolve_hybrid_selected_symbols(&state, quantile, short_enabled, train_days, top).await {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error": e})),
+                )
+                    .into_response()
+            }
+        };
 
     match paper_trade::paper_trade_run(
         client,
         &resolved_conids,
+        &selected_symbols,
         redis,
         quantile,
         short_enabled,
@@ -690,6 +783,7 @@ struct PaperTradeBackfillQuery {
     quantile: Option<f64>,
     short_enabled: Option<bool>,
     overwrite: Option<bool>,
+    top: Option<usize>,
 }
 
 async fn paper_trade_backfill_handler(
@@ -724,9 +818,22 @@ async fn paper_trade_backfill_handler(
     let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
     let short_enabled = q.short_enabled.unwrap_or(true);
     let overwrite = q.overwrite.unwrap_or(false);
+    let top = q.top.unwrap_or(default_top_selection_size()).max(3);
+    let selected_symbols =
+        match resolve_hybrid_selected_symbols(&state, quantile, short_enabled, 120, top).await {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error": e})),
+                )
+                    .into_response()
+            }
+        };
     match paper_trade::paper_trade_backfill(
         client,
         &resolved_conids,
+        &selected_symbols,
         redis,
         days,
         quantile,
@@ -749,6 +856,7 @@ struct PaperTradeOrderPlanQuery {
     quantile: Option<f64>,
     short_enabled: Option<bool>,
     train_days: Option<usize>,
+    top: Option<usize>,
 }
 
 async fn paper_trade_order_plan_handler(
@@ -769,6 +877,7 @@ async fn paper_trade_order_plan_handler(
     let quantile = q.quantile.unwrap_or(0.2).clamp(0.05, 0.45);
     let short_enabled = q.short_enabled.unwrap_or(true);
     let train_days = q.train_days.unwrap_or(120).max(60);
+    let top = q.top.unwrap_or(default_top_selection_size()).max(3);
 
     // Snapshot watchlist prices + conids without holding the lock over awaits.
     let (resolved_conids, watchlist_as_of, price_by_symbol) = {
@@ -782,7 +891,18 @@ async fn paper_trade_order_plan_handler(
         (g.resolved_conids.clone(), g.as_of.clone(), price_by_symbol)
     };
 
-    let pairs: Vec<(String, u64)> = watchlist::DEFAULT_SYMBOLS
+    let selected_symbols =
+        match resolve_hybrid_selected_symbols(&state, quantile, short_enabled, train_days, top).await {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error": e})),
+                )
+                    .into_response()
+            }
+        };
+    let pairs: Vec<(String, u64)> = selected_symbols
         .iter()
         .filter_map(|s| {
             let n = s.trim().to_ascii_uppercase();

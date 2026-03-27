@@ -11,6 +11,7 @@ const HISTORY_URL = '/api/v1/stock-service/history';
 const TODAY_URL = '/api/v1/stock-service/today';
 const DAILY_SIGNALS_MODEL_URL = '/api/v1/stock-service/daily-signals/model?train_days=120&quantile=0.2&short=true';
 const DAILY_SIGNALS_PHASE1_URL = '/api/v1/stock-service/daily-signals?backtest=true';
+const SELECTION_URL = '/api/v1/stock-service/selection?top=20&quantile=0.2&short=true&train_days=120';
 const PAPER_TRADE_STATUS_URL = '/api/v1/stock-service/paper-trade/status';
 const PAPER_TRADE_RECORDS_URL = '/api/v1/stock-service/paper-trade/records?limit=5';
 const PAPER_TRADE_BACKFILL_URL = '/api/v1/stock-service/paper-trade/backfill?days=60&quantile=0.2&short_enabled=true&overwrite=true';
@@ -20,6 +21,7 @@ const WATCHLIST_REFRESH_MS = 60_000;
 const DAILY_SIGNALS_REFRESH_MS = 5 * 60_000;
 const PAPER_TRADE_REFRESH_MS = 5 * 60_000;
 const ORDER_PLAN_REFRESH_MS = 5 * 60_000;
+const SELECTION_REFRESH_MS = 5 * 60_000;
 
 /* ViewBox coordinates — SVG scales to 100% width of container via CSS */
 const CHART_WIDTH = 960;
@@ -103,6 +105,9 @@ export default function StockServicePage() {
   const [dailySignals, setDailySignals] = useState(null);
   const [dailySignalsLoading, setDailySignalsLoading] = useState(true);
   const [dailySignalsError, setDailySignalsError] = useState(null);
+  const [selection, setSelection] = useState(null);
+  const [selectionLoading, setSelectionLoading] = useState(true);
+  const [selectionError, setSelectionError] = useState(null);
   const [dailySignalsSource, setDailySignalsSource] = useState('model');
   const [showSignalsJson, setShowSignalsJson] = useState(false);
 
@@ -205,6 +210,23 @@ export default function StockServicePage() {
       .finally(() => setDailySignalsLoading(false));
   }, []);
 
+  const loadSelection = useCallback(() => {
+    setSelectionLoading(true);
+    setSelectionError(null);
+    fetch(SELECTION_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(j?.error || `Selection request failed (${r.status}).`);
+        return j;
+      })
+      .then((j) => setSelection(j))
+      .catch((e) => {
+        setSelection(null);
+        setSelectionError(String(e?.message || e));
+      })
+      .finally(() => setSelectionLoading(false));
+  }, []);
+
   const loadPaperTradeStatus = useCallback(() => {
     setPaperTradeLoading(true);
     setPaperTradeError(null);
@@ -248,6 +270,12 @@ export default function StockServicePage() {
     const id = setInterval(loadDailySignals, DAILY_SIGNALS_REFRESH_MS);
     return () => clearInterval(id);
   }, [loadDailySignals]);
+
+  useEffect(() => {
+    loadSelection();
+    const id = setInterval(loadSelection, SELECTION_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadSelection]);
 
   useEffect(() => {
     loadPaperTradeStatus();
@@ -937,6 +965,60 @@ export default function StockServicePage() {
                   )}
                 </div>
               )}
+              <div className="stock-service-paper-plan">
+                <div className="stock-service-paper-plan-head">
+                  <span className="stock-service-paper-plan-title">Dynamic Selection (hybrid)</span>
+                  {!selectionLoading && selection && (
+                    <span className="stock-service-paper-plan-sub">
+                      universe={Number(selection.universe_size || 0)} selected={Number(selection.selected_size || 0)} price-priority&lt;=${Number(selection.price_priority_usd || 50).toFixed(0)}
+                    </span>
+                  )}
+                </div>
+                {selectionLoading && <p className="stock-service-loading">Loading selection…</p>}
+                {!selectionLoading && selectionError && (
+                  <p className="stock-service-error" role="alert">{selectionError}</p>
+                )}
+                {!selectionLoading && selection && (
+                  <>
+                    <div className="stock-service-paper-plan-totals">
+                      <span>wDaily: <b>{Number(selection?.weights?.daily || 0).toFixed(2)}</b></span>
+                      <span>wIntraday: <b>{Number(selection?.weights?.intraday || 0).toFixed(2)}</b></span>
+                      <span>wUnder50: <b>{Number(selection?.weights?.under50 || 0).toFixed(2)}</b></span>
+                      <span>wRisk: <b>{Number(selection?.weights?.risk || 0).toFixed(2)}</b></span>
+                    </div>
+                    <div className="stock-service-table-wrap" style={{ marginTop: '0.35rem' }}>
+                      <table className="stock-service-watchlist-table" aria-label="Dynamic hybrid selected symbols">
+                        <thead>
+                          <tr>
+                            <th>Symbol</th>
+                            <th className="stock-service-th-number">Price</th>
+                            <th className="stock-service-th-number">Hybrid</th>
+                            <th className="stock-service-th-number">Daily</th>
+                            <th className="stock-service-th-number">Intraday</th>
+                            <th className="stock-service-th-number">Under50</th>
+                            <th className="stock-service-th-number">Risk</th>
+                            <th>Why selected</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selection.selected || []).slice(0, 12).map((c) => (
+                            <tr key={c.symbol}>
+                              <td className="stock-service-wl-symbol">{c.symbol}</td>
+                              <td className="stock-service-td-number">{c.price != null ? Number(c.price).toFixed(2) : '—'}</td>
+                              <td className="stock-service-td-number">{Number(c.hybrid_score || 0).toFixed(3)}</td>
+                              <td className="stock-service-td-number">{Number(c.daily_score || 0).toFixed(3)}</td>
+                              <td className="stock-service-td-number">{Number(c.intraday_score || 0).toFixed(3)}</td>
+                              <td className="stock-service-td-number">{Number(c.under50_bonus || 0).toFixed(2)}</td>
+                              <td className="stock-service-td-number">{Number(c.risk_penalty || 0).toFixed(2)}</td>
+                              <td className="stock-service-selection-reasons">{(c.reasons || []).join(', ')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
               <div className="stock-service-paper-card">
                 <div className="stock-service-paper-header">
                   <h3 className="stock-service-paper-title">Paper trade</h3>

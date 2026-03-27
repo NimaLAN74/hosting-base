@@ -2,6 +2,9 @@ name: Stock Service Phase 2 – LightGBM Train (Research)
 
 on:
   workflow_dispatch:
+  schedule:
+    # Recalibration on weekdays after market close.
+    - cron: "20 21 * * 1-5"
 
 permissions:
   contents: read
@@ -49,5 +52,17 @@ jobs:
             --train-days "$TRAIN_DAYS" \
             --test-days "$TEST_DAYS" \
             --sample-rows "$SAMPLE_ROWS" \
+            --insecure-ssl
+
+      - name: Promotion gate - validate dynamic selection health
+        run: |
+          python lianel/dc/stock-service/scripts/validate_dynamic_selection.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --quantile "$QUANTILE" \
+            --short "$SHORT_ENABLED" \
+            --train-days "$TRAIN_DAYS" \
+            --top 20 \
+            --min-selected 8 \
+            --max-missing-price-ratio 0.35 \
             --insecure-ssl
 

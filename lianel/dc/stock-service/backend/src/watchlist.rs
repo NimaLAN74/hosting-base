@@ -5,6 +5,7 @@ use crate::today_cache;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing;
@@ -13,10 +14,50 @@ const REFRESH_INTERVAL_SECS: u64 = 60;
 /// 31 = last; 84/86 = bid/ask (used when last is empty — delayed data / pre-flight).
 const SNAPSHOT_FIELDS: &str = "31,84,86";
 
-/// Default 10 common symbols (US large cap). Conids from IBKR for these symbols.
-pub const DEFAULT_SYMBOLS: &[&str] = &[
+/// Global liquid fallback universe (biased toward lower-price symbols first).
+/// Runtime override: `STOCK_DYNAMIC_UNIVERSE_SYMBOLS` (comma-separated symbols).
+const GLOBAL_LIQUID_FALLBACK: &[&str] = &[
+    // Lower-price names first (priority bias, not hard cap)
+    "F", "INTC", "BAC", "PFE", "NOK", "SOFI", "NIO", "RIVN", "CCL", "AAL",
+    "PBR", "VALE", "BABA", "UBER", "GM", "T", "VZ", "CSCO", "WBA", "SNAP",
+    // Core liquid leaders
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "JPM", "V", "JNJ",
+    // Additional global liquid exposure (ADR/international)
+    "ASML", "TM", "SONY", "SHEL", "BP", "RIO", "BIDU", "INFY", "NTES", "HSBC",
 ];
+
+fn parse_dynamic_universe_symbols() -> Vec<&'static str> {
+    let parsed = std::env::var("STOCK_DYNAMIC_UNIVERSE_SYMBOLS")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_ascii_uppercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let source = if parsed.is_empty() {
+        GLOBAL_LIQUID_FALLBACK
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    } else {
+        parsed
+    };
+    source
+        .into_iter()
+        .filter(|s| seen.insert(s.clone()))
+        .map(|s| Box::leak(s.into_boxed_str()) as &'static str)
+        .collect()
+}
+
+/// Dynamic symbol universe loaded once at runtime.
+pub static DEFAULT_SYMBOLS: LazyLock<Vec<&'static str>> = LazyLock::new(parse_dynamic_universe_symbols);
+
+pub fn configured_watchlist_symbols() -> &'static [&'static str] {
+    DEFAULT_SYMBOLS.as_slice()
+}
 
 /// Symbol → conid for default watchlist (IBKR US stock conids).
 /// Refreshed from `/trsrv/stocks` each cycle when possible; these are fallbacks if trsrv fails.
@@ -42,7 +83,7 @@ fn norm_sym(s: &str) -> String {
 /// True if `symbol` is one of the fixed watchlist tickers.
 pub fn is_watchlist_symbol(symbol: &str) -> bool {
     let n = norm_sym(symbol);
-    DEFAULT_SYMBOLS.iter().any(|s| norm_sym(s) == n)
+    configured_watchlist_symbols().iter().any(|s| norm_sym(s) == n)
 }
 
 /// Static fallback conid (for tests and last-resort). Prefer [`get_conid_with_cache`] after a refresh.
@@ -58,6 +99,14 @@ pub fn get_conid_with_cache(symbol: &str, cache: &WatchlistCache) -> Option<u64>
         .get(&n)
         .copied()
         .or_else(|| get_conid_for_symbol(&n))
+}
+
+/// Active symbol-conid pairs in configured watchlist order.
+pub fn active_symbol_conid_pairs(cache: &WatchlistCache) -> Vec<(String, u64)> {
+    configured_watchlist_symbols()
+        .iter()
+        .filter_map(|s| get_conid_with_cache(s, cache).map(|c| ((*s).to_string(), c)))
+        .collect()
 }
 
 /// Resolve symbols to conids via IBKR GET /trsrv/stocks.
@@ -286,7 +335,7 @@ pub struct WatchlistCache {
 
 impl Default for WatchlistCache {
     fn default() -> Self {
-        let symbols: Vec<WatchlistQuote> = DEFAULT_SYMBOLS
+        let symbols: Vec<WatchlistQuote> = configured_watchlist_symbols()
             .iter()
             .map(|s| WatchlistQuote {
                 symbol: (*s).to_string(),
@@ -337,11 +386,11 @@ pub async fn refresh_from_ibkr(
     // Resolve symbols to conids via IBKR so we use correct conids (fixes missing prices for some symbols).
     // If it fails, we keep using the hardcoded defaults.
     let conids_map = if let Some(ref client) = ibkr_client {
-        fetch_conids_from_trsrv(client.as_ref(), base_url, DEFAULT_SYMBOLS).await
+        fetch_conids_from_trsrv(client.as_ref(), base_url, configured_watchlist_symbols()).await
     } else {
         default_symbol_conids()
     };
-    let conids_list: Vec<u64> = DEFAULT_SYMBOLS
+    let conids_list: Vec<u64> = configured_watchlist_symbols()
         .iter()
         .filter_map(|s| conids_map.get(*s).copied())
         .collect();
@@ -355,7 +404,7 @@ pub async fn refresh_from_ibkr(
     let Some(client) = ibkr_client else {
         let mut next = WatchlistCache::default();
         next.as_of = as_of.clone();
-        for s in DEFAULT_SYMBOLS {
+        for s in configured_watchlist_symbols().iter() {
             next.quotes.insert(
                 (*s).to_string(),
                 WatchlistQuote {
@@ -386,7 +435,7 @@ pub async fn refresh_from_ibkr(
                 tracing::warn!("Watchlist IBKR sign_request failed: {}", e);
                 let mut next = WatchlistCache::default();
                 next.as_of = as_of.clone();
-                for s in DEFAULT_SYMBOLS {
+                for s in configured_watchlist_symbols().iter() {
                     next.quotes.insert(
                         (*s).to_string(),
                         WatchlistQuote {
@@ -414,7 +463,7 @@ pub async fn refresh_from_ibkr(
             tracing::warn!("Watchlist IBKR tickle (session) failed: {}", e);
             let mut next = WatchlistCache::default();
             next.as_of = as_of.clone();
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -499,7 +548,7 @@ pub async fn refresh_from_ibkr(
             if !status.is_success() {
                 let mut next = WatchlistCache::default();
                 next.as_of = as_of.clone();
-                for s in DEFAULT_SYMBOLS {
+                for s in configured_watchlist_symbols().iter() {
                     next.quotes.insert(
                         (*s).to_string(),
                         WatchlistQuote {
@@ -523,7 +572,7 @@ pub async fn refresh_from_ibkr(
             tracing::warn!("Watchlist IBKR /accounts pre-call request error");
             let mut next = WatchlistCache::default();
             next.as_of = as_of.clone();
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -552,7 +601,7 @@ pub async fn refresh_from_ibkr(
             tracing::warn!("Watchlist IBKR snapshot request failed: {}", e);
             let mut next = WatchlistCache::default();
             next.as_of = as_of.clone();
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -577,7 +626,7 @@ pub async fn refresh_from_ibkr(
             tracing::warn!("Watchlist IBKR snapshot body read failed (status {}): {}", status, e);
             let mut next = WatchlistCache::default();
             next.as_of = as_of.clone();
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -695,7 +744,7 @@ pub async fn refresh_from_ibkr(
                     },
                 );
             }
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 if !next.quotes.contains_key(*s) {
                     next.quotes.insert(
                         (*s).to_string(),
@@ -715,7 +764,7 @@ pub async fn refresh_from_ibkr(
             let err_msg = ibkr_error_from_value(&v)
                 .unwrap_or_else(|| format!("IBKR error (status {})", status));
             tracing::warn!("Watchlist IBKR snapshot error response: {}", err_msg);
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -729,7 +778,7 @@ pub async fn refresh_from_ibkr(
             }
         }
         Ok(_) => {
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -758,7 +807,7 @@ pub async fn refresh_from_ibkr(
                 format!("IBKR {} (status {}): {}", hint, status, e)
             });
             tracing::warn!("Watchlist IBKR snapshot parse failed: {}", err_msg);
-            for s in DEFAULT_SYMBOLS {
+            for s in configured_watchlist_symbols().iter() {
                 next.quotes.insert(
                     (*s).to_string(),
                     WatchlistQuote {
@@ -943,7 +992,7 @@ pub fn spawn_watchlist_ticker(
 
 /// Fallback response when cache is unavailable (avoids 502).
 pub fn fallback_response() -> WatchlistResponse {
-    let symbols: Vec<WatchlistQuote> = DEFAULT_SYMBOLS
+    let symbols: Vec<WatchlistQuote> = configured_watchlist_symbols()
         .iter()
         .map(|s| WatchlistQuote {
             symbol: (*s).to_string(),
@@ -970,7 +1019,7 @@ pub async fn get_watchlist_response(cache: &RwLock<WatchlistCache>) -> Watchlist
         }
     };
     let g = read_guard;
-    let symbols: Vec<WatchlistQuote> = DEFAULT_SYMBOLS
+    let symbols: Vec<WatchlistQuote> = configured_watchlist_symbols()
         .iter()
         .map(|s| {
             g.quotes.get(*s).cloned().unwrap_or_else(|| WatchlistQuote {

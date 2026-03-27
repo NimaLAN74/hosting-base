@@ -516,6 +516,14 @@
   flex-wrap: wrap;
 }
 
+.stock-service-selection-reasons {
+  max-width: 320px;
+  font-size: 0.82rem;
+  color: #475569;
+  white-space: normal;
+  line-height: 1.35;
+}
+
 .stock-service-paper-trade-equity {
   background: #ffffff;
   border: 1px solid #e2e8f0;
