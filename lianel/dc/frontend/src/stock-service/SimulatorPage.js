@@ -533,6 +533,9 @@ export default function SimulatorPage() {
                   {Object.keys(decisionFeatures).length === 0 && <p className="sim-note">No feature payload.</p>}
                 </div>
                 <div className="sim-subtitle">Model Rationale</div>
+                {explainData?.decision?.short_explanation && (
+                  <p className="sim-note"><b>Short explanation:</b> {explainData.decision.short_explanation}</p>
+                )}
                 <ul className="sim-list">
                   {(explainData?.decision?.rationale || []).map((r) => <li key={r}>{r}</li>)}
                   {(explainData?.decision?.rationale || []).length === 0 && <li>No rationale entries.</li>}
@@ -542,7 +545,12 @@ export default function SimulatorPage() {
                   {(explainData?.fills || []).map((f) => (
                     <div key={`${f.exec_ts}-${f.order_id || f.decision_id}`} className="sim-kv-row">
                       <span>{fmtTs(f.exec_ts)} · {f.order_id || f.decision_id}</span>
-                      <span>PnL ${Number(f.pnl_usd || 0).toFixed(2)} (fee ${Number(f.fee_usd || 0).toFixed(2)}, slip ${Number(f.slippage_usd || 0).toFixed(2)})</span>
+                      <span>
+                        Buy ${Number(f.buy_px || 0).toFixed(4)} ({f.buy_session_time_utc || 'open'}) →
+                        Sell ${Number(f.sell_px || 0).toFixed(4)} ({f.sell_session_time_utc || 'close'}) |
+                        PnL ${Number(f.pnl_usd || 0).toFixed(2)} | total cost ${Number(f.total_cost_usd || 0).toFixed(2)}
+                        {' '}({`ibkr ${Number(f.ibkr_commission_usd || 0).toFixed(2)}, ex ${Number(f.exchange_fee_usd || 0).toFixed(2)}, clear ${Number(f.clearing_fee_usd || 0).toFixed(2)}, reg ${Number(f.regulatory_fee_usd || 0).toFixed(2)}, fx ${Number(f.fx_fee_usd || 0).toFixed(2)}, tax ${Number(f.tax_usd || 0).toFixed(2)}, slip ${Number(f.slippage_usd || 0).toFixed(2)}, impact ${Number(f.market_impact_usd || 0).toFixed(2)}, borrow ${Number(f.borrow_fee_usd || 0).toFixed(2)}`})
+                      </span>
                     </div>
                   ))}
                   {(explainData?.fills || []).length === 0 && <p className="sim-note">No fills linked to decision.</p>}
