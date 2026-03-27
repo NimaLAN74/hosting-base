@@ -7,5 +7,6 @@ pub mod daily_strategy;
 pub mod hybrid_selector;
 pub mod ibkr;
 pub mod paper_trade;
+pub mod simulator;
 pub mod today_cache;
 pub mod watchlist;

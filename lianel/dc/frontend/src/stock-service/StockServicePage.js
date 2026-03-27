@@ -877,6 +877,8 @@ export default function StockServicePage() {
       <div className="stock-service-content">
         <p className="stock-service-explainer">
           <Link to="/stock/gateway" className="stock-service-gateway-link">Gateway session</Link> (paste cookie when needed)
+          {' · '}
+          <Link to="/stock/simulator" className="stock-service-gateway-link">Replay simulator</Link>
         </p>
         <section className="stock-service-card stock-service-signals-card">
           <h2 className="stock-service-card-title">Daily Signals (next open → next close)</h2>

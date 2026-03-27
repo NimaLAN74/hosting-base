@@ -1,0 +1,132 @@
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.sim-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 0.9rem;
+}
+
+.sim-card h3 {
+  margin: 0 0 0.5rem 0;
+}
+
+.sim-note {
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.sim-error {
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
+.sim-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+}
+
+.sim-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.sim-form-grid input[type="number"] {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.4rem 0.45rem;
+}
+
+.sim-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.sim-btn {
+  border: none;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #fff;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+.sim-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.sim-runs-list,
+.sim-decision-list,
+.sim-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.sim-run-row,
+.sim-event-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+.sim-run-row {
+  text-align: left;
+  cursor: pointer;
+}
+
+.sim-run-row.active {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.sim-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.sim-finding {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: 8px;
+  padding: 0.5rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.86rem;
+}
+
+.sim-json {
+  margin-top: 0.6rem;
+  max-height: 300px;
+  overflow: auto;
+  background: #111827;
+  color: #e5e7eb;
+  border-radius: 8px;
+  padding: 0.6rem;
+  font-size: 0.75rem;
+}
+

@@ -1,0 +1,44 @@
+name: Stock Service Simulator Validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 2 * * 1-5"
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "lianel/dc/stock-service/backend/src/simulator/**"
+      - "lianel/dc/stock-service/backend/src/app.rs"
+      - "lianel/dc/stock-service/scripts/validate_simulator_api.py"
+      - ".github/workflows/stock-service-simulator-validation.yml"
+
+permissions:
+  contents: read
+
+env:
+  STOCK_SERVICE_BASE_URL: ${{ vars.STOCK_SERVICE_BASE_URL || 'https://www.lianel.se' }}
+
+jobs:
+  validate_simulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run simulator API validation
+        env:
+          STOCK_SERVICE_BASE_URL: ${{ env.STOCK_SERVICE_BASE_URL }}
+        run: |
+          python lianel/dc/stock-service/scripts/validate_simulator_api.py \
+            --base-url "$STOCK_SERVICE_BASE_URL" \
+            --insecure-ssl \
+            --days 7
+
