@@ -91,8 +91,23 @@ def main():
                     "not enough aligned days",
                 )
             )
+            upstream_data_unavailable = exc.status == 400 and any(
+                token in body
+                for token in (
+                    "history failed 500",
+                    "Chart data unavailable",
+                )
+            )
             if data_limited:
                 print(f"simulator_validation=skipped_data_limited status={exc.status}")
+                print(body[:400])
+                return
+            if upstream_data_unavailable and attempt < 6:
+                print(f"start_run_retry_upstream attempt={attempt} status={exc.status}")
+                time.sleep(5)
+                continue
+            if upstream_data_unavailable:
+                print(f"simulator_validation=skipped_upstream_data_unavailable status={exc.status}")
                 print(body[:400])
                 return
             if transient and attempt < 6:
