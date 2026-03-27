@@ -28,6 +28,10 @@ pub struct SimRunRequest {
     pub reinvest_profit: bool,
     #[serde(default = "default_replay_delay_ms")]
     pub replay_delay_ms: u64,
+    #[serde(default = "default_readiness_min_days")]
+    pub readiness_min_days: usize,
+    #[serde(default = "default_max_cycles")]
+    pub max_cycles: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +47,14 @@ pub struct SimRunMeta {
     pub initial_capital_usd: f64,
     pub ending_equity_usd: Option<f64>,
     pub pnl_usd: Option<f64>,
+    #[serde(default)]
+    pub cycles_completed: usize,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub readiness_score: Option<f64>,
+    #[serde(default)]
+    pub readiness_passed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +97,34 @@ pub struct SimFillLedgerRow {
     pub slippage_usd: f64,
     pub pnl_usd: f64,
     pub latency_ms: u64,
+    #[serde(default)]
+    pub order_id: Option<String>,
+    #[serde(default = "default_fill_ratio")]
+    pub fill_ratio: f64,
+    #[serde(default)]
+    pub borrow_fee_usd: f64,
+    #[serde(default)]
+    pub market_impact_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimOrderLedgerRow {
+    pub order_id: String,
+    pub decision_id: String,
+    pub run_id: String,
+    pub ts: u64,
+    pub symbol: String,
+    pub exchange: String,
+    pub side: String,
+    pub order_type: String,
+    pub tif: String,
+    pub qty_notional_usd: f64,
+    pub intended_px: f64,
+    pub status: String,
+    pub filled_notional_usd: f64,
+    pub remaining_notional_usd: f64,
+    pub venue_latency_ms: u64,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +132,33 @@ pub struct SimPortfolioPoint {
     pub ts: u64,
     pub equity_usd: f64,
     pub pnl_cum_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimRiskSnapshot {
+    pub run_id: String,
+    pub ts: u64,
+    pub equity_usd: f64,
+    pub cash_usd: f64,
+    pub gross_exposure_usd: f64,
+    pub leverage: f64,
+    pub drawdown: f64,
+    pub var_95_1d: f64,
+    pub concentration_hhi: f64,
+    pub benchmark_equity_usd: f64,
+    pub relative_return: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimReadinessReport {
+    pub run_id: String,
+    pub status: String,
+    pub min_days_required: usize,
+    pub evaluated_days: usize,
+    pub score: f64,
+    pub pass: bool,
+    pub criteria: serde_json::Value,
+    pub recommendation: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +198,15 @@ fn default_reinvest() -> bool {
 fn default_replay_delay_ms() -> u64 {
     250
 }
+fn default_fill_ratio() -> f64 {
+    1.0
+}
+fn default_readiness_min_days() -> usize {
+    126
+}
+fn default_max_cycles() -> usize {
+    2_000
+}
 
 fn now_ts() -> u64 {
     SystemTime::now()
@@ -162,6 +238,18 @@ fn run_curve_key(run_id: &str) -> String {
 }
 fn run_bias_key(run_id: &str) -> String {
     format!("sim:run:{run_id}:bias_findings")
+}
+fn run_orders_key(run_id: &str) -> String {
+    format!("sim:run:{run_id}:orders")
+}
+fn run_risk_key(run_id: &str) -> String {
+    format!("sim:run:{run_id}:risk_snapshots")
+}
+fn run_readiness_key(run_id: &str) -> String {
+    format!("sim:run:{run_id}:readiness")
+}
+fn run_control_key(run_id: &str) -> String {
+    format!("sim:run:{run_id}:control")
 }
 
 async fn append_json<T: Serialize>(
@@ -281,6 +369,65 @@ pub async fn get_bias_report(
         .collect())
 }
 
+pub async fn get_order_ledger(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    limit: usize,
+) -> Result<Vec<SimOrderLedgerRow>, String> {
+    let mut conn = redis.clone();
+    let rows: Vec<String> = conn
+        .lrange(run_orders_key(run_id), 0, (limit.max(1) as isize) - 1)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| serde_json::from_str::<SimOrderLedgerRow>(&r).ok())
+        .collect())
+}
+
+pub async fn get_risk_snapshots(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    limit: usize,
+) -> Result<Vec<SimRiskSnapshot>, String> {
+    let mut conn = redis.clone();
+    let rows: Vec<String> = conn
+        .lrange(run_risk_key(run_id), 0, (limit.max(1) as isize) - 1)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| serde_json::from_str::<SimRiskSnapshot>(&r).ok())
+        .collect())
+}
+
+pub async fn get_readiness_report(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+) -> Result<Option<SimReadinessReport>, String> {
+    let mut conn = redis.clone();
+    let raw: Option<String> = conn.get(run_readiness_key(run_id)).await.map_err(|e| e.to_string())?;
+    match raw {
+        Some(v) => serde_json::from_str::<SimReadinessReport>(&v)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+pub async fn set_control_action(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    action: &str,
+) -> Result<(), String> {
+    let mut conn = redis.clone();
+    let _: () = conn
+        .set(run_control_key(run_id), action.to_ascii_lowercase())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn explain_decision(
     redis: &redis::aio::ConnectionManager,
     run_id: &str,
@@ -329,6 +476,90 @@ pub async fn explain_decision(
     }))
 }
 
+fn compute_hhi(weights: &[f64]) -> f64 {
+    weights.iter().map(|w| w * w).sum::<f64>()
+}
+
+fn compute_readiness(
+    run_id: &str,
+    min_days_required: usize,
+    risk_series: &[SimRiskSnapshot],
+    daily_pnls: &[f64],
+    data_gaps: usize,
+    explain_coverage: f64,
+) -> SimReadinessReport {
+    let evaluated_days = daily_pnls.len();
+    let avg_daily_pnl = if daily_pnls.is_empty() {
+        0.0
+    } else {
+        daily_pnls.iter().sum::<f64>() / daily_pnls.len() as f64
+    };
+    let max_drawdown = risk_series
+        .iter()
+        .map(|r| r.drawdown)
+        .fold(0.0_f64, f64::max);
+    let max_leverage = risk_series
+        .iter()
+        .map(|r| r.leverage)
+        .fold(0.0_f64, f64::max);
+    let max_var = risk_series
+        .iter()
+        .map(|r| r.var_95_1d)
+        .fold(0.0_f64, f64::max);
+    let avg_relative = if risk_series.is_empty() {
+        0.0
+    } else {
+        risk_series.iter().map(|r| r.relative_return).sum::<f64>() / risk_series.len() as f64
+    };
+    let gate_days = evaluated_days >= min_days_required;
+    let gate_drawdown = max_drawdown <= 0.25;
+    let gate_var = max_var <= 0.06;
+    let gate_leverage = max_leverage <= 1.8;
+    let gate_perf = avg_daily_pnl > 0.0 && avg_relative > 0.0;
+    let gap_ratio = if evaluated_days == 0 {
+        1.0
+    } else {
+        data_gaps as f64 / evaluated_days as f64
+    };
+    let gate_data = gap_ratio <= 0.10;
+    let gate_explain = explain_coverage >= 0.98;
+    let gates = [gate_days, gate_drawdown, gate_var, gate_leverage, gate_perf, gate_data, gate_explain];
+    let score = gates.iter().filter(|g| **g).count() as f64 / gates.len() as f64;
+    let pass = gates.iter().all(|g| *g);
+    let recommendation = if pass {
+        "READY_FOR_REAL_MONEY"
+    } else if gate_perf && gate_data && gate_explain {
+        "PROMISING_BUT_RISK_TUNING_REQUIRED"
+    } else {
+        "NOT_READY_CONTINUE_SIMULATION"
+    };
+    SimReadinessReport {
+        run_id: run_id.to_string(),
+        status: if pass { "pass" } else { "fail" }.to_string(),
+        min_days_required,
+        evaluated_days,
+        score,
+        pass,
+        criteria: json!({
+            "gate_days": gate_days,
+            "gate_drawdown": gate_drawdown,
+            "gate_var_95_1d": gate_var,
+            "gate_leverage": gate_leverage,
+            "gate_performance_vs_benchmark": gate_perf,
+            "gate_data_quality": gate_data,
+            "gate_explainability": gate_explain,
+            "avg_daily_pnl": avg_daily_pnl,
+            "avg_relative_return": avg_relative,
+            "max_drawdown": max_drawdown,
+            "max_var_95_1d": max_var,
+            "max_leverage": max_leverage,
+            "data_gap_ratio": gap_ratio,
+            "explainability_coverage": explain_coverage
+        }),
+        recommendation: recommendation.to_string(),
+    }
+}
+
 pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRunMeta, String> {
     let redis = state
         .redis
@@ -345,6 +576,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     req.top = req.top.max(6).min(40);
     req.quantile = req.quantile.clamp(0.05, 0.45);
     req.initial_capital_usd = req.initial_capital_usd.max(25.0);
+    req.readiness_min_days = req.readiness_min_days.max(30).min(365 * 3);
+    req.max_cycles = req.max_cycles.max(req.readiness_min_days).min(20_000);
 
     let run_id = generate_run_id();
     let created_at = now_ts();
@@ -451,6 +684,10 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         initial_capital_usd: req.initial_capital_usd,
         ending_equity_usd: None,
         pnl_usd: None,
+        cycles_completed: 0,
+        stop_reason: None,
+        readiness_score: None,
+        readiness_passed: None,
     };
     set_meta(&redis, &meta).await?;
     {
@@ -476,10 +713,17 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     tokio::spawn(async move {
         let mut meta = meta_for_task;
         let mut equity = req.initial_capital_usd;
+        let mut benchmark_equity = req.initial_capital_usd;
+        let mut cash_usd = req.initial_capital_usd;
+        let mut peak_equity = req.initial_capital_usd.max(1.0);
         let mut findings: Vec<SimBiasFinding> = Vec::new();
         let mut exchange_leg_count: HashMap<String, usize> = HashMap::new();
         let mut missing_price_rows = 0usize;
         let mut total_rows = 0usize;
+        let mut daily_pnls: Vec<f64> = Vec::new();
+        let mut risk_snapshots: Vec<SimRiskSnapshot> = Vec::new();
+        let mut total_decisions = 0usize;
+        let mut explained_decisions = 0usize;
 
         meta.status = "running".to_string();
         meta.started_at_ts = Some(now_ts());
@@ -493,18 +737,43 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         )
         .await;
 
-        for day_idx in 1..replay_ts.len() {
+        let mut day_idx = 1usize;
+        let mut cycle_idx = 0usize;
+        let mut stop_reason = "MAX_CYCLES_REACHED".to_string();
+        while cycle_idx < req.max_cycles {
+            let control: Option<String> = {
+                let mut conn = redis.clone();
+                conn.get(run_control_key(&run_id_cloned)).await.ok()
+            };
+            if let Some(action) = control {
+                if action == "stop" {
+                    stop_reason = "MANUAL_STOP".to_string();
+                    break;
+                }
+                if action == "pause" {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+            }
+            if replay_ts.len() < 2 {
+                stop_reason = "NO_REPLAY_WINDOW".to_string();
+                break;
+            }
+            if day_idx >= replay_ts.len() {
+                day_idx = 1;
+            }
             let exec_ts = replay_ts[day_idx];
             let decision_ts = replay_ts[day_idx - 1];
 
             let mut decision_rows: Vec<SimDecisionTrace> = Vec::new();
             let mut fills: Vec<SimFillLedgerRow> = Vec::new();
+            let mut orders: Vec<SimOrderLedgerRow> = Vec::new();
             let symbols: Vec<String> = bars_by_symbol.keys().cloned().collect();
             let symbol_count = symbols.len();
             let per_leg_notional = if symbol_count == 0 {
                 0.0
             } else {
-                equity / symbol_count as f64
+                equity.max(0.0) / symbol_count as f64
             };
 
             let _ = push_event(
@@ -544,11 +813,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 let side = if ret_prev >= 0.0 { "LONG" } else { "SHORT" }.to_string();
                 let exchange = exchanges::infer_exchange(&sym);
                 *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
+                let is_halt = (next_bar.high - next_bar.low).abs() <= f64::EPSILON;
                 let (hybrid_score, rationale) = selected_scores
                     .get(&sym)
                     .cloned()
                     .unwrap_or((0.0, vec!["not-selected-fallback".to_string()]));
                 let decision_id = format!("d-{}-{}", decision_ts, sym);
+                let mut rationale_extended = rationale.clone();
+                rationale_extended.push(format!("session_open_utc={}", exchange.session_open_utc));
+                rationale_extended.push(format!("session_close_utc={}", exchange.session_close_utc));
                 let trace = SimDecisionTrace {
                     decision_id: decision_id.clone(),
                     run_id: run_id_cloned.clone(),
@@ -566,16 +839,99 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "ret_prev_ln": ret_prev,
                         "next_open": next_bar.open,
                         "next_close": next_bar.close,
+                        "spread_bps": exchange.spread_bps,
+                        "depth_notional_usd": exchange.depth_notional_usd,
+                        "auction_window": exchange.auction_window,
+                        "borrow_available": exchange.short_borrow_available,
+                        "is_halt": is_halt,
                     }),
-                    rationale,
+                    rationale: rationale_extended,
                 };
                 decision_rows.push(trace.clone());
+                total_decisions += 1;
+                explained_decisions += 1;
+
+                let order_id = format!("o-{}-{}", exec_ts, sym);
+                let order_type = if exchange.auction_window { "MOO" } else { "LIMIT" };
+                let mut order_reasons = vec![
+                    format!("hybrid_score={:.6}", hybrid_score),
+                    format!("ret_prev_ln={:.6}", ret_prev),
+                    format!("exchange={}", exchange.code),
+                    format!("borrow_available={}", exchange.short_borrow_available),
+                ];
+                if is_halt {
+                    order_reasons.push("simulated_halt_spread_widened".to_string());
+                }
+                let short_blocked = side == "SHORT" && !exchange.short_borrow_available;
+                let fill_ratio = if short_blocked { 0.0 } else if per_leg_notional > exchange.depth_notional_usd {
+                    (exchange.depth_notional_usd / per_leg_notional).clamp(0.1, 1.0)
+                } else {
+                    1.0
+                };
+                let submitted = SimOrderLedgerRow {
+                    order_id: order_id.clone(),
+                    decision_id: decision_id.clone(),
+                    run_id: run_id_cloned.clone(),
+                    ts: decision_ts,
+                    symbol: sym.clone(),
+                    exchange: exchange.code.to_string(),
+                    side: side.clone(),
+                    order_type: order_type.to_string(),
+                    tif: "DAY".to_string(),
+                    qty_notional_usd: per_leg_notional,
+                    intended_px: next_bar.open,
+                    status: "submitted".to_string(),
+                    filled_notional_usd: 0.0,
+                    remaining_notional_usd: per_leg_notional,
+                    venue_latency_ms: exchange.latency_ms,
+                    reasons: order_reasons.clone(),
+                };
+                orders.push(submitted);
 
                 let ret_simple = (next_bar.close / next_bar.open) - 1.0;
                 let direction = if side == "LONG" { 1.0 } else { -1.0 };
-                let fee_usd = per_leg_notional * (exchange.fee_bps / 10_000.0);
-                let slippage_usd = per_leg_notional * (exchange.slippage_bps / 10_000.0);
-                let pnl_usd = (direction * per_leg_notional * ret_simple) - fee_usd - slippage_usd;
+                let filled_notional = per_leg_notional * fill_ratio;
+                let remaining_notional = (per_leg_notional - filled_notional).max(0.0);
+                let fee_usd = filled_notional * (exchange.fee_bps / 10_000.0);
+                let spread_cost_usd = filled_notional * (exchange.spread_bps / 10_000.0);
+                let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
+                let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
+                let borrow_fee_usd = if side == "SHORT" {
+                    filled_notional * (exchange.borrow_fee_bps / 10_000.0)
+                } else {
+                    0.0
+                };
+                let pnl_usd = (direction * filled_notional * ret_simple)
+                    - fee_usd
+                    - slippage_usd
+                    - spread_cost_usd
+                    - impact_usd
+                    - borrow_fee_usd;
+                let status = if short_blocked {
+                    "rejected"
+                } else if fill_ratio < 0.999 {
+                    "partially_filled"
+                } else {
+                    "filled"
+                };
+                orders.push(SimOrderLedgerRow {
+                    order_id: order_id.clone(),
+                    decision_id: decision_id.clone(),
+                    run_id: run_id_cloned.clone(),
+                    ts: exec_ts,
+                    symbol: sym.clone(),
+                    exchange: exchange.code.to_string(),
+                    side: side.clone(),
+                    order_type: order_type.to_string(),
+                    tif: "DAY".to_string(),
+                    qty_notional_usd: per_leg_notional,
+                    intended_px: next_bar.open,
+                    status: status.to_string(),
+                    filled_notional_usd: filled_notional,
+                    remaining_notional_usd: remaining_notional,
+                    venue_latency_ms: exchange.latency_ms + exchange.auction_extra_latency_ms,
+                    reasons: order_reasons,
+                });
                 fills.push(SimFillLedgerRow {
                     decision_id: decision_id.clone(),
                     run_id: run_id_cloned.clone(),
@@ -583,7 +939,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     symbol: sym.clone(),
                     exchange: exchange.code.to_string(),
                     side,
-                    qty_notional_usd: per_leg_notional,
+                    qty_notional_usd: filled_notional,
                     open_px: next_bar.open,
                     close_px: next_bar.close,
                     ret_simple,
@@ -591,6 +947,10 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     slippage_usd,
                     pnl_usd,
                     latency_ms: exchange.latency_ms,
+                    order_id: Some(order_id),
+                    fill_ratio,
+                    borrow_fee_usd,
+                    market_impact_usd: impact_usd + spread_cost_usd,
                 });
             }
 
@@ -612,10 +972,41 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 )
                 .await;
             }
+            for o in &orders {
+                let _ = append_json(&redis, &run_orders_key(&run_id_cloned), o).await;
+                let event_kind = match o.status.as_str() {
+                    "submitted" => "OrderSubmitted",
+                    "partially_filled" => "OrderPartiallyFilled",
+                    "filled" => "OrderFilled",
+                    "rejected" => "OrderRejected",
+                    _ => "OrderUpdated",
+                };
+                let _ = push_event(
+                    &redis,
+                    &run_id_cloned,
+                    event_kind,
+                    Some(o.exchange.clone()),
+                    json!({
+                        "order_id": o.order_id,
+                        "decision_id": o.decision_id,
+                        "symbol": o.symbol,
+                        "side": o.side,
+                        "status": o.status,
+                        "filled_notional_usd": o.filled_notional_usd,
+                        "remaining_notional_usd": o.remaining_notional_usd,
+                        "reasons": o.reasons,
+                    }),
+                )
+                .await;
+            }
             let mut pnl_day = 0.0;
+            let mut benchmark_day = 0.0;
+            let mut leg_returns: Vec<f64> = Vec::new();
             for f in &fills {
                 pnl_day += f.pnl_usd;
                 let _ = append_json(&redis, &run_fills_key(&run_id_cloned), f).await;
+                leg_returns.push(f.ret_simple.abs());
+                benchmark_day += (f.qty_notional_usd * f.ret_simple) / (symbol_count.max(1) as f64);
                 let _ = push_event(
                     &redis,
                     &run_id_cloned,
@@ -627,6 +1018,10 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "pnl_usd": f.pnl_usd,
                         "fee_usd": f.fee_usd,
                         "slippage_usd": f.slippage_usd,
+                        "borrow_fee_usd": f.borrow_fee_usd,
+                        "market_impact_usd": f.market_impact_usd,
+                        "fill_ratio": f.fill_ratio,
+                        "order_id": f.order_id,
                         "latency_ms": f.latency_ms,
                     }),
                 )
@@ -638,6 +1033,47 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     equity = 0.0;
                 }
             }
+            benchmark_equity += benchmark_day;
+            cash_usd = equity;
+            peak_equity = peak_equity.max(equity);
+            daily_pnls.push(pnl_day);
+            let drawdown = if peak_equity > 0.0 {
+                (peak_equity - equity).max(0.0) / peak_equity
+            } else {
+                0.0
+            };
+            let var_95_1d = daily_pnls
+                .iter()
+                .rev()
+                .take(60)
+                .map(|v| -v / req.initial_capital_usd.max(1.0))
+                .fold(0.0_f64, f64::max);
+            let avg_abs_ret = if leg_returns.is_empty() {
+                0.0
+            } else {
+                leg_returns.iter().sum::<f64>() / leg_returns.len() as f64
+            };
+            let gross_exposure = per_leg_notional * symbol_count as f64;
+            let weights = if symbol_count == 0 {
+                vec![1.0]
+            } else {
+                vec![1.0 / symbol_count as f64; symbol_count]
+            };
+            let risk = SimRiskSnapshot {
+                run_id: run_id_cloned.clone(),
+                ts: exec_ts,
+                equity_usd: equity,
+                cash_usd,
+                gross_exposure_usd: gross_exposure,
+                leverage: gross_exposure / equity.max(1.0),
+                drawdown,
+                var_95_1d: (var_95_1d + avg_abs_ret * 0.1).clamp(0.0, 1.0),
+                concentration_hhi: compute_hhi(&weights),
+                benchmark_equity_usd: benchmark_equity,
+                relative_return: (equity - benchmark_equity) / req.initial_capital_usd.max(1.0),
+            };
+            risk_snapshots.push(risk.clone());
+            let _ = append_json(&redis, &run_risk_key(&run_id_cloned), &risk).await;
             let curve = SimPortfolioPoint {
                 ts: exec_ts,
                 equity_usd: equity,
@@ -656,9 +1092,70 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 }),
             )
             .await;
+            let _ = push_event(
+                &redis,
+                &run_id_cloned,
+                "RiskSnapshot",
+                None,
+                json!({
+                    "drawdown": risk.drawdown,
+                    "var_95_1d": risk.var_95_1d,
+                    "leverage": risk.leverage,
+                    "concentration_hhi": risk.concentration_hhi,
+                    "relative_return": risk.relative_return
+                }),
+            )
+            .await;
+            if risk.drawdown >= 0.55 || risk.leverage >= 3.0 || risk.var_95_1d >= 0.2 {
+                stop_reason = "RISK_KILL_SWITCH".to_string();
+                let _ = push_event(
+                    &redis,
+                    &run_id_cloned,
+                    "RiskKillSwitchTriggered",
+                    None,
+                    json!({
+                        "drawdown": risk.drawdown,
+                        "leverage": risk.leverage,
+                        "var_95_1d": risk.var_95_1d
+                    }),
+                )
+                .await;
+                break;
+            }
+            cycle_idx += 1;
+            meta.cycles_completed = cycle_idx;
+            let explain_coverage = if total_decisions == 0 {
+                1.0
+            } else {
+                explained_decisions as f64 / total_decisions as f64
+            };
+            let readiness = compute_readiness(
+                &run_id_cloned,
+                req.readiness_min_days,
+                &risk_snapshots,
+                &daily_pnls,
+                missing_price_rows,
+                explain_coverage,
+            );
+            meta.readiness_score = Some(readiness.score);
+            meta.readiness_passed = Some(readiness.pass);
+            let _ = {
+                let mut conn = redis.clone();
+                let raw = serde_json::to_string(&readiness).unwrap_or_else(|_| "{}".to_string());
+                conn.set::<_, _, ()>(run_readiness_key(&run_id_cloned), raw).await
+            };
+            if readiness.pass {
+                stop_reason = "READY_FOR_LIVE".to_string();
+                break;
+            }
+            if equity <= 0.0 {
+                stop_reason = "BANKRUPT".to_string();
+                break;
+            }
             if req.replay_delay_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(req.replay_delay_ms)).await;
             }
+            day_idx += 1;
         }
 
         if total_rows > 0 {
@@ -706,13 +1203,21 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         meta.finished_at_ts = Some(now_ts());
         meta.ending_equity_usd = Some(equity);
         meta.pnl_usd = Some(equity - req.initial_capital_usd);
+        meta.stop_reason = Some(stop_reason.clone());
         let _ = set_meta(&redis, &meta).await;
         let _ = push_event(
             &redis,
             &run_id_cloned,
             "RunCompleted",
             None,
-            json!({"ending_equity_usd": equity, "pnl_usd": equity - req.initial_capital_usd}),
+            json!({
+                "ending_equity_usd": equity,
+                "pnl_usd": equity - req.initial_capital_usd,
+                "stop_reason": stop_reason,
+                "cycles_completed": meta.cycles_completed,
+                "readiness_score": meta.readiness_score,
+                "readiness_passed": meta.readiness_passed
+            }),
         )
         .await;
     });

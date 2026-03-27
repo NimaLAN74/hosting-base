@@ -4,6 +4,7 @@ Validate simulator API end-to-end:
 - start run
 - poll status
 - fetch timeline
+- fetch order/risk/readiness artifacts
 - fetch bias report
 - fetch explainability for one decision
 """
@@ -151,6 +152,32 @@ def main():
     if not events:
         raise RuntimeError("Timeline is empty")
     print(f"timeline_events={len(events)}")
+    if not any(e.get("kind") in ("OrderSubmitted", "OrderFilled", "OrderPartiallyFilled") for e in events):
+        raise RuntimeError("Missing order lifecycle events in timeline")
+
+    orders = http_json(
+        f"{base}/api/v1/stock-service/sim/runs/{run_id}/orders?limit=200",
+        insecure=args.insecure_ssl,
+    ).get("orders", [])
+    if len(orders) == 0:
+        raise RuntimeError("Order ledger is empty")
+    print(f"orders={len(orders)}")
+
+    risk = http_json(
+        f"{base}/api/v1/stock-service/sim/runs/{run_id}/risk?limit=200",
+        insecure=args.insecure_ssl,
+    ).get("risk", [])
+    if len(risk) == 0:
+        raise RuntimeError("Risk snapshot series is empty")
+    print(f"risk_points={len(risk)}")
+
+    readiness = http_json(
+        f"{base}/api/v1/stock-service/sim/runs/{run_id}/readiness",
+        insecure=args.insecure_ssl,
+    )
+    if "score" not in readiness:
+        raise RuntimeError("Readiness report missing score")
+    print(f"readiness_score={readiness.get('score')}")
 
     bias = http_json(
         f"{base}/api/v1/stock-service/sim/runs/{run_id}/bias-report",

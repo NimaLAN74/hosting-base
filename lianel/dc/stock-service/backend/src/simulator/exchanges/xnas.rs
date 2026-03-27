@@ -6,8 +6,15 @@ pub fn adapter() -> ExchangeAdapter {
         session_open_utc: "14:30",
         session_close_utc: "21:00",
         fee_bps: 1.2,
+        spread_bps: 1.6,
         slippage_bps: 3.5,
+        market_impact_bps: 2.2,
+        borrow_fee_bps: 0.9,
+        depth_notional_usd: 30_000.0,
         latency_ms: 70,
+        auction_window: true,
+        auction_extra_latency_ms: 120,
+        short_borrow_available: true,
     }
 }
 

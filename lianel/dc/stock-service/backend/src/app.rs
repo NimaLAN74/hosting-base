@@ -155,6 +155,26 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/sim/runs/:run_id/bias-report",
             get(sim_run_bias_handler),
         )
+        .route("/api/v1/sim/runs/:run_id/orders", get(sim_run_orders_handler))
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/orders",
+            get(sim_run_orders_handler),
+        )
+        .route("/api/v1/sim/runs/:run_id/risk", get(sim_run_risk_handler))
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/risk",
+            get(sim_run_risk_handler),
+        )
+        .route("/api/v1/sim/runs/:run_id/readiness", get(sim_run_readiness_handler))
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/readiness",
+            get(sim_run_readiness_handler),
+        )
+        .route("/api/v1/sim/runs/:run_id/control", post(sim_run_control_handler))
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/control",
+            post(sim_run_control_handler),
+        )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -1173,6 +1193,128 @@ async fn sim_run_bias_handler(
         Ok(findings) => (
             StatusCode::OK,
             Json(serde_json::json!({ "run_id": run_id, "findings": findings })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+async fn sim_run_orders_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Query(q): Query<SimTimelineQuery>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    match simulator::get_order_ledger(redis, &run_id, q.limit.unwrap_or(500).min(10_000)).await {
+        Ok(orders) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "run_id": run_id, "orders": orders })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+async fn sim_run_risk_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Query(q): Query<SimTimelineQuery>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    match simulator::get_risk_snapshots(redis, &run_id, q.limit.unwrap_or(500).min(10_000)).await {
+        Ok(risk) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "run_id": run_id, "risk": risk })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+async fn sim_run_readiness_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    match simulator::get_readiness_report(redis, &run_id).await {
+        Ok(Some(readiness)) => (StatusCode::OK, Json(readiness)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "readiness not found for run" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SimControlBody {
+    action: String,
+}
+
+async fn sim_run_control_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Json(body): Json<SimControlBody>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    let action = body.action.trim().to_ascii_lowercase();
+    if !["pause", "resume", "stop"].contains(&action.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error":"action must be one of pause|resume|stop"})),
+        )
+            .into_response();
+    }
+    let normalized = if action == "resume" {
+        "run".to_string()
+    } else {
+        action
+    };
+    match simulator::set_control_action(redis, &run_id, &normalized).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "run_id": run_id, "action": normalized })),
         )
             .into_response(),
         Err(e) => (

@@ -9,8 +9,15 @@ pub struct ExchangeAdapter {
     pub session_open_utc: &'static str,
     pub session_close_utc: &'static str,
     pub fee_bps: f64,
+    pub spread_bps: f64,
     pub slippage_bps: f64,
+    pub market_impact_bps: f64,
+    pub borrow_fee_bps: f64,
+    pub depth_notional_usd: f64,
     pub latency_ms: u64,
+    pub auction_window: bool,
+    pub auction_extra_latency_ms: u64,
+    pub short_borrow_available: bool,
 }
 
 pub fn infer_exchange(symbol: &str) -> ExchangeAdapter {
