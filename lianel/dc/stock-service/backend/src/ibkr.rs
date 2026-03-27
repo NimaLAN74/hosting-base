@@ -509,18 +509,15 @@ impl IbkrOAuthClient {
                 body.trim_start().chars().take(120).collect::<String>()
             )
         })?;
-        let factor = raw.price_factor.unwrap_or(1.0);
         let bars: Vec<HistoryBar> = raw
             .data
             .into_iter()
             .map(|b| HistoryBar {
-                // CP API returns bar time `t` as Unix **milliseconds**; we expose **seconds**
-                // so JSON consumers can do `new Date(t * 1000)` consistently.
                 t: normalize_history_timestamp_secs(b.t),
-                open: b.o / factor,
-                high: b.h / factor,
-                low: b.l / factor,
-                close: b.c / factor,
+                open: b.o,
+                high: b.h,
+                low: b.l,
+                close: b.c,
             })
             .collect();
         Ok(bars)
