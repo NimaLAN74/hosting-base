@@ -158,12 +158,12 @@ impl AppConfig {
     }
 
     pub fn ibkr_oauth_configured(&self) -> bool {
-        self.ibkr_oauth_consumer_key.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-            && self.ibkr_oauth_access_token.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-            && self.ibkr_oauth_access_token_secret.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-            && self.ibkr_oauth_dh_param_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-            && self.ibkr_oauth_private_encryption_key_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-            && self.ibkr_oauth_private_signature_key_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+        self.ibkr_oauth_consumer_key.is_some()
+            && self.ibkr_oauth_access_token.is_some()
+            && self.ibkr_oauth_access_token_secret.is_some()
+            && self.ibkr_oauth_dh_param_path.is_some()
+            && self.ibkr_oauth_private_encryption_key_path.is_some()
+            && self.ibkr_oauth_private_signature_key_path.is_some()
     }
 
     /// True when using Client Portal Gateway with a pre-obtained session cookie (no OAuth).

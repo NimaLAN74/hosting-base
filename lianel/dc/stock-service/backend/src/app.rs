@@ -1070,9 +1070,12 @@ async fn me(
     display_name: Option<axum::extract::Extension<UserDisplayName>>,
     email: Option<axum::extract::Extension<UserEmail>>,
 ) -> Json<serde_json::Value> {
+    const MAX_DISPLAY_LEN: usize = 128;
     let resolved_email = email.and_then(|axum::extract::Extension(v)| v.0);
     let resolved_display_name = display_name
-        .map(|axum::extract::Extension(v)| v.0)
+        .map(|axum::extract::Extension(v)| {
+            v.0.trim().chars().take(MAX_DISPLAY_LEN).collect::<String>()
+        })
         .filter(|v| !v.trim().is_empty())
         .filter(|v| v != &user_id.0)
         .filter(|v| !looks_like_user_id(v))
@@ -1080,7 +1083,7 @@ async fn me(
             resolved_email
                 .as_deref()
                 .and_then(|v| v.split('@').next())
-                .map(String::from)
+                .map(|v| v.chars().take(MAX_DISPLAY_LEN).collect::<String>())
         });
     Json(serde_json::json!({
         "user_id": user_id.0,
