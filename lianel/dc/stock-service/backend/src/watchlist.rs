@@ -497,10 +497,6 @@ pub async fn refresh_from_ibkr(
             let status = r.status();
             let _ = r.text().await;
             if !status.is_success() {
-                tracing::warn!(
-                    "Watchlist IBKR /accounts pre-call failed ({})",
-                    status
-                );
                 let mut next = WatchlistCache::default();
                 next.as_of = as_of.clone();
                 for s in DEFAULT_SYMBOLS {
@@ -891,10 +887,10 @@ pub async fn fetch_snapshot_raw_for_conids(
     } else {
         accounts_req
     };
-    let accounts_resp = accounts_req
-        .send()
-        .await
-        .map_err(|_| "IBKR /accounts request failed".to_string())?;
+    let accounts_resp = match accounts_req.send().await {
+        Ok(resp) => resp,
+        Err(_) => return Err("IBKR /accounts request failed".to_string()),
+    };
     if !accounts_resp.status().is_success() {
         let status = accounts_resp.status();
         let _ = accounts_resp.text().await;
