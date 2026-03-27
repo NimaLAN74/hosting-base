@@ -70,6 +70,7 @@ def main():
 
     run = None
     start_url = f"{base}/api/v1/stock-service/sim/runs"
+    last_start_exc: HttpJsonError | None = None
     for attempt in range(1, 7):
         try:
             run = http_json(
@@ -80,6 +81,7 @@ def main():
             )
             break
         except HttpJsonError as exc:
+            last_start_exc = exc
             body = exc.body or ""
             transient = exc.status in (404, 429, 500, 502, 503, 504)
             data_limited = exc.status == 400 and any(
@@ -91,11 +93,13 @@ def main():
                     "not enough aligned days",
                 )
             )
-            upstream_data_unavailable = exc.status == 400 and any(
+            upstream_data_unavailable = exc.status in (400, 503) and any(
                 token in body
                 for token in (
                     "history failed 500",
                     "Chart data unavailable",
+                    '"retryable":true',
+                    '"retryable": true',
                 )
             )
             if data_limited:
@@ -116,6 +120,10 @@ def main():
                 continue
             raise
     if run is None:
+        if last_start_exc and last_start_exc.status in (503, 502, 504):
+            print(f"simulator_validation=skipped_upstream_unavailable status={last_start_exc.status}")
+            print((last_start_exc.body or "")[:400])
+            return
         raise RuntimeError("Failed to start simulator run after retries")
     run_id = run.get("run_id")
     if not run_id:
