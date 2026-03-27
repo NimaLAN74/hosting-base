@@ -12,7 +12,7 @@ Validate simulator API end-to-end:
 import argparse
 import json
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib import request
 
 
@@ -46,6 +46,8 @@ def http_json(url: str, method: str = "GET", payload: dict | None = None, insecu
         if exc.fp is not None:
             body_text = exc.fp.read().decode("utf-8", errors="replace")
         raise HttpJsonError(method, url, exc.code, body_text) from exc
+    except URLError as exc:
+        raise HttpJsonError(method, url, 503, str(exc.reason or exc)) from exc
     if code < 200 or code >= 300:
         raise HttpJsonError(method, url, code, raw)
     return json.loads(raw) if raw else {}
