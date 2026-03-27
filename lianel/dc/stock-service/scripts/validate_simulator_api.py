@@ -85,7 +85,7 @@ def main():
             last_start_exc = exc
             body = exc.body or ""
             transient = exc.status in (404, 429, 500, 502, 503, 504)
-            data_limited = exc.status == 400 and any(
+            data_limited = exc.status in (400, 422) and any(
                 token in body
                 for token in (
                     "need at least 6 symbols",
