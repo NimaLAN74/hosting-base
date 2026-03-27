@@ -380,20 +380,50 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
 
     let mut bars_by_symbol: HashMap<String, Vec<crate::ibkr::HistoryBar>> = HashMap::new();
+    let mut history_fetch_failures = 0usize;
     for (sym, conid) in &pairs {
         if !selected_symbols.iter().any(|s| s == sym) {
             continue;
         }
-        let bars = client
-            .fetch_history(*conid, "1y", "1d")
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut bars = None;
+        for attempt in 1..=3 {
+            match client.fetch_history(*conid, "1y", "1d").await {
+                Ok(result) => {
+                    bars = Some(result);
+                    break;
+                }
+                Err(e) => {
+                    if attempt == 3 {
+                        history_fetch_failures += 1;
+                        tracing::warn!(
+                            "simulator: history fetch failed for {} (conid={}): {}",
+                            sym,
+                            conid,
+                            e
+                        );
+                    } else {
+                        tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64))
+                            .await;
+                    }
+                }
+            }
+        }
+        let Some(bars) = bars else {
+            continue;
+        };
         let bars = daily_strategy::sort_dedupe_bars(bars);
         if bars.len() >= req.days + 3 {
             bars_by_symbol.insert(sym.clone(), bars);
         }
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
     }
     if bars_by_symbol.len() < 4 {
+        if bars_by_symbol.is_empty() && history_fetch_failures > 0 {
+            return Err(format!(
+                "history failed for all selected symbols ({})",
+                history_fetch_failures
+            ));
+        }
         return Err("not enough symbols with stable daily history for replay".to_string());
     }
 
