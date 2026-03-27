@@ -1010,11 +1010,30 @@ async fn sim_run_start_handler(
     }
     match simulator::start_run(state.clone(), body).await {
         Ok(meta) => (StatusCode::ACCEPTED, Json(meta)).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response(),
+        Err(e) => {
+            let lower = e.to_ascii_lowercase();
+            let status = if lower.contains("history failed")
+                || lower.contains("chart data unavailable")
+                || lower.contains("ibkr")
+            {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else if lower.contains("not enough")
+                || lower.contains("selection produced too few symbols")
+                || lower.contains("need at least")
+            {
+                StatusCode::UNPROCESSABLE_ENTITY
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (
+                status,
+                Json(serde_json::json!({
+                    "error": e,
+                    "retryable": status == StatusCode::SERVICE_UNAVAILABLE
+                })),
+            )
+                .into_response()
+        }
     }
 }
 

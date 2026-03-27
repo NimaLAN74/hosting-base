@@ -3,6 +3,16 @@ import PageTemplate from '../PageTemplate';
 import './SimulatorPage.css';
 
 const RUNS_URL = '/api/v1/stock-service/sim/runs';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function normalizeErrorPayload(payload, status) {
+  const msg = String(payload?.error || `Failed (${status})`);
+  const retryableByBody = /history failed|chart data unavailable|temporar|unavailable/i.test(msg);
+  return {
+    message: msg,
+    retryable: Boolean(payload?.retryable) || status === 503 || retryableByBody,
+  };
+}
 
 function fmtTs(ts) {
   if (!ts) return '—';
@@ -103,20 +113,39 @@ export default function SimulatorPage() {
     setStartLoading(true);
     setStartMsg('');
     try {
-      const r = await fetch(RUNS_URL, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(form),
-      });
-      const j = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(j?.error || `Failed (${r.status})`);
-      setStartMsg(`Started run ${j.run_id}`);
-      setSelectedRunId(j.run_id);
-      loadRuns();
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const r = await fetch(RUNS_URL, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(form),
+        });
+        const j = await r.json().catch(() => null);
+        if (r.ok) {
+          setStartMsg(`Started run ${j.run_id}`);
+          setSelectedRunId(j.run_id);
+          loadRuns();
+          return;
+        }
+        const info = normalizeErrorPayload(j, r.status);
+        lastError = info;
+        if (info.retryable && attempt < 3) {
+          setStartMsg(`Upstream market data temporarily unavailable. Retrying (${attempt}/2)…`);
+          await sleep(2000 * attempt);
+          continue;
+        }
+        break;
+      }
+      const msg = lastError?.message || 'Unknown start failure';
+      if (/not enough|selection produced too few symbols|aligned days/i.test(msg)) {
+        setStartMsg(`Start failed: ${msg}. Try reducing Days/Top symbols or retry later when more market data is available.`);
+      } else {
+        setStartMsg(`Start failed: ${msg}`);
+      }
     } catch (e) {
       setStartMsg(`Start failed: ${String(e?.message || e)}`);
     } finally {
