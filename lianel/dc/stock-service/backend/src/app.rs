@@ -316,7 +316,24 @@ async fn today_handler(
         )
             .into_response();
     }
-    let points = crate::today_cache::get_today(state.redis.as_ref(), symbol).await;
+    let mut points = crate::today_cache::get_today(state.redis.as_ref(), symbol).await;
+    if points.is_empty() {
+        // If Redis intraday cache is empty/unavailable, still surface latest watchlist quote
+        // so the UI can render a current point instead of a hard "no data" state.
+        let latest_price = {
+            let g = state.watchlist_cache.read().await;
+            g.quotes
+                .get(&symbol.to_ascii_uppercase())
+                .and_then(|q| q.price)
+        };
+        if let Some(px) = latest_price {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            points.push((now, px));
+        }
+    }
     let data: Vec<serde_json::Value> = points
         .into_iter()
         .map(|(t, price)| serde_json::json!({ "t": t, "price": price }))

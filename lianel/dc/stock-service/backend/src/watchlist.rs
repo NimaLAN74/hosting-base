@@ -1045,14 +1045,7 @@ pub fn fallback_response() -> WatchlistResponse {
 
 /// Build the API response from current cache. Uses fallback if cache read times out (e.g. ticker holding lock).
 pub async fn get_watchlist_response(cache: &RwLock<WatchlistCache>) -> WatchlistResponse {
-    let read_guard = match tokio::time::timeout(Duration::from_secs(5), cache.read()).await {
-        Ok(g) => g,
-        Err(_) => {
-            tracing::warn!("Watchlist cache read timed out");
-            return fallback_response();
-        }
-    };
-    let g = read_guard;
+    let g = cache.read().await;
     let symbols: Vec<WatchlistQuote> = configured_watchlist_symbols()
         .iter()
         .map(|s| {
