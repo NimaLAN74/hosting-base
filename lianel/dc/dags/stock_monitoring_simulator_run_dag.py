@@ -41,33 +41,52 @@ def run_simulator_replay(**context):
     elif latest:
         print(f"No active run. Latest status={latest_status or 'unknown'} stop_reason={latest_stop_reason or 'n/a'}. Starting new run.")
 
-    payload = {
-        "days": max(126, min(days, 365)),
+    base_payload = {
         "top": int(os.getenv("SIM_REPLAY_TOP", "16")),
         "quantile": float(os.getenv("SIM_REPLAY_QUANTILE", "0.2")),
         "short_enabled": os.getenv("SIM_REPLAY_SHORT_ENABLED", "true").lower() in ("1", "true", "yes"),
         "initial_capital_usd": float(os.getenv("SIM_REPLAY_INITIAL_CAPITAL_USD", "100")),
         "reinvest_profit": os.getenv("SIM_REPLAY_REINVEST", "true").lower() in ("1", "true", "yes"),
-        "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "0")),
+        # Keep the run visibly active for monitoring instead of finishing in seconds.
+        "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "250")),
         "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),
-        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "252")),
+        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "20000")),
     }
+    target_days = max(7, min(days, 365))
+    candidate_days = [target_days, 126, 90, 60, 30, 14, 7]
+    # Preserve order and uniqueness.
+    unique_days = []
+    seen = set()
+    for d in candidate_days:
+        if d not in seen:
+            unique_days.append(d)
+            seen.add(d)
     url = f"{base_url.rstrip('/')}/api/v1/stock-service/sim/runs"
-    body = json.dumps(payload).encode("utf-8")
-    req = request.Request(
-        url=url,
-        method="POST",
-        data=body,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-    )
-    with request.urlopen(req, timeout=90) as response:  # nosec B310 - trusted internal endpoint
-        status = response.status
-        raw = response.read().decode("utf-8")
-    if status < 200 or status >= 300:
-        raise RuntimeError(f"Simulator run trigger failed: HTTP {status} - {raw[:500]}")
-    data = json.loads(raw)
-    run_id = data.get("run_id", "<unknown>")
-    print(f"Simulator run started: {run_id}")
+    last_error = None
+    for d in unique_days:
+        payload = {**base_payload, "days": d}
+        body = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            url=url,
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        try:
+            with request.urlopen(req, timeout=90) as response:  # nosec B310 - trusted internal endpoint
+                status = response.status
+                raw = response.read().decode("utf-8")
+            if status < 200 or status >= 300:
+                last_error = f"HTTP {status} - {raw[:500]}"
+                continue
+            data = json.loads(raw)
+            run_id = data.get("run_id", "<unknown>")
+            print(f"Simulator run started: {run_id} (days={d})")
+            return
+        except Exception as e:
+            last_error = str(e)
+            continue
+    raise RuntimeError(f"Simulator run trigger failed for all day windows {unique_days}: {last_error}")
 
 
 default_args = {

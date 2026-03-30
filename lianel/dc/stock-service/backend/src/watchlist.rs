@@ -363,6 +363,32 @@ fn iso_ts() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+async fn fetch_public_fallback_price(symbol: &str) -> Option<f64> {
+    // Lightweight public delayed fallback when IBKR snapshot returns no quote.
+    // Example response: Symbol,Date,Time,Open,High,Low,Close,Volume
+    //                   NIO.US,2026-03-28,22:00:08,3.66,3.70,3.62,3.67,123456
+    let normalized = norm_sym(symbol);
+    if normalized.contains('.') {
+        return None;
+    }
+    let stooq_symbol = format!("{}.us", normalized.to_ascii_lowercase());
+    let url = format!("https://stooq.com/q/l/?s={stooq_symbol}&i=d");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+        .ok()?;
+    let body = client.get(url).send().await.ok()?.text().await.ok()?;
+    let mut lines = body.lines();
+    let _header = lines.next()?;
+    let row = lines.next()?;
+    let cols: Vec<&str> = row.split(',').collect();
+    let close = cols.get(6).map(|x| x.trim())?;
+    if close.is_empty() || close.eq_ignore_ascii_case("N/D") {
+        return None;
+    }
+    close.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
 /// Refresh watchlist from IBKR only. If ibkr_client is None, all quotes get error "IBKR not configured".
 /// When redis is Some, each symbol's price is pushed to Redis for today's intraday cache.
 pub async fn refresh_from_ibkr(
@@ -853,6 +879,37 @@ pub async fn refresh_from_ibkr(
             Err(_) => {
                 // Keep original no-price state if history fallback is unavailable.
             }
+        }
+    }
+
+    // Last-resort fallback for symbols still missing quotes (e.g., missing IBKR market-data subscription).
+    let still_missing_symbols: Vec<String> = configured_watchlist_symbols()
+        .iter()
+        .filter_map(|s| {
+            let missing = next
+                .quotes
+                .get(*s)
+                .map(|q| q.price.is_none())
+                .unwrap_or(true);
+            if missing {
+                Some((*s).to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    for symbol in still_missing_symbols {
+        if let Some(px) = fetch_public_fallback_price(&symbol).await {
+            next.quotes.insert(
+                symbol.clone(),
+                WatchlistQuote {
+                    symbol: symbol.clone(),
+                    price: Some(px),
+                    currency: Some("USD".to_string()),
+                    updated_at: Some(as_of.clone()),
+                    error: Some("fallback delayed quote (public source)".to_string()),
+                },
+            );
         }
     }
 
