@@ -478,7 +478,8 @@ export default function SimulatorPage() {
                 <div>Stop reason: <b>{runStatus.stop_reason || '—'}</b></div>
                 <div>Data mode: <b>{runDataModeLabel}</b></div>
                 <div>Initial: <b>${Number(runStatus.initial_capital_usd || 0).toFixed(2)}</b></div>
-                <div>Ending: <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
+                <div>{runStatus.status === 'running' ? 'Current equity' : 'Ending'}:{' '}
+                  <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
                 <div>PnL: <b>{runStatus.pnl_usd != null ? `$${Number(runStatus.pnl_usd).toFixed(2)}` : '—'}</b></div>
                 <div>Cycles: <b>{Number(runStatus.cycles_completed || 0)}</b></div>
                 <div>Readiness score: <b>{runStatus.readiness_score != null ? Number(runStatus.readiness_score).toFixed(3) : '—'}</b></div>

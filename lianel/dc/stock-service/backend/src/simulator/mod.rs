@@ -1485,11 +1485,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             );
             meta.readiness_score = Some(readiness.score);
             meta.readiness_passed = Some(readiness.pass);
+            // Live snapshot for UI polling (status endpoint reads Redis meta only at start/end otherwise).
+            meta.ending_equity_usd = Some(equity);
+            meta.pnl_usd = Some(equity - req.initial_capital_usd);
             let _ = {
                 let mut conn = redis.clone();
                 let raw = serde_json::to_string(&readiness).unwrap_or_else(|_| "{}".to_string());
                 conn.set::<_, _, ()>(run_readiness_key(&run_id_cloned), raw).await
             };
+            let _ = set_meta(&redis, &meta).await;
             // Do not auto-stop on readiness pass; continue simulation until bankroll is depleted
             // (or manually stopped), while continuously tracking readiness.
             if equity <= 0.0 {
