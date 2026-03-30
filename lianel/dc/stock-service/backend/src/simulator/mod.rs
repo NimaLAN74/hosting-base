@@ -38,6 +38,10 @@ pub struct SimRunRequest {
     pub edge_cost_buffer_bps: f64,
     #[serde(default = "default_min_signal_abs_return_bps")]
     pub min_signal_abs_return_bps: f64,
+    #[serde(default = "default_min_hold_seconds")]
+    pub min_hold_seconds: u64,
+    #[serde(default = "default_symbol_cooldown_seconds")]
+    pub symbol_cooldown_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +257,12 @@ fn default_edge_cost_buffer_bps() -> f64 {
 }
 fn default_min_signal_abs_return_bps() -> f64 {
     8.0
+}
+fn default_min_hold_seconds() -> u64 {
+    300
+}
+fn default_symbol_cooldown_seconds() -> u64 {
+    180
 }
 
 fn hhmm_utc_from_ts(ts: u64) -> String {
@@ -683,6 +693,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
     req.edge_cost_buffer_bps = req.edge_cost_buffer_bps.clamp(0.0, 150.0);
     req.min_signal_abs_return_bps = req.min_signal_abs_return_bps.clamp(0.0, 200.0);
+    req.min_hold_seconds = req.min_hold_seconds.clamp(0, 86_400);
+    req.symbol_cooldown_seconds = req.symbol_cooldown_seconds.clamp(0, 86_400);
 
     let run_id = generate_run_id();
     let created_at = now_ts();
@@ -858,6 +870,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         let mut explained_decisions = 0usize;
         let mut live_prev_prices: HashMap<String, f64> = HashMap::new();
         let mut live_last_decision_ts = now_ts().saturating_sub(1);
+        let mut last_fill_ts_by_symbol: HashMap<String, u64> = HashMap::new();
+        let mut cooldown_until_by_symbol: HashMap<String, u64> = HashMap::new();
 
         meta.status = "running".to_string();
         meta.started_at_ts = Some(now_ts());
@@ -1029,6 +1043,48 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     )
                     .await;
                     continue;
+                }
+                if req.min_hold_seconds > 0 {
+                    if let Some(last_fill_ts) = last_fill_ts_by_symbol.get(&sym).copied() {
+                        let elapsed = exec_ts.saturating_sub(last_fill_ts);
+                        if elapsed < req.min_hold_seconds {
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "TradeSkipped",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "side": side,
+                                    "reason": "skip_min_hold_window",
+                                    "last_fill_ts": last_fill_ts,
+                                    "elapsed_seconds": elapsed,
+                                    "required_min_hold_seconds": req.min_hold_seconds
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
+                    }
+                }
+                if let Some(cooldown_until) = cooldown_until_by_symbol.get(&sym).copied() {
+                    if exec_ts < cooldown_until {
+                        let _ = push_event(
+                            &redis,
+                            &run_id_cloned,
+                            "TradeSkipped",
+                            Some(exchange.code.to_string()),
+                            json!({
+                                "symbol": sym,
+                                "side": side,
+                                "reason": "skip_symbol_cooldown",
+                                "cooldown_until_ts": cooldown_until,
+                                "remaining_seconds": cooldown_until.saturating_sub(exec_ts)
+                            }),
+                        )
+                        .await;
+                        continue;
+                    }
                 }
                 *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
                 let (hybrid_score, rationale) = selected_scores
@@ -1222,6 +1278,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     market_impact_usd: impact_usd + spread_cost_usd,
                     total_cost_usd,
                 });
+                if filled_notional > 0.0 {
+                    last_fill_ts_by_symbol.insert(sym.clone(), exec_ts);
+                    if pnl_usd < 0.0 && req.symbol_cooldown_seconds > 0 {
+                        cooldown_until_by_symbol
+                            .insert(sym.clone(), exec_ts.saturating_add(req.symbol_cooldown_seconds));
+                    }
+                }
             }
 
             for d in &decision_rows {
