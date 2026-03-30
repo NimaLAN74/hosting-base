@@ -379,9 +379,14 @@ async fn fetch_public_fallback_price(symbol: &str) -> Option<f64> {
         .ok()?;
     let body = client.get(url).send().await.ok()?.text().await.ok()?;
     let mut lines = body.lines();
-    let _header = lines.next()?;
-    let row = lines.next()?;
+    let first = lines.next()?.trim();
+    let row = if first.to_ascii_lowercase().starts_with("symbol,") {
+        lines.next()?.trim()
+    } else {
+        first
+    };
     let cols: Vec<&str> = row.split(',').collect();
+    // Stooq compact CSV typically: SYMBOL,DATE,TIME,OPEN,HIGH,LOW,CLOSE,VOLUME
     let close = cols.get(6).map(|x| x.trim())?;
     if close.is_empty() || close.eq_ignore_ascii_case("N/D") {
         return None;

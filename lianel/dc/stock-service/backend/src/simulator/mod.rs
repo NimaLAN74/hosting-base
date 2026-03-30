@@ -694,12 +694,28 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
 
     let aligned_ts = daily_strategy::aligned_timestamps(&bars_by_symbol);
-    if aligned_ts.len() < 3 {
-        return Err("not enough aligned days to run requested simulation horizon".to_string());
-    }
+    let replay_base_ts: Vec<i64> = if aligned_ts.len() >= 3 {
+        aligned_ts
+    } else {
+        // Fallback: when strict all-symbol overlap is too short, replay on the densest symbol's
+        // timeline and allow per-symbol bar misses during scoring/execution.
+        let maybe_ref = bars_by_symbol
+            .values()
+            .max_by_key(|bars| bars.len())
+            .map(|bars| {
+                let mut ts = bars.iter().map(|b| b.ts).collect::<Vec<_>>();
+                ts.sort_unstable();
+                ts.dedup();
+                ts
+            });
+        match maybe_ref {
+            Some(ts) if ts.len() >= 3 => ts,
+            _ => return Err("not enough aligned days to run requested simulation horizon".to_string()),
+        }
+    };
     // Degrade gracefully when overlap is limited instead of hard-failing run startup.
-    let effective_days = req.days.min(aligned_ts.len().saturating_sub(1)).max(2);
-    let replay_ts = aligned_ts[aligned_ts.len() - (effective_days + 1)..].to_vec();
+    let effective_days = req.days.min(replay_base_ts.len().saturating_sub(1)).max(2);
+    let replay_ts = replay_base_ts[replay_base_ts.len() - (effective_days + 1)..].to_vec();
 
     let mut exch_set = std::collections::BTreeSet::<String>::new();
     for sym in bars_by_symbol.keys() {
