@@ -7,6 +7,7 @@ bias, process gaps, and missing data issues from realistic execution replay.
 
 import json
 import os
+import inspect
 from datetime import datetime, timedelta
 from urllib import request, parse
 
@@ -103,19 +104,20 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
+DAG_ID = "stock_monitoring_simulator_replay"
+
 _dag_kwargs = dict(
-    dag_id="stock_monitoring_simulator_replay",
+    dag_id=DAG_ID,
     default_args=default_args,
     description="Trigger stock replay simulator to find model/process/data gaps",
     catchup=False,
     tags=["stock-service", "simulator", "bias-detection"],
 )
 _dag_schedule = "*/30 * * * *"  # Keep one active run; restart quickly after completion/bankrupt.
-try:
-    # Airflow variants that accept `schedule=`.
+_dag_params = inspect.signature(DAG).parameters
+if "schedule" in _dag_params:
     dag = DAG(**_dag_kwargs, schedule=_dag_schedule)
-except TypeError:
-    # Airflow variants that accept `schedule_interval=`.
+else:
     dag = DAG(**_dag_kwargs, schedule_interval=_dag_schedule)
 
 run_task = PythonOperator(
@@ -126,4 +128,6 @@ run_task = PythonOperator(
 
 # Some runtimes are strict about symbol exposure while loading bundles.
 globals()["stock_monitoring_simulator_replay"] = dag
+# Also expose a symbol whose name matches dag_id exactly.
+stock_monitoring_simulator_replay = dag
 
