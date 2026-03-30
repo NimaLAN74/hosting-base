@@ -245,6 +245,15 @@ fn default_live_market_data() -> bool {
     true
 }
 
+fn hhmm_utc_from_ts(ts: u64) -> String {
+    use chrono::{TimeZone, Timelike, Utc};
+    let dt = Utc
+        .timestamp_opt(ts as i64, 0)
+        .single()
+        .unwrap_or_else(Utc::now);
+    format!("{:02}:{:02}", dt.hour(), dt.minute())
+}
+
 fn parse_hhmm_utc(v: &str) -> Option<(u32, u32)> {
     let mut parts = v.split(':');
     let h = parts.next()?.trim().parse::<u32>().ok()?;
@@ -654,11 +663,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     req.initial_capital_usd = req.initial_capital_usd.max(25.0);
     // User requirement: never evaluate readiness below six months.
     req.readiness_min_days = req.readiness_min_days.max(126).min(365 * 3);
-    req.max_cycles = req.max_cycles.max(req.readiness_min_days).min(20_000);
+    req.max_cycles = req
+        .max_cycles
+        .max(req.readiness_min_days)
+        .min(if req.live_market_data { 1_000_000 } else { 20_000 });
     if req.live_market_data {
-        // In live mode, keep cadence realistic and avoid extreme cycle counts.
-        req.replay_delay_ms = req.replay_delay_ms.max(1_000);
-        req.max_cycles = req.max_cycles.min(2_000).max(req.readiness_min_days);
+        // In live mode, one cycle should represent a real-time step, not a tight loop.
+        req.replay_delay_ms = req.replay_delay_ms.max(60_000);
     }
 
     let run_id = generate_run_id();
@@ -1005,9 +1016,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         if side == "LONG" { "Buy" } else { "Sell short" },
                         sym,
                         open_px,
-                        exchange.session_open_utc,
+                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_open_utc.to_string() },
                         close_px,
-                        exchange.session_close_utc,
+                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_close_utc.to_string() },
                         ret_prev,
                         hybrid_score,
                         if side == "LONG" { "upside" } else { "downside" },
@@ -1127,8 +1138,16 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     sell_px: close_px,
                     buy_ts: exec_ts,
                     sell_ts: exec_ts,
-                    buy_session_time_utc: exchange.session_open_utc.to_string(),
-                    sell_session_time_utc: exchange.session_close_utc.to_string(),
+                    buy_session_time_utc: if req.live_market_data {
+                        hhmm_utc_from_ts(exec_ts)
+                    } else {
+                        exchange.session_open_utc.to_string()
+                    },
+                    sell_session_time_utc: if req.live_market_data {
+                        hhmm_utc_from_ts(exec_ts)
+                    } else {
+                        exchange.session_close_utc.to_string()
+                    },
                     market_data_source,
                     ret_simple,
                     fee_usd,

@@ -68,7 +68,8 @@ def main():
         "short_enabled": True,
         "initial_capital_usd": 100,
         "reinvest_profit": True,
-        "live_market_data": True,
+        # Keep CI validation fast/stable; production runs use live_market_data=true via DAG/UI.
+        "live_market_data": False,
         "replay_delay_ms": 0,
     }
 
