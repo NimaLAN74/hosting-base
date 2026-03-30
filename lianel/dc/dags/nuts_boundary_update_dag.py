@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-import geopandas as gpd
 import requests
 from pathlib import Path
 import tempfile
@@ -83,6 +82,8 @@ def download_nuts_file(level: int, **context) -> str:
 
 
 def process_nuts_data(level: int, **context) -> dict:
+    import geopandas as gpd
+
     """
     Process NUTS GeoJSON: transform to EPSG:3035, calculate area, validate.
     
@@ -176,6 +177,8 @@ def process_nuts_data(level: int, **context) -> dict:
 
 
 def load_nuts_to_database(level: int, **context) -> dict:
+    import geopandas as gpd
+
     """
     Load processed NUTS data into dim_region table.
     

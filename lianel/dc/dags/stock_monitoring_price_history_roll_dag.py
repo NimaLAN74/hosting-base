@@ -8,9 +8,10 @@ Run once per day after market close (e.g. 00:05 UTC).
 
 import os
 from datetime import datetime, timedelta
-from urllib import request
+from urllib import request, error
 
 from airflow import DAG
+from airflow.exceptions import AirflowSkipException
 from airflow.providers.standard.operators.python import PythonOperator
 
 
@@ -20,10 +21,20 @@ def roll_daily_price_history(**context):
     url = f"{base_url.rstrip('/')}/internal/price-history/roll-daily"
     req = request.Request(url=url, method="POST", data=b"")
     req.add_header("Content-Type", "application/json")
-    with request.urlopen(req, timeout=120) as response:  # nosec B310 - trusted internal endpoint
-        status = response.status
-        body = response.read().decode("utf-8")
+    try:
+        with request.urlopen(req, timeout=120) as response:  # nosec B310 - trusted internal endpoint
+            status = response.status
+            body = response.read().decode("utf-8")
+    except error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
+        if e.code >= 500:
+            raise AirflowSkipException(f"Stock service transient HTTP {e.code}: {body[:500]}")
+        raise RuntimeError(f"Roll daily failed: HTTP {e.code} - {body[:500]}")
+    except error.URLError as e:
+        raise AirflowSkipException(f"Stock service unavailable (network): {e}")
     if status < 200 or status >= 300:
+        if status >= 500:
+            raise AirflowSkipException(f"Stock service transient HTTP {status}: {body[:500]}")
         raise RuntimeError(f"Roll daily failed: HTTP {status} - {body[:500]}")
     try:
         import json

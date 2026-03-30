@@ -19,8 +19,12 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from shapely.geometry import Point, Polygon, shape
 from shapely.ops import transform
-import pyproj
 from functools import partial
+
+try:
+    import pyproj
+except ModuleNotFoundError:
+    pyproj = None
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +299,11 @@ def get_region_bbox(region_geometry: Any) -> Tuple[float, float, float, float]:
             if 'properties' in crs_info and 'name' in crs_info['properties']:
                 crs_name = crs_info['properties']['name']
                 if 'EPSG:4326' not in crs_name and 'CRS84' not in crs_name:
+                    if pyproj is None:
+                        raise RuntimeError(
+                            "pyproj is required to transform non-WGS84 region geometries. "
+                            "Install pyproj in the Airflow environment."
+                        )
                     # Need to transform from source CRS to WGS84
                     source_crs = pyproj.CRS.from_string(crs_name)
                     target_crs = pyproj.CRS.from_epsg(4326)
@@ -321,6 +330,11 @@ def get_region_bbox(region_geometry: Any) -> Tuple[float, float, float, float]:
     # If coordinates are outside lat/lon ranges, transform from projected CRS
     if abs(min_x) > 180 or abs(max_x) > 180 or abs(min_y) > 90 or abs(max_y) > 90:
         try:
+            if pyproj is None:
+                raise RuntimeError(
+                    "pyproj is required to transform projected region geometry to WGS84. "
+                    "Install pyproj in the Airflow environment."
+                )
             # Common CRS for EU NUTS regions: EPSG:3035 (ETRS89/LAEA Europe)
             # Transform to WGS84 (EPSG:4326)
             source_crs = pyproj.CRS.from_epsg(3035)
