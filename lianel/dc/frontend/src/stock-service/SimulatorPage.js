@@ -398,8 +398,9 @@ export default function SimulatorPage() {
     }
   };
 
-  const refreshLabel = lastRefreshTs ? new Date(lastRefreshTs).toLocaleTimeString('sv-SE') : '—';
+  const refreshLabel = lastRefreshTs ? new Date(lastRefreshTs).toLocaleString('sv-SE', { hour12: false }) : '—';
   const decisionFeatures = explainData?.decision?.features || {};
+  const blotterVisibleCount = Math.min(500, blotterOrders.length);
 
   return (
     <PageTemplate title="Realistic Trading Simulator" subtitle="Run control, live monitoring, and trade-level decision forensics">
@@ -476,23 +477,63 @@ export default function SimulatorPage() {
         <section className="sim-card">
           <div className="sim-row-head sim-row-head--wrap">
             <h3>Current Run Status</h3>
-            <div className="sim-toolbar">
-              <label className="sim-check">
-                <input type="checkbox" checked={refreshEnabled} onChange={(e) => setRefreshEnabled(e.target.checked)} />
-                Auto refresh
-              </label>
-              <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value || 60000))}>
-                <option value={30000}>30s</option>
-                <option value={60000}>60s</option>
-                <option value={120000}>120s</option>
-              </select>
-              <select value={exchangeFilter} onChange={(e) => setExchangeFilter(e.target.value)}>
-                {exchanges.map((x) => (<option key={x} value={x}>{x}</option>))}
-              </select>
-              <button className="sim-btn sim-btn--secondary" type="button" onClick={loadSelectedRun}>
-                {isRefreshing ? 'Refreshing...' : 'Refresh Now'}
-              </button>
-              <span className="sim-note">Last update: {refreshLabel}</span>
+            <div className="sim-monitor-bar" role="presentation">
+              <div className="sim-control-group" role="group" aria-label="Run data refresh">
+                <span className="sim-control-group__title">Run data</span>
+                <div className="sim-control-group__row">
+                  <label className="sim-check sim-check--spaced" htmlFor="sim-auto-refresh">
+                    <input
+                      id="sim-auto-refresh"
+                      type="checkbox"
+                      checked={refreshEnabled}
+                      onChange={(e) => setRefreshEnabled(e.target.checked)}
+                    />
+                    Refresh automatically
+                  </label>
+                  <label className="sim-inline-field" htmlFor="sim-refresh-interval">
+                    <span className="sim-inline-field__label">Interval</span>
+                    <select
+                      id="sim-refresh-interval"
+                      value={refreshMs}
+                      onChange={(e) => setRefreshMs(Number(e.target.value || 60000))}
+                      aria-describedby="sim-refresh-hint"
+                    >
+                      <option value={30000}>Every 30 seconds</option>
+                      <option value={60000}>Every 1 minute</option>
+                      <option value={120000}>Every 2 minutes</option>
+                    </select>
+                  </label>
+                  <button className="sim-btn sim-btn--secondary" type="button" onClick={loadSelectedRun}>
+                    {isRefreshing ? 'Refreshing…' : 'Refresh now'}
+                  </button>
+                </div>
+                <p id="sim-refresh-hint" className="sim-control-hint">
+                  Updates status, holdings, timeline, orders, and risk for the run you selected in the list above. Last fetched:{' '}
+                  {lastRefreshTs ? (
+                    <time dateTime={new Date(lastRefreshTs).toISOString()}>{refreshLabel}</time>
+                  ) : (
+                    refreshLabel
+                  )}
+                </p>
+              </div>
+              <div className="sim-control-group" role="group" aria-label="Timeline filter">
+                <span className="sim-control-group__title">Timeline</span>
+                <div className="sim-control-group__row">
+                  <label className="sim-inline-field sim-inline-field--grow" htmlFor="sim-exchange-filter">
+                    <span className="sim-inline-field__label">Show events for</span>
+                    <select
+                      id="sim-exchange-filter"
+                      value={exchangeFilter}
+                      onChange={(e) => setExchangeFilter(e.target.value)}
+                    >
+                      {exchanges.map((x) => (
+                        <option key={x} value={x}>{x === 'ALL' ? 'All exchanges' : x}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="sim-control-hint">Filters the event list only. Holdings and blotter still use the full run.</p>
+              </div>
             </div>
           </div>
 
@@ -650,12 +691,32 @@ export default function SimulatorPage() {
         <div className="sim-grid sim-grid--two">
           <section className="sim-card">
             <h3>Trade Blotter</h3>
-            <div className="sim-toolbar">
-              <label className="sim-check">
-                <input type="checkbox" checked={onlyTodayOrders} onChange={(e) => setOnlyTodayOrders(e.target.checked)} />
-                Only today
-              </label>
-              <span className="sim-note">Showing {Math.min(500, blotterOrders.length)} of {blotterOrders.length} recent orders</span>
+            <div className="sim-blotter-controls">
+              <div className="sim-control-group" role="group" aria-label="Blotter filter">
+                <span className="sim-control-group__title">Filter</span>
+                <div className="sim-control-group__row">
+                  <label className="sim-check sim-check--spaced" htmlFor="sim-blotter-today">
+                    <input
+                      id="sim-blotter-today"
+                      type="checkbox"
+                      checked={onlyTodayOrders}
+                      onChange={(e) => setOnlyTodayOrders(e.target.checked)}
+                    />
+                    {"Today's trades only"}
+                  </label>
+                </div>
+                <p id="sim-blotter-filter-hint" className="sim-control-hint">
+                  {"Uses your device's local calendar date on the order timestamp (wall clock when present, otherwise simulator time)."}
+                </p>
+              </div>
+              <p className="sim-blotter-count" aria-live="polite">
+                <strong>{blotterVisibleCount}</strong> row{blotterVisibleCount !== 1 ? 's' : ''} in this list
+                {blotterOrders.length > blotterVisibleCount && ` (cap 500)`}
+                {' · '}
+                <strong>{blotterOrders.length}</strong> after filter
+                {' · '}
+                <strong>{orders.length}</strong> loaded from server
+              </p>
             </div>
             {ordersError && <p className="sim-error">{ordersError}</p>}
             {!ordersError && blotterOrders.length === 0 && <p className="sim-note">No orders in this view yet.</p>}

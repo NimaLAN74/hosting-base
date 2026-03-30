@@ -181,6 +181,92 @@
   flex-wrap: wrap;
 }
 
+.sim-monitor-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+.sim-control-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem 0.5rem;
+  background: #fafafa;
+}
+
+.sim-control-group__title {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sim-muted);
+  margin-bottom: 0.4rem;
+}
+
+.sim-control-group__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+}
+
+.sim-check--spaced {
+  gap: 0.45rem !important;
+}
+
+.sim-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  color: var(--sim-text);
+}
+
+.sim-inline-field--grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.sim-inline-field__label {
+  font-weight: 600;
+  color: var(--sim-muted);
+  white-space: nowrap;
+}
+
+.sim-inline-field select {
+  min-width: 11rem;
+  flex: 1;
+}
+
+.sim-control-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--sim-muted);
+  max-width: 52rem;
+}
+
+.sim-blotter-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.5rem;
+}
+
+.sim-blotter-count {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--sim-text);
+  line-height: 1.4;
+}
+
+.sim-blotter-count strong {
+  font-variant-numeric: tabular-nums;
+}
+
 .sim-control-row {
   display: flex;
   align-items: center;
