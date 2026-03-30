@@ -11,7 +11,12 @@ from datetime import datetime, timedelta
 from urllib import request, parse
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+try:
+    # Airflow 2.4+ location.
+    from airflow.operators.python import PythonOperator
+except Exception:  # pragma: no cover - compatibility for older Airflow runtimes
+    # Legacy location used by older Airflow installs.
+    from airflow.operators.python_operator import PythonOperator
 
 
 def run_simulator_replay(**context):
@@ -99,17 +104,21 @@ default_args = {
 }
 
 dag = DAG(
-    "stock_monitoring_simulator_replay",
+    dag_id="stock_monitoring_simulator_replay",
     default_args=default_args,
     description="Trigger stock replay simulator to find model/process/data gaps",
-    schedule="*/30 * * * *",  # Keep one active run; restart quickly after completion/bankrupt.
+    # Use schedule_interval for broad compatibility across Airflow versions.
+    schedule_interval="*/30 * * * *",  # Keep one active run; restart quickly after completion/bankrupt.
     catchup=False,
     tags=["stock-service", "simulator", "bias-detection"],
 )
 
-PythonOperator(
+run_task = PythonOperator(
     task_id="run_simulator_replay",
     python_callable=run_simulator_replay,
     dag=dag,
 )
+
+# Some runtimes are strict about symbol exposure while loading bundles.
+globals()["stock_monitoring_simulator_replay"] = dag
 
