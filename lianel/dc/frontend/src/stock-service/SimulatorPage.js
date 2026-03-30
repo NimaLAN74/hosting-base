@@ -63,6 +63,7 @@ export default function SimulatorPage() {
   const [lastRefreshTs, setLastRefreshTs] = useState(0);
 
   const [selectedOrderKey, setSelectedOrderKey] = useState('');
+  const [onlyTodayOrders, setOnlyTodayOrders] = useState(true);
   const [explainData, setExplainData] = useState(null);
   const [explainError, setExplainError] = useState('');
 
@@ -92,6 +93,25 @@ export default function SimulatorPage() {
     () => orders.find((o) => `${o.order_id}-${o.ts}-${o.status}` === selectedOrderKey) || null,
     [orders, selectedOrderKey]
   );
+
+  const blotterOrders = useMemo(() => {
+    const sorted = [...orders].sort((a, b) => {
+      const ta = Number(a?.wall_clock_ts || a?.ts || 0);
+      const tb = Number(b?.wall_clock_ts || b?.ts || 0);
+      return tb - ta;
+    });
+    if (!onlyTodayOrders) return sorted;
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    const d = today.getDate();
+    return sorted.filter((o) => {
+      const t = Number(o?.wall_clock_ts || o?.ts || 0);
+      if (!t) return false;
+      const dt = new Date(t * 1000);
+      return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+    });
+  }, [orders, onlyTodayOrders]);
 
   const latestRisk = useMemo(() => (riskSeries.length > 0 ? riskSeries[riskSeries.length - 1] : null), [riskSeries]);
 
@@ -158,7 +178,7 @@ export default function SimulatorPage() {
       ? `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/timeline?limit=400`
       : `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/exchanges/${encodeURIComponent(exchangeFilter)}?limit=400`;
     const biasUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/bias-report`;
-    const ordersUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/orders?limit=500`;
+    const ordersUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/orders?limit=2000`;
     const riskUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/risk?limit=500`;
     const readinessUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/readiness`;
     const shouldQueryReadiness = !readinessUnavailableRunsRef.current.has(selectedRunId);
@@ -202,8 +222,12 @@ export default function SimulatorPage() {
       setOrders(nextOrders);
       setOrdersError('');
       if (!selectedOrderKey && nextOrders.length > 0) {
-        const first = nextOrders[0];
-        setSelectedOrderKey(`${first.order_id}-${first.ts}-${first.status}`);
+        const latest = [...nextOrders].sort((a, b) => {
+          const ta = Number(a?.wall_clock_ts || a?.ts || 0);
+          const tb = Number(b?.wall_clock_ts || b?.ts || 0);
+          return tb - ta;
+        })[0];
+        if (latest) setSelectedOrderKey(`${latest.order_id}-${latest.ts}-${latest.status}`);
       }
     } else {
       setOrders([]);
@@ -511,10 +535,17 @@ export default function SimulatorPage() {
         <div className="sim-grid sim-grid--two">
           <section className="sim-card">
             <h3>Trade Blotter</h3>
+            <div className="sim-toolbar">
+              <label className="sim-check">
+                <input type="checkbox" checked={onlyTodayOrders} onChange={(e) => setOnlyTodayOrders(e.target.checked)} />
+                Only today
+              </label>
+              <span className="sim-note">Showing {Math.min(500, blotterOrders.length)} of {blotterOrders.length} recent orders</span>
+            </div>
             {ordersError && <p className="sim-error">{ordersError}</p>}
-            {!ordersError && orders.length === 0 && <p className="sim-note">No orders yet.</p>}
+            {!ordersError && blotterOrders.length === 0 && <p className="sim-note">No orders in this view yet.</p>}
             <div className="sim-runs-list sim-runs-list--tall">
-              {orders.slice(0, 250).map((o) => {
+              {blotterOrders.slice(0, 500).map((o) => {
                 const key = `${o.order_id}-${o.ts}-${o.status}`;
                 const tone = statusTone(o.status);
                 return (
@@ -523,7 +554,7 @@ export default function SimulatorPage() {
                     className={`sim-run-row ${selectedOrderKey === key ? 'active' : ''}`}
                     onClick={() => setSelectedOrderKey(key)}
                   >
-                    <span>{o.symbol} · {o.side}</span>
+                    <span>{fmtTs(o.wall_clock_ts || o.ts)} · {o.symbol} · {o.side}</span>
                     <span className={`sim-pill sim-pill--${tone}`}>{o.status}</span>
                     <span>${Number(o.filled_notional_usd || 0).toFixed(2)}</span>
                   </button>

@@ -52,10 +52,10 @@ def run_simulator_replay(**context):
         "short_enabled": os.getenv("SIM_REPLAY_SHORT_ENABLED", "true").lower() in ("1", "true", "yes"),
         "initial_capital_usd": float(os.getenv("SIM_REPLAY_INITIAL_CAPITAL_USD", "100")),
         "reinvest_profit": os.getenv("SIM_REPLAY_REINVEST", "true").lower() in ("1", "true", "yes"),
-        # Keep the run visibly active for monitoring instead of finishing in seconds.
-        "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "250")),
+        # Fast replay, but not unrealistically extreme.
+        "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "1000")),
         "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),
-        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "20000")),
+        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "252")),
     }
     target_days = max(7, min(days, 365))
     candidate_days = [target_days, 126, 90, 60, 30, 14, 7]

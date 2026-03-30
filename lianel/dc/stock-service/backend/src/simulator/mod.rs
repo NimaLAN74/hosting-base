@@ -143,6 +143,8 @@ pub struct SimOrderLedgerRow {
     pub decision_id: String,
     pub run_id: String,
     pub ts: u64,
+    #[serde(default)]
+    pub wall_clock_ts: u64,
     pub symbol: String,
     pub exchange: String,
     pub side: String,
@@ -359,8 +361,9 @@ pub async fn get_timeline(
     limit: usize,
 ) -> Result<Vec<SimEvent>, String> {
     let mut conn = redis.clone();
+    let n = limit.max(1) as isize;
     let rows: Vec<String> = conn
-        .lrange(run_events_key(run_id), 0, (limit.max(1) as isize) - 1)
+        .lrange(run_events_key(run_id), -n, -1)
         .await
         .map_err(|e| e.to_string())?;
     Ok(rows
@@ -405,8 +408,9 @@ pub async fn get_order_ledger(
     limit: usize,
 ) -> Result<Vec<SimOrderLedgerRow>, String> {
     let mut conn = redis.clone();
+    let n = limit.max(1) as isize;
     let rows: Vec<String> = conn
-        .lrange(run_orders_key(run_id), 0, (limit.max(1) as isize) - 1)
+        .lrange(run_orders_key(run_id), -n, -1)
         .await
         .map_err(|e| e.to_string())?;
     Ok(rows
@@ -421,8 +425,9 @@ pub async fn get_risk_snapshots(
     limit: usize,
 ) -> Result<Vec<SimRiskSnapshot>, String> {
     let mut conn = redis.clone();
+    let n = limit.max(1) as isize;
     let rows: Vec<String> = conn
-        .lrange(run_risk_key(run_id), 0, (limit.max(1) as isize) - 1)
+        .lrange(run_risk_key(run_id), -n, -1)
         .await
         .map_err(|e| e.to_string())?;
     Ok(rows
@@ -942,6 +947,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     decision_id: decision_id.clone(),
                     run_id: run_id_cloned.clone(),
                     ts: decision_ts,
+                    wall_clock_ts: now_ts(),
                     symbol: sym.clone(),
                     exchange: exchange.code.to_string(),
                     side: side.clone(),
@@ -1000,6 +1006,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     decision_id: decision_id.clone(),
                     run_id: run_id_cloned.clone(),
                     ts: exec_ts,
+                    wall_clock_ts: now_ts(),
                     symbol: sym.clone(),
                     exchange: exchange.code.to_string(),
                     side: side.clone(),
