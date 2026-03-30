@@ -2,6 +2,7 @@
 
 use crate::ibkr::IbkrOAuthClient;
 use crate::today_cache;
+use chrono::{SecondsFormat, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -359,20 +360,7 @@ impl Default for WatchlistCache {
 }
 
 fn iso_ts() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let days = secs / 86400;
-    let rem = secs % 86400;
-    let h = rem / 3600;
-    let m = (rem % 3600) / 60;
-    let s = rem % 60;
-    let y = 1970u64 + (days / 365).min(200);
-    let d = (days % 365) as u32;
-    let mo = ((d / 31) % 12).max(1).min(12);
-    let da = (d % 28).max(1).min(28);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, da, h, m, s)
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 /// Refresh watchlist from IBKR only. If ibkr_client is None, all quotes get error "IBKR not configured".
@@ -818,6 +806,52 @@ pub async fn refresh_from_ibkr(
                         error: Some(err_msg.clone()),
                     },
                 );
+            }
+        }
+    }
+
+    // Fallback path for symbols lacking live L1 quote fields (31/84/86):
+    // use latest available IBKR daily close so watchlist still shows a usable price.
+    let missing_symbols: Vec<String> = configured_watchlist_symbols()
+        .iter()
+        .filter_map(|s| {
+            let missing = next
+                .quotes
+                .get(*s)
+                .map(|q| q.price.is_none())
+                .unwrap_or(true);
+            if missing {
+                Some((*s).to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    for symbol in missing_symbols {
+        let Some(conid) = conids_map.get(&symbol).copied() else {
+            continue;
+        };
+        match client.fetch_history(conid, "1m", "1d").await {
+            Ok(bars) => {
+                let last_close = bars
+                    .iter()
+                    .rev()
+                    .find_map(|b| (b.close.is_finite() && b.close > 0.0).then_some(b.close));
+                if let Some(px) = last_close {
+                    next.quotes.insert(
+                        symbol.clone(),
+                        WatchlistQuote {
+                            symbol: symbol.clone(),
+                            price: Some(px),
+                            currency: Some("USD".to_string()),
+                            updated_at: Some(as_of.clone()),
+                            error: None,
+                        },
+                    );
+                }
+            }
+            Err(_) => {
+                // Keep original no-price state if history fallback is unavailable.
             }
         }
     }

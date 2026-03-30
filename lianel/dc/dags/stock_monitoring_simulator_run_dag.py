@@ -8,7 +8,7 @@ bias, process gaps, and missing data issues from realistic execution replay.
 import json
 import os
 from datetime import datetime, timedelta
-from urllib import request
+from urllib import request, parse
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
@@ -16,15 +16,41 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 def run_simulator_replay(**context):
     base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-service:3003")
-    days = int(os.getenv("SIM_REPLAY_DAYS", "7"))
+    days = int(os.getenv("SIM_REPLAY_DAYS", "126"))
+    limit = int(os.getenv("SIM_REPLAY_RUN_LIST_LIMIT", "20"))
+    runs_url = f"{base_url.rstrip('/')}/api/v1/stock-service/sim/runs?{parse.urlencode({'limit': max(5, min(limit, 100))})}"
+    with request.urlopen(runs_url, timeout=30) as response:  # nosec B310 - trusted internal endpoint
+        runs_raw = response.read().decode("utf-8")
+    runs_data = json.loads(runs_raw) if runs_raw else {}
+    runs = runs_data.get("runs", []) if isinstance(runs_data, dict) else []
+    latest = runs[0] if runs else None
+    latest_status = str((latest or {}).get("status", "")).lower()
+    latest_stop_reason = str((latest or {}).get("stop_reason", "")).upper()
+    active_statuses = {"queued", "running", "paused"}
+    has_active = any(str((r or {}).get("status", "")).lower() in active_statuses for r in runs if isinstance(r, dict))
+
+    # Continuous mode: keep exactly one active run. If a run is already active, skip.
+    if has_active:
+        print("Simulator run already active; skip trigger.")
+        return
+
+    # Start a new run when no active run exists.
+    # This includes initial bootstrap and explicit restart after bankrupt termination.
+    if latest and latest_status == "completed" and latest_stop_reason == "BANKRUPT":
+        print("Latest run ended BANKRUPT; starting replacement run.")
+    elif latest:
+        print(f"No active run. Latest status={latest_status or 'unknown'} stop_reason={latest_stop_reason or 'n/a'}. Starting new run.")
+
     payload = {
-        "days": max(5, min(days, 30)),
+        "days": max(126, min(days, 365)),
         "top": int(os.getenv("SIM_REPLAY_TOP", "16")),
         "quantile": float(os.getenv("SIM_REPLAY_QUANTILE", "0.2")),
         "short_enabled": os.getenv("SIM_REPLAY_SHORT_ENABLED", "true").lower() in ("1", "true", "yes"),
         "initial_capital_usd": float(os.getenv("SIM_REPLAY_INITIAL_CAPITAL_USD", "100")),
         "reinvest_profit": os.getenv("SIM_REPLAY_REINVEST", "true").lower() in ("1", "true", "yes"),
         "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "0")),
+        "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),
+        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "252")),
     }
     url = f"{base_url.rstrip('/')}/api/v1/stock-service/sim/runs"
     body = json.dumps(payload).encode("utf-8")
@@ -57,7 +83,7 @@ dag = DAG(
     "stock_monitoring_simulator_replay",
     default_args=default_args,
     description="Trigger stock replay simulator to find model/process/data gaps",
-    schedule="30 2 * * 1-5",  # Weekdays after most daily data is available
+    schedule="*/30 * * * *",  # Keep one active run; restart quickly after completion/bankrupt.
     catchup=False,
     tags=["stock-service", "simulator", "bias-detection"],
 )

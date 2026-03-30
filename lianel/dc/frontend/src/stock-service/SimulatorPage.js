@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import PageTemplate from '../PageTemplate';
 import './SimulatorPage.css';
 
@@ -309,6 +310,9 @@ export default function SimulatorPage() {
 
   return (
     <PageTemplate title="Realistic Trading Simulator" subtitle="Run control, live monitoring, and trade-level decision forensics">
+      <p className="sim-note">
+        <Link to="/stock" className="sim-back-link">← Back to Stock Service</Link>
+      </p>
       <div className="sim-stage">
         <h2 className="sim-stage-title">1) Run Control</h2>
         <div className="sim-grid sim-grid--two">

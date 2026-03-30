@@ -602,7 +602,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .ok_or_else(|| "IBKR not configured".to_string())?
         .clone();
 
-    req.days = req.days.max(30).min(365);
+    // Allow short replay windows when aligned market data is sparse.
+    // Continuous six-month evidence still comes from readiness_min_days/max_cycles.
+    req.days = req.days.max(7).min(365);
     req.top = req.top.max(6).min(40);
     req.quantile = req.quantile.clamp(0.05, 0.45);
     req.initial_capital_usd = req.initial_capital_usd.max(25.0);

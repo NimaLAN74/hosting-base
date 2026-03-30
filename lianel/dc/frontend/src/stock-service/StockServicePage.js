@@ -1503,6 +1503,10 @@ export default function StockServicePage() {
                       const isExpanded = expandedSymbol === row.symbol;
                       const symbolRange = getRangeForSymbol(row.symbol);
                       const historyEntry = historyBySymbol[`${row.symbol}:${symbolRange}`];
+                      const updatedSource = row.updated_at || watchlist.as_of || null;
+                      const updatedDt = updatedSource ? new Date(updatedSource) : null;
+                      const updatedAgeMs = updatedDt && !Number.isNaN(updatedDt.getTime()) ? (Date.now() - updatedDt.getTime()) : null;
+                      const isStale = updatedAgeMs != null && updatedAgeMs > (2 * 60 * 60 * 1000);
                       return (
                         <React.Fragment key={row.symbol}>
                           <tr
@@ -1537,7 +1541,10 @@ export default function StockServicePage() {
                               {change === null && <span>—</span>}
                             </td>
                             <td>{row.currency || '—'}</td>
-                            <td className="stock-service-wl-updated">{formatSvDateTime24h(row.updated_at)}</td>
+                            <td className="stock-service-wl-updated">
+                              {formatSvDateTime24h(updatedSource)}
+                              {isStale ? ' (stale)' : ''}
+                            </td>
                             <td>
                               {row.error ? (
                                 row.error.includes('pre-flight or stream not ready') ? (
