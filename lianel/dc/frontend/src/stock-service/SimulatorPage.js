@@ -5,6 +5,7 @@ import './SimulatorPage.css';
 
 const RUNS_URL = '/api/v1/stock-service/sim/runs';
 const PURGE_URL = '/api/v1/stock-service/sim/purge';
+const PURGE_STATUS_URL = '/api/v1/stock-service/sim/purge-status';
 
 /** Default campaign: live quotes, 60s cadence, ~6-month readiness window, high max_cycles. */
 const SIX_MONTH_LIVE_PRESET = {
@@ -90,6 +91,8 @@ export default function SimulatorPage() {
   const [startMsg, setStartMsg] = useState('');
   const [purgeSecret, setPurgeSecret] = useState('');
   const [purgeLoading, setPurgeLoading] = useState(false);
+  /** null = backend did not report (older deploy); false = SIMULATOR_PURGE_SECRET unset */
+  const [serverPurgeAvailable, setServerPurgeAvailable] = useState(null);
   const [controlLoading, setControlLoading] = useState(false);
   const [controlMsg, setControlMsg] = useState('');
   const readinessUnavailableRunsRef = useRef(new Set());
@@ -328,6 +331,26 @@ export default function SimulatorPage() {
   }, [loadRuns]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(PURGE_STATUS_URL, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        const j = await r.json().catch(() => null);
+        if (cancelled || !r.ok || !j || typeof j.purge_enabled !== 'boolean') return;
+        setServerPurgeAvailable(j.purge_enabled);
+      } catch {
+        /* leave null — older image without /purge-status */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setExplainData(null);
     setExplainError('');
     loadSelectedRun();
@@ -408,6 +431,10 @@ export default function SimulatorPage() {
   }, [clearRunPanels, loadRuns]);
 
   const handlePurgeServer = useCallback(async () => {
+    if (serverPurgeAvailable === false) {
+      setStartMsg('Server purge is disabled: set SIMULATOR_PURGE_SECRET on stock-service and redeploy.');
+      return;
+    }
     if (!purgeSecret.trim()) {
       setStartMsg('Set the purge secret before erasing server runs.');
       return;
@@ -436,9 +463,13 @@ export default function SimulatorPage() {
     } finally {
       setPurgeLoading(false);
     }
-  }, [purgeSecret, clearRunPanels, loadRuns]);
+  }, [purgeSecret, clearRunPanels, loadRuns, serverPurgeAvailable]);
 
   const handlePurgeAndStart = useCallback(async () => {
+    if (serverPurgeAvailable === false) {
+      setStartMsg('Server purge is disabled: set SIMULATOR_PURGE_SECRET on stock-service and redeploy.');
+      return;
+    }
     if (!purgeSecret.trim()) {
       setStartMsg('Set the purge secret before erase-and-start.');
       return;
@@ -468,7 +499,7 @@ export default function SimulatorPage() {
     } finally {
       setPurgeLoading(false);
     }
-  }, [purgeSecret, clearRunPanels, loadRuns, startRunWithPayload]);
+  }, [purgeSecret, clearRunPanels, loadRuns, startRunWithPayload, serverPurgeAvailable]);
 
   const handleSelectRun = useCallback((runId) => {
     if (!runId || runId === selectedRunId) return;
@@ -559,6 +590,12 @@ export default function SimulatorPage() {
               </label>
             </div>
             <div className="sim-purge-panel">
+              {serverPurgeAvailable === false && (
+                <p className="sim-error">
+                  Server run history cannot be wiped here: <code>SIMULATOR_PURGE_SECRET</code> is not set on stock-service.
+                  Use <strong>Clear page &amp; reset form</strong> to reset only this browser view, or set the secret and redeploy to enable erase.
+                </p>
+              )}
               <p className="sim-control-hint">
                 To wipe the server run list, set env <code>SIMULATOR_PURGE_SECRET</code> on stock-service, enter it here, then erase.
               </p>
@@ -570,12 +607,22 @@ export default function SimulatorPage() {
                   placeholder="Purge secret (server)"
                   value={purgeSecret}
                   onChange={(e) => setPurgeSecret(e.target.value)}
-                  disabled={purgeLoading || startLoading}
+                  disabled={purgeLoading || startLoading || serverPurgeAvailable === false}
                 />
-                <button type="button" className="sim-btn sim-btn--secondary" disabled={purgeLoading || startLoading} onClick={handlePurgeServer}>
+                <button
+                  type="button"
+                  className="sim-btn sim-btn--secondary"
+                  disabled={purgeLoading || startLoading || serverPurgeAvailable === false}
+                  onClick={handlePurgeServer}
+                >
                   {purgeLoading ? 'Working…' : 'Erase all runs (server)'}
                 </button>
-                <button type="button" className="sim-btn" disabled={purgeLoading || startLoading} onClick={handlePurgeAndStart}>
+                <button
+                  type="button"
+                  className="sim-btn"
+                  disabled={purgeLoading || startLoading || serverPurgeAvailable === false}
+                  onClick={handlePurgeAndStart}
+                >
                   Erase all &amp; start 6-month live
                 </button>
               </div>

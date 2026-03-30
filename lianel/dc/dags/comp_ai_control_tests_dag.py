@@ -14,7 +14,10 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.exceptions import AirflowException
-from airflow.providers.standard.operators.python import PythonOperator
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+except ImportError:
+    from airflow.operators.python import PythonOperator
 
 # Add utils to path for comp_ai_client
 import sys

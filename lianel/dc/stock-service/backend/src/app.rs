@@ -182,6 +182,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/v1/sim/purge", post(sim_purge_handler))
         .route("/api/v1/stock-service/sim/purge", post(sim_purge_handler))
+        .route("/api/v1/sim/purge-status", get(sim_purge_status_handler))
+        .route(
+            "/api/v1/stock-service/sim/purge-status",
+            get(sim_purge_status_handler),
+        )
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -1345,6 +1350,23 @@ struct SimPurgeBody {
     secret: String,
 }
 
+fn simulator_purge_secret_configured() -> bool {
+    std::env::var("SIMULATOR_PURGE_SECRET")
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Whether POST `/sim/purge` is available (secret set on server). Does not reveal the secret.
+async fn sim_purge_status_handler() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "purge_enabled": simulator_purge_secret_configured()
+        })),
+    )
+        .into_response()
+}
+
 /// Wipe simulator Redis keys. Requires `SIMULATOR_PURGE_SECRET` on the server and matching JSON body `secret`.
 async fn sim_purge_handler(
     State(state): State<AppState>,
@@ -1357,26 +1379,17 @@ async fn sim_purge_handler(
         )
             .into_response();
     };
-    let expected = match std::env::var("SIMULATOR_PURGE_SECRET") {
-        Ok(s) => {
-            let t = s.trim();
-            if t.is_empty() {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({"error":"Simulator purge is not enabled (set SIMULATOR_PURGE_SECRET on the server)"})),
-                )
-                    .into_response();
-            }
-            t.to_string()
-        }
-        Err(_) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error":"Simulator purge is not enabled (set SIMULATOR_PURGE_SECRET on the server)"})),
-            )
-                .into_response();
-        }
-    };
+    if !simulator_purge_secret_configured() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Simulator purge is not enabled (set SIMULATOR_PURGE_SECRET on the server)"})),
+        )
+            .into_response();
+    }
+    let expected = std::env::var("SIMULATOR_PURGE_SECRET")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     if body.secret != expected {
         return (
             StatusCode::UNAUTHORIZED,

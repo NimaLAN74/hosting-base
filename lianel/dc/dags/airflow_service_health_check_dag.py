@@ -12,7 +12,10 @@ Schedule: Every 10 minutes.
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.exceptions import AirflowException
-from airflow.providers.standard.operators.python import PythonOperator
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+except ImportError:  # Airflow 2.x or slim images without standard provider
+    from airflow.operators.python import PythonOperator
 
 default_args = {
     'owner': 'lianel',

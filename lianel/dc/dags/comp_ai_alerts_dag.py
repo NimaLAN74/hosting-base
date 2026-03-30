@@ -20,7 +20,10 @@ from datetime import datetime, timedelta
 import requests
 
 from airflow import DAG
-from airflow.providers.standard.operators.python import PythonOperator
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+except ImportError:
+    from airflow.operators.python import PythonOperator
 
 # Add utils to path for comp_ai_client
 import sys

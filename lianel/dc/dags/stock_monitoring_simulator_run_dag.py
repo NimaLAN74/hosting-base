@@ -28,7 +28,11 @@ except Exception:  # pragma: no cover - compatibility for older Airflow runtimes
 
 
 def run_simulator_replay(**context):
-    base_url = os.getenv("STOCK_MONITORING_INTERNAL_URL", "http://lianel-stock-service:3003")
+    base_url = (
+        os.getenv("STOCK_SERVICE_INTERNAL_URL")
+        or os.getenv("STOCK_MONITORING_INTERNAL_URL")
+        or "http://lianel-stock-service:3003"
+    )
     days = int(os.getenv("SIM_REPLAY_DAYS", "126"))
     limit = int(os.getenv("SIM_REPLAY_RUN_LIST_LIMIT", "20"))
     runs_url = f"{base_url.rstrip('/')}/api/v1/stock-service/sim/runs?{parse.urlencode({'limit': max(5, min(limit, 100))})}"

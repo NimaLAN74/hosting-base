@@ -55,13 +55,13 @@ if [ "$daily_total" -eq 0 ] && [ "$intra_total" -eq 0 ]; then
   echo "  Charts show little/no history because:"
   echo "    - daily=0: No rows in price_history_daily (roll-daily job not run or no intraday data yet)."
   echo "    - intraday_today=0: No rows in price_history_intraday for today, and no Redis/cache points."
-  echo "  Fix: Run stock_monitoring_price_history_roll DAG (daily), ensure ingest DAG runs and persist_intraday_quotes succeeds; set REDIS_URL if using Redis."
+  echo "  Fix: Confirm stock-service has history data (IBKR/watchlist path); set REDIS_URL if using Redis; legacy Airflow roll/ingest DAGs were removed."
 elif [ "$daily_total" -eq 0 ]; then
   echo "  Last-7-days chart incomplete: daily=0 (roll-daily job not run or no data). Current-day chart can show intraday points."
-  echo "  Fix: Run stock_monitoring_price_history_roll DAG (e.g. 00:05 UTC) to populate price_history_daily from intraday."
+  echo "  Fix: Populate price_history from the current stock-service pipeline (no Airflow roll DAG)."
 elif [ "$intra_total" -eq 0 ]; then
   echo "  Current-day chart empty: intraday_today=0. Last-7-days chart may show daily bars only."
-  echo "  Fix: Ensure quotes are fetched (dashboard or ingest) and persist_intraday_quotes/Redis writes succeed."
+  echo "  Fix: Ensure watchlist quotes and persist/Redis writes succeed (dashboard or stock_service_heartbeat for connectivity)."
 else
   echo "  API returns both daily and intraday data; chart should show history. If UI still incomplete, check frontend parsing (trade_date/observed_at, close_price/price)."
 fi
