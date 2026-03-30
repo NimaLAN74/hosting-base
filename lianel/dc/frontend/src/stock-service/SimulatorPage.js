@@ -121,16 +121,27 @@ export default function SimulatorPage() {
     [timeline]
   );
   const runDataModeLabel = useMemo(() => {
+    if (runStatus?.live_market_data === true) return 'LIVE (real-time quotes)';
+    if (runStatus?.live_market_data === false) return 'REPLAY (historical daily bars)';
     if (!runStartedEvent) return '—';
     return runStartedEvent?.payload?.live_market_data
       ? 'LIVE (real-time quotes)'
-      : 'REPLAY (historical bars)';
-  }, [runStartedEvent]);
+      : 'REPLAY (historical daily bars)';
+  }, [runStatus, runStartedEvent]);
 
   const holdingsDeployedTotal = useMemo(() => {
     const d = Number(holdings?.deployed_usd || 0);
     return d > 0 ? d : 1;
   }, [holdings]);
+
+  const runLooksStuck = useMemo(() => {
+    if (!runStatus || String(runStatus.status || '').toLowerCase() !== 'running') return false;
+    if (Number(runStatus.cycles_completed || 0) > 0) return false;
+    const started = Number(runStatus.started_at_ts || 0);
+    if (!started) return false;
+    const ageSec = Date.now() / 1000 - started;
+    return ageSec > 180;
+  }, [runStatus]);
 
   const clearRunPanels = useCallback(() => {
     setRunStatus(null);
@@ -541,6 +552,13 @@ export default function SimulatorPage() {
           {!runStatus && !runStatusError && <p className="sim-note">Select a run to monitor.</p>}
           {runStatus && (
             <>
+              {runLooksStuck && (
+                <p className="sim-order-hint" role="status">
+                  <strong>Stuck run?</strong> This run has been &quot;running&quot; for several minutes with zero completed cycles.
+                  The Airflow job also refuses to start another run while any run is active. Try <strong>Stop Run</strong>, then start again,
+                  or pick a completed run above.
+                </p>
+              )}
               <div className="sim-status-grid">
                 <div>Status: <b>{runStatus.status}</b></div>
                 <div>Stop reason: <b>{runStatus.stop_reason || '—'}</b></div>
@@ -742,6 +760,29 @@ export default function SimulatorPage() {
           <section className="sim-card">
             <h3>Decision Dossier</h3>
             {!selectedOrder && <p className="sim-note">Select a trade from blotter.</p>}
+            {selectedOrder && explainData?.run && (explainData.run.live_market_data === true || explainData.run.live_market_data === false) && (
+              <div
+                className={`sim-data-mode-banner ${explainData.run.live_market_data ? '' : 'sim-data-mode-banner--replay'}`}
+                role="status"
+              >
+                {explainData.run.live_market_data ? (
+                  <>
+                    <strong>LIVE run:</strong> execution times and prices follow the simulator step clock and watchlist quotes.
+                  </>
+                ) : (
+                  <>
+                    <strong>REPLAY run:</strong> buy/sell times show the exchange session template (e.g. 08:00–16:30 UTC-style)
+                    and OHLC comes from historical daily bars — not current market time.
+                  </>
+                )}
+              </div>
+            )}
+            {selectedOrder && String(selectedOrder.status || '').toLowerCase() === 'rejected' && (
+              <p className="sim-order-hint">
+                <strong>No execution:</strong> this order was rejected or had zero fill (for example short borrow unavailable).
+                Execution lines below only apply to filled or partially filled orders.
+              </p>
+            )}
             {selectedOrder && (
               <>
                 <div className="sim-status-grid">

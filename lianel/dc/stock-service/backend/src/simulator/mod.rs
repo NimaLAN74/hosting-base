@@ -65,6 +65,9 @@ pub struct SimRunMeta {
     pub readiness_score: Option<f64>,
     #[serde(default)]
     pub readiness_passed: Option<bool>,
+    /// `None` = run started before this field existed; do not infer LIVE vs REPLAY from it.
+    #[serde(default)]
+    pub live_market_data: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -890,6 +893,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         stop_reason: None,
         readiness_score: None,
         readiness_passed: None,
+        live_market_data: Some(req.live_market_data),
     };
     set_meta(&redis, &meta).await?;
     {
@@ -1295,49 +1299,51 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     venue_latency_ms: exchange.latency_ms + exchange.auction_extra_latency_ms,
                     reasons: order_reasons,
                 });
-                fills.push(SimFillLedgerRow {
-                    decision_id: decision_id.clone(),
-                    run_id: run_id_cloned.clone(),
-                    exec_ts,
-                    symbol: sym.clone(),
-                    exchange: exchange.code.to_string(),
-                    side,
-                    qty_notional_usd: filled_notional,
-                    open_px,
-                    close_px,
-                    buy_px: open_px,
-                    sell_px: close_px,
-                    buy_ts: exec_ts,
-                    sell_ts: exec_ts,
-                    buy_session_time_utc: if req.live_market_data {
-                        hhmm_utc_from_ts(exec_ts)
-                    } else {
-                        exchange.session_open_utc.to_string()
-                    },
-                    sell_session_time_utc: if req.live_market_data {
-                        hhmm_utc_from_ts(exec_ts)
-                    } else {
-                        exchange.session_close_utc.to_string()
-                    },
-                    market_data_source,
-                    ret_simple,
-                    fee_usd,
-                    ibkr_commission_usd,
-                    exchange_fee_usd,
-                    clearing_fee_usd,
-                    regulatory_fee_usd,
-                    fx_fee_usd,
-                    tax_usd,
-                    slippage_usd,
-                    pnl_usd,
-                    latency_ms: exchange.latency_ms,
-                    order_id: Some(order_id),
-                    fill_ratio,
-                    borrow_fee_usd,
-                    market_impact_usd: impact_usd + spread_cost_usd,
-                    total_cost_usd,
-                });
-                if filled_notional > 0.0 {
+                if filled_notional > f64::EPSILON {
+                    fills.push(SimFillLedgerRow {
+                        decision_id: decision_id.clone(),
+                        run_id: run_id_cloned.clone(),
+                        exec_ts,
+                        symbol: sym.clone(),
+                        exchange: exchange.code.to_string(),
+                        side,
+                        qty_notional_usd: filled_notional,
+                        open_px,
+                        close_px,
+                        buy_px: open_px,
+                        sell_px: close_px,
+                        buy_ts: exec_ts,
+                        sell_ts: exec_ts,
+                        buy_session_time_utc: if req.live_market_data {
+                            hhmm_utc_from_ts(exec_ts)
+                        } else {
+                            exchange.session_open_utc.to_string()
+                        },
+                        sell_session_time_utc: if req.live_market_data {
+                            hhmm_utc_from_ts(exec_ts)
+                        } else {
+                            exchange.session_close_utc.to_string()
+                        },
+                        market_data_source,
+                        ret_simple,
+                        fee_usd,
+                        ibkr_commission_usd,
+                        exchange_fee_usd,
+                        clearing_fee_usd,
+                        regulatory_fee_usd,
+                        fx_fee_usd,
+                        tax_usd,
+                        slippage_usd,
+                        pnl_usd,
+                        latency_ms: exchange.latency_ms,
+                        order_id: Some(order_id),
+                        fill_ratio,
+                        borrow_fee_usd,
+                        market_impact_usd: impact_usd + spread_cost_usd,
+                        total_cost_usd,
+                    });
+                }
+                if filled_notional > f64::EPSILON {
                     last_fill_ts_by_symbol.insert(sym.clone(), exec_ts);
                     if pnl_usd < 0.0 && req.symbol_cooldown_seconds > 0 {
                         cooldown_until_by_symbol
