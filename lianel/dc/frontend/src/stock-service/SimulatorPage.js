@@ -542,17 +542,35 @@ export default function SimulatorPage() {
                 </ul>
                 <div className="sim-subtitle">Execution Attribution</div>
                 <div className="sim-keyvals">
-                  {(explainData?.fills || []).map((f) => (
-                    <div key={`${f.exec_ts}-${f.order_id || f.decision_id}`} className="sim-kv-row">
-                      <span>{fmtTs(f.exec_ts)} · {f.order_id || f.decision_id}</span>
-                      <span>
-                        Buy ${Number(f.buy_px || 0).toFixed(4)} ({f.buy_session_time_utc || 'open'}) →
-                        Sell ${Number(f.sell_px || 0).toFixed(4)} ({f.sell_session_time_utc || 'close'}) |
-                        PnL ${Number(f.pnl_usd || 0).toFixed(2)} | total cost ${Number(f.total_cost_usd || 0).toFixed(2)}
-                        {' '}({`ibkr ${Number(f.ibkr_commission_usd || 0).toFixed(2)}, ex ${Number(f.exchange_fee_usd || 0).toFixed(2)}, clear ${Number(f.clearing_fee_usd || 0).toFixed(2)}, reg ${Number(f.regulatory_fee_usd || 0).toFixed(2)}, fx ${Number(f.fx_fee_usd || 0).toFixed(2)}, tax ${Number(f.tax_usd || 0).toFixed(2)}, slip ${Number(f.slippage_usd || 0).toFixed(2)}, impact ${Number(f.market_impact_usd || 0).toFixed(2)}, borrow ${Number(f.borrow_fee_usd || 0).toFixed(2)}`})
-                      </span>
-                    </div>
-                  ))}
+                  {(explainData?.fills || []).map((f) => {
+                    const buyPx = Number(f.buy_px) > 0 ? Number(f.buy_px) : Number(f.open_px || 0);
+                    const sellPx = Number(f.sell_px) > 0 ? Number(f.sell_px) : Number(f.close_px || 0);
+                    const ibkr = Number(f.ibkr_commission_usd || 0);
+                    const ex = Number(f.exchange_fee_usd || 0);
+                    const clear = Number(f.clearing_fee_usd || 0);
+                    const reg = Number(f.regulatory_fee_usd || 0);
+                    const fx = Number(f.fx_fee_usd || 0);
+                    const tax = Number(f.tax_usd || 0);
+                    const slip = Number(f.slippage_usd || 0);
+                    const impact = Number(f.market_impact_usd || 0);
+                    const borrow = Number(f.borrow_fee_usd || 0);
+                    const totalCost = Number.isFinite(Number(f.total_cost_usd))
+                      ? Number(f.total_cost_usd || 0)
+                      : (ibkr + ex + clear + reg + fx + tax + slip + impact + borrow);
+                    return (
+                      <div key={`${f.exec_ts}-${f.order_id || f.decision_id}`} className="sim-kv-row">
+                        <span>{fmtTs(f.exec_ts)} · {f.order_id || f.decision_id}</span>
+                        <span>
+                          Buy ${buyPx.toFixed(4)} ({f.buy_session_time_utc || 'open'}) →
+                          Sell ${sellPx.toFixed(4)} ({f.sell_session_time_utc || 'close'}) |
+                          Notional ${Number(f.qty_notional_usd || 0).toFixed(2)} |
+                          PnL ${Number(f.pnl_usd || 0).toFixed(2)} |
+                          total cost ${totalCost.toFixed(4)}
+                          {' '}({`ibkr ${ibkr.toFixed(4)}, ex ${ex.toFixed(4)}, clear ${clear.toFixed(4)}, reg ${reg.toFixed(4)}, fx ${fx.toFixed(4)}, tax ${tax.toFixed(4)}, slip ${slip.toFixed(4)}, impact ${impact.toFixed(4)}, borrow ${borrow.toFixed(4)}`})
+                        </span>
+                      </div>
+                    );
+                  })}
                   {(explainData?.fills || []).length === 0 && <p className="sim-note">No fills linked to decision.</p>}
                 </div>
               </>
