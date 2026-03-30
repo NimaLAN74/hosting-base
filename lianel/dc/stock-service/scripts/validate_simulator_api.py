@@ -68,6 +68,7 @@ def main():
         "short_enabled": True,
         "initial_capital_usd": 100,
         "reinvest_profit": True,
+        "live_market_data": True,
         "replay_delay_ms": 0,
     }
 

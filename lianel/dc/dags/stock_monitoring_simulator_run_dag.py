@@ -53,6 +53,7 @@ def run_simulator_replay(**context):
         "short_enabled": os.getenv("SIM_REPLAY_SHORT_ENABLED", "true").lower() in ("1", "true", "yes"),
         "initial_capital_usd": float(os.getenv("SIM_REPLAY_INITIAL_CAPITAL_USD", "100")),
         "reinvest_profit": os.getenv("SIM_REPLAY_REINVEST", "true").lower() in ("1", "true", "yes"),
+        "live_market_data": os.getenv("SIM_REPLAY_LIVE_MARKET_DATA", "true").lower() in ("1", "true", "yes"),
         # Fast replay, but not unrealistically extreme.
         "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "1000")),
         "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),

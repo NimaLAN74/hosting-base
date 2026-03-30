@@ -32,6 +32,8 @@ pub struct SimRunRequest {
     pub readiness_min_days: usize,
     #[serde(default = "default_max_cycles")]
     pub max_cycles: usize,
+    #[serde(default = "default_live_market_data")]
+    pub live_market_data: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +240,43 @@ fn default_readiness_min_days() -> usize {
 }
 fn default_max_cycles() -> usize {
     2_000
+}
+fn default_live_market_data() -> bool {
+    true
+}
+
+fn parse_hhmm_utc(v: &str) -> Option<(u32, u32)> {
+    let mut parts = v.split(':');
+    let h = parts.next()?.trim().parse::<u32>().ok()?;
+    let m = parts.next()?.trim().parse::<u32>().ok()?;
+    if h > 23 || m > 59 {
+        return None;
+    }
+    Some((h, m))
+}
+
+fn is_exchange_open_now(exchange: &exchanges::ExchangeAdapter, now_ts: u64) -> bool {
+    use chrono::{Datelike, TimeZone, Timelike, Utc, Weekday};
+    let dt = Utc
+        .timestamp_opt(now_ts as i64, 0)
+        .single()
+        .unwrap_or_else(Utc::now);
+    match dt.weekday() {
+        Weekday::Sat | Weekday::Sun => return false,
+        _ => {}
+    }
+    let (oh, om) = match parse_hhmm_utc(exchange.session_open_utc) {
+        Some(v) => v,
+        None => return true,
+    };
+    let (ch, cm) = match parse_hhmm_utc(exchange.session_close_utc) {
+        Some(v) => v,
+        None => return true,
+    };
+    let now_mins = dt.hour() * 60 + dt.minute();
+    let open_mins = oh * 60 + om;
+    let close_mins = ch * 60 + cm;
+    now_mins >= open_mins && now_mins <= close_mins
 }
 
 fn now_ts() -> u64 {
@@ -616,6 +655,11 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     // User requirement: never evaluate readiness below six months.
     req.readiness_min_days = req.readiness_min_days.max(126).min(365 * 3);
     req.max_cycles = req.max_cycles.max(req.readiness_min_days).min(20_000);
+    if req.live_market_data {
+        // In live mode, keep cadence realistic and avoid extreme cycle counts.
+        req.replay_delay_ms = req.replay_delay_ms.max(1_000);
+        req.max_cycles = req.max_cycles.min(2_000).max(req.readiness_min_days);
+    }
 
     let run_id = generate_run_id();
     let created_at = now_ts();
@@ -651,79 +695,87 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
 
     let mut bars_by_symbol: HashMap<String, Vec<crate::ibkr::HistoryBar>> = HashMap::new();
-    let mut history_fetch_failures = 0usize;
-    for (sym, conid) in &pairs {
-        if !selected_symbols.iter().any(|s| s == sym) {
-            continue;
-        }
-        let mut bars = None;
-        for attempt in 1..=3 {
-            match client.fetch_history(*conid, "1y", "1d").await {
-                Ok(result) => {
-                    bars = Some(result);
-                    break;
-                }
-                Err(e) => {
-                    if attempt == 3 {
-                        history_fetch_failures += 1;
-                        tracing::warn!(
-                            "simulator: history fetch failed for {} (conid={}): {}",
-                            sym,
-                            conid,
-                            e
-                        );
-                    } else {
-                        tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64))
-                            .await;
+    let mut replay_symbols: Vec<String> = selected_symbols.clone();
+    let mut replay_ts: Vec<u64> = Vec::new();
+    let effective_days: usize;
+    if req.live_market_data {
+        effective_days = req.days;
+    } else {
+        let mut history_fetch_failures = 0usize;
+        for (sym, conid) in &pairs {
+            if !selected_symbols.iter().any(|s| s == sym) {
+                continue;
+            }
+            let mut bars = None;
+            for attempt in 1..=3 {
+                match client.fetch_history(*conid, "1y", "1d").await {
+                    Ok(result) => {
+                        bars = Some(result);
+                        break;
+                    }
+                    Err(e) => {
+                        if attempt == 3 {
+                            history_fetch_failures += 1;
+                            tracing::warn!(
+                                "simulator: history fetch failed for {} (conid={}): {}",
+                                sym,
+                                conid,
+                                e
+                            );
+                        } else {
+                            tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64))
+                                .await;
+                        }
                     }
                 }
             }
+            let Some(bars) = bars else {
+                continue;
+            };
+            let bars = daily_strategy::sort_dedupe_bars(bars);
+            if bars.len() >= req.days + 3 {
+                bars_by_symbol.insert(sym.clone(), bars);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
         }
-        let Some(bars) = bars else {
-            continue;
+        if bars_by_symbol.len() < 4 {
+            if bars_by_symbol.is_empty() && history_fetch_failures > 0 {
+                return Err(format!(
+                    "history failed for all selected symbols ({})",
+                    history_fetch_failures
+                ));
+            }
+            return Err("not enough symbols with stable daily history for replay".to_string());
+        }
+        let aligned_ts = daily_strategy::aligned_timestamps(&bars_by_symbol);
+        let replay_base_ts: Vec<u64> = if aligned_ts.len() >= 3 {
+            aligned_ts
+        } else {
+            // Fallback: when strict all-symbol overlap is too short, replay on the densest symbol's
+            // timeline and allow per-symbol bar misses during scoring/execution.
+            let maybe_ref = bars_by_symbol
+                .values()
+                .max_by_key(|bars| bars.len())
+                .map(|bars| {
+                    let mut ts = bars.iter().map(|b| b.t).collect::<Vec<_>>();
+                    ts.sort_unstable();
+                    ts.dedup();
+                    ts
+                });
+            match maybe_ref {
+                Some(ts) if ts.len() >= 3 => ts,
+                _ => return Err("not enough aligned days to run requested simulation horizon".to_string()),
+            }
         };
-        let bars = daily_strategy::sort_dedupe_bars(bars);
-        if bars.len() >= req.days + 3 {
-            bars_by_symbol.insert(sym.clone(), bars);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        // Degrade gracefully when overlap is limited instead of hard-failing run startup.
+        let d = req.days.min(replay_base_ts.len().saturating_sub(1)).max(2);
+        replay_ts = replay_base_ts[replay_base_ts.len() - (d + 1)..].to_vec();
+        effective_days = d;
+        replay_symbols = bars_by_symbol.keys().cloned().collect();
     }
-    if bars_by_symbol.len() < 4 {
-        if bars_by_symbol.is_empty() && history_fetch_failures > 0 {
-            return Err(format!(
-                "history failed for all selected symbols ({})",
-                history_fetch_failures
-            ));
-        }
-        return Err("not enough symbols with stable daily history for replay".to_string());
-    }
-
-    let aligned_ts = daily_strategy::aligned_timestamps(&bars_by_symbol);
-    let replay_base_ts: Vec<u64> = if aligned_ts.len() >= 3 {
-        aligned_ts
-    } else {
-        // Fallback: when strict all-symbol overlap is too short, replay on the densest symbol's
-        // timeline and allow per-symbol bar misses during scoring/execution.
-        let maybe_ref = bars_by_symbol
-            .values()
-            .max_by_key(|bars| bars.len())
-            .map(|bars| {
-                let mut ts = bars.iter().map(|b| b.t).collect::<Vec<_>>();
-                ts.sort_unstable();
-                ts.dedup();
-                ts
-            });
-        match maybe_ref {
-            Some(ts) if ts.len() >= 3 => ts,
-            _ => return Err("not enough aligned days to run requested simulation horizon".to_string()),
-        }
-    };
-    // Degrade gracefully when overlap is limited instead of hard-failing run startup.
-    let effective_days = req.days.min(replay_base_ts.len().saturating_sub(1)).max(2);
-    let replay_ts = replay_base_ts[replay_base_ts.len() - (effective_days + 1)..].to_vec();
 
     let mut exch_set = std::collections::BTreeSet::<String>::new();
-    for sym in bars_by_symbol.keys() {
+    for sym in &replay_symbols {
         exch_set.insert(exchanges::infer_exchange(sym).code.to_string());
     }
     let exchanges = exch_set.into_iter().collect::<Vec<_>>();
@@ -735,7 +787,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         started_at_ts: None,
         finished_at_ts: None,
         days_requested: effective_days,
-        symbols_count: bars_by_symbol.len(),
+        symbols_count: replay_symbols.len(),
         exchanges,
         initial_capital_usd: req.initial_capital_usd,
         ending_equity_usd: None,
@@ -763,6 +815,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .iter()
         .map(|c| (c.symbol.clone(), (c.hybrid_score, c.reasons.clone())))
         .collect();
+    let watchlist_cache = state.watchlist_cache.clone();
 
     let run_id_cloned = run_id.clone();
     let meta_for_task = meta.clone();
@@ -780,6 +833,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         let mut risk_snapshots: Vec<SimRiskSnapshot> = Vec::new();
         let mut total_decisions = 0usize;
         let mut explained_decisions = 0usize;
+        let mut live_prev_prices: HashMap<String, f64> = HashMap::new();
+        let mut live_last_decision_ts = now_ts().saturating_sub(1);
 
         meta.status = "running".to_string();
         meta.started_at_ts = Some(now_ts());
@@ -792,8 +847,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             json!({
                 "days_requested": req.days,
                 "days_effective": effective_days,
-                "symbols": bars_by_symbol.len(),
-                "initial_capital_usd": req.initial_capital_usd
+                "symbols": replay_symbols.len(),
+                "initial_capital_usd": req.initial_capital_usd,
+                "live_market_data": req.live_market_data
             }),
         )
         .await;
@@ -816,21 +872,35 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     continue;
                 }
             }
-            if replay_ts.len() < 2 {
-                stop_reason = "NO_REPLAY_WINDOW".to_string();
-                break;
-            }
-            if day_idx >= replay_ts.len() {
-                day_idx = 1;
-            }
-            let exec_ts = replay_ts[day_idx];
-            let decision_ts = replay_ts[day_idx - 1];
+            let (exec_ts, decision_ts) = if req.live_market_data {
+                let exec = now_ts();
+                let decision = live_last_decision_ts;
+                live_last_decision_ts = exec;
+                (exec, decision)
+            } else {
+                if replay_ts.len() < 2 {
+                    stop_reason = "NO_REPLAY_WINDOW".to_string();
+                    break;
+                }
+                if day_idx >= replay_ts.len() {
+                    day_idx = 1;
+                }
+                let exec = replay_ts[day_idx];
+                let decision = replay_ts[day_idx - 1];
+                (exec, decision)
+            };
 
             let mut decision_rows: Vec<SimDecisionTrace> = Vec::new();
             let mut fills: Vec<SimFillLedgerRow> = Vec::new();
             let mut orders: Vec<SimOrderLedgerRow> = Vec::new();
-            let symbols: Vec<String> = bars_by_symbol.keys().cloned().collect();
+            let symbols: Vec<String> = replay_symbols.clone();
             let symbol_count = symbols.len();
+            let quote_snapshot = if req.live_market_data {
+                let g = watchlist_cache.read().await;
+                Some(g.quotes.clone())
+            } else {
+                None
+            };
             let per_leg_notional = if symbol_count == 0 {
                 0.0
             } else {
@@ -847,34 +917,56 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             .await;
 
             for sym in symbols {
-                let Some(bars) = bars_by_symbol.get(&sym) else {
-                    continue;
-                };
-                let map: HashMap<u64, &crate::ibkr::HistoryBar> = bars.iter().map(|b| (b.t, b)).collect();
-                let prev = map.get(&decision_ts).copied();
-                let prev2 = if day_idx >= 2 {
-                    map.get(&replay_ts[day_idx - 2]).copied()
+                let exchange = exchanges::infer_exchange(&sym);
+                let (open_px, close_px, ret_prev, is_halt, market_data_source) = if req.live_market_data {
+                    if !is_exchange_open_now(&exchange, exec_ts) {
+                        continue;
+                    }
+                    let quote = quote_snapshot
+                        .as_ref()
+                        .and_then(|q| q.get(&sym))
+                        .and_then(|q| q.price)
+                        .filter(|p| p.is_finite() && *p > 0.0);
+                    let Some(px_now) = quote else {
+                        missing_price_rows += 1;
+                        total_rows += 1;
+                        continue;
+                    };
+                    let px_prev = live_prev_prices.get(&sym).copied().unwrap_or(px_now);
+                    live_prev_prices.insert(sym.clone(), px_now);
+                    let ret_prev = if px_prev > 0.0 { (px_now / px_prev).ln() } else { 0.0 };
+                    let is_halt = (px_now - px_prev).abs() <= f64::EPSILON;
+                    (px_prev, px_now, ret_prev, is_halt, "IBKR_LIVE_WATCHLIST_QUOTE".to_string())
                 } else {
-                    None
-                };
-                let next = map.get(&exec_ts).copied();
-                let Some(next_bar) = next else {
-                    continue;
+                    let Some(bars) = bars_by_symbol.get(&sym) else {
+                        continue;
+                    };
+                    let map: HashMap<u64, &crate::ibkr::HistoryBar> = bars.iter().map(|b| (b.t, b)).collect();
+                    let prev = map.get(&decision_ts).copied();
+                    let prev2 = if day_idx >= 2 {
+                        map.get(&replay_ts[day_idx - 2]).copied()
+                    } else {
+                        None
+                    };
+                    let next = map.get(&exec_ts).copied();
+                    let Some(next_bar) = next else {
+                        continue;
+                    };
+                    let ret_prev = match (prev, prev2) {
+                        (Some(p1), Some(p0)) if p1.close > 0.0 && p0.close > 0.0 => (p1.close / p0.close).ln(),
+                        _ => 0.0,
+                    };
+                    let is_halt = (next_bar.high - next_bar.low).abs() <= f64::EPSILON;
+                    (next_bar.open, next_bar.close, ret_prev, is_halt, "IBKR_HISTORY_REAL_BAR".to_string())
                 };
                 total_rows += 1;
-                if next_bar.open <= 0.0 || next_bar.close <= 0.0 {
+                if open_px <= 0.0 || close_px <= 0.0 {
                     missing_price_rows += 1;
                     continue;
                 }
 
-                let ret_prev = match (prev, prev2) {
-                    (Some(p1), Some(p0)) if p1.close > 0.0 && p0.close > 0.0 => (p1.close / p0.close).ln(),
-                    _ => 0.0,
-                };
                 let side = if ret_prev >= 0.0 { "LONG" } else { "SHORT" }.to_string();
-                let exchange = exchanges::infer_exchange(&sym);
                 *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
-                let is_halt = (next_bar.high - next_bar.low).abs() <= f64::EPSILON;
                 let (hybrid_score, rationale) = selected_scores
                     .get(&sym)
                     .cloned()
@@ -898,22 +990,23 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     hybrid_score,
                     features: json!({
                         "ret_prev_ln": ret_prev,
-                        "next_open": next_bar.open,
-                        "next_close": next_bar.close,
+                        "next_open": open_px,
+                        "next_close": close_px,
                         "spread_bps": exchange.spread_bps,
                         "depth_notional_usd": exchange.depth_notional_usd,
                         "auction_window": exchange.auction_window,
                         "borrow_available": exchange.short_borrow_available,
                         "is_halt": is_halt,
+                        "live_market_data": req.live_market_data,
                     }),
                     rationale: rationale_extended,
                     short_explanation: format!(
-                        "{} {} using real market bar prices (buy {:.4} at {} UTC, sell {:.4} at {} UTC) because momentum {:.4} and hybrid score {:.4} favored {} on {}.",
+                        "{} {} using real market prices (buy {:.4} at {} UTC, sell {:.4} at {} UTC) because momentum {:.4} and hybrid score {:.4} favored {} on {}.",
                         if side == "LONG" { "Buy" } else { "Sell short" },
                         sym,
-                        next_bar.open,
+                        open_px,
                         exchange.session_open_utc,
-                        next_bar.close,
+                        close_px,
                         exchange.session_close_utc,
                         ret_prev,
                         hybrid_score,
@@ -954,7 +1047,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     order_type: order_type.to_string(),
                     tif: "DAY".to_string(),
                     qty_notional_usd: per_leg_notional,
-                    intended_px: next_bar.open,
+                    intended_px: open_px,
                     status: "submitted".to_string(),
                     filled_notional_usd: 0.0,
                     remaining_notional_usd: per_leg_notional,
@@ -963,7 +1056,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 };
                 orders.push(submitted);
 
-                let ret_simple = (next_bar.close / next_bar.open) - 1.0;
+                let ret_simple = (close_px / open_px) - 1.0;
                 let direction = if side == "LONG" { 1.0 } else { -1.0 };
                 let filled_notional = per_leg_notional * fill_ratio;
                 let remaining_notional = (per_leg_notional - filled_notional).max(0.0);
@@ -1013,7 +1106,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     order_type: order_type.to_string(),
                     tif: "DAY".to_string(),
                     qty_notional_usd: per_leg_notional,
-                    intended_px: next_bar.open,
+                    intended_px: open_px,
                     status: status.to_string(),
                     filled_notional_usd: filled_notional,
                     remaining_notional_usd: remaining_notional,
@@ -1028,15 +1121,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     exchange: exchange.code.to_string(),
                     side,
                     qty_notional_usd: filled_notional,
-                    open_px: next_bar.open,
-                    close_px: next_bar.close,
-                    buy_px: next_bar.open,
-                    sell_px: next_bar.close,
+                    open_px,
+                    close_px,
+                    buy_px: open_px,
+                    sell_px: close_px,
                     buy_ts: exec_ts,
                     sell_ts: exec_ts,
                     buy_session_time_utc: exchange.session_open_utc.to_string(),
                     sell_session_time_utc: exchange.session_close_utc.to_string(),
-                    market_data_source: "IBKR_HISTORY_REAL_BAR".to_string(),
+                    market_data_source,
                     ret_simple,
                     fee_usd,
                     ibkr_commission_usd,
