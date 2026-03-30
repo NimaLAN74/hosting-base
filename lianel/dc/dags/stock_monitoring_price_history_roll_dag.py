@@ -12,7 +12,7 @@ from urllib import request, error
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
 
 
 def roll_daily_price_history(**context):

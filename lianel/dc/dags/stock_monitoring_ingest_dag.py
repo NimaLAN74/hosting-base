@@ -17,7 +17,7 @@ from urllib import parse, request, error
 from airflow import DAG
 from airflow.models import Variable
 from airflow.exceptions import AirflowSkipException
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
 
 # Default EU symbols when Variable is not set
 DEFAULT_INGEST_SYMBOLS = "ASML.AS,SAP.DE,VOLV-B.ST,SHEL.L"
