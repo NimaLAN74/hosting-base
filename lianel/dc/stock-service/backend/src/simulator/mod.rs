@@ -694,10 +694,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
 
     let aligned_ts = daily_strategy::aligned_timestamps(&bars_by_symbol);
-    if aligned_ts.len() < req.days + 2 {
+    if aligned_ts.len() < 3 {
         return Err("not enough aligned days to run requested simulation horizon".to_string());
     }
-    let replay_ts = aligned_ts[aligned_ts.len() - (req.days + 1)..].to_vec();
+    // Degrade gracefully when overlap is limited instead of hard-failing run startup.
+    let effective_days = req.days.min(aligned_ts.len().saturating_sub(1)).max(2);
+    let replay_ts = aligned_ts[aligned_ts.len() - (effective_days + 1)..].to_vec();
 
     let mut exch_set = std::collections::BTreeSet::<String>::new();
     for sym in bars_by_symbol.keys() {
@@ -711,7 +713,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         created_at_ts: created_at,
         started_at_ts: None,
         finished_at_ts: None,
-        days_requested: req.days,
+        days_requested: effective_days,
         symbols_count: bars_by_symbol.len(),
         exchanges,
         initial_capital_usd: req.initial_capital_usd,
@@ -766,7 +768,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             &run_id_cloned,
             "RunStarted",
             None,
-            json!({"days": req.days, "symbols": bars_by_symbol.len(), "initial_capital_usd": req.initial_capital_usd}),
+            json!({
+                "days_requested": req.days,
+                "days_effective": effective_days,
+                "symbols": bars_by_symbol.len(),
+                "initial_capital_usd": req.initial_capital_usd
+            }),
         )
         .await;
 

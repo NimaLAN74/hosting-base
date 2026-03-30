@@ -797,10 +797,15 @@ export default function StockServicePage() {
     const pts = getMergedTodayPoints(symbol);
     const cached = todayBySymbol[symbol] || [];
     const sessionOnly = cached.length === 0 && pts.length > 0;
+    const symbolRow = (watchlist?.symbols || []).find((s) => s?.symbol === symbol) || null;
+    const noPriceReason = symbolRow?.error ? String(symbolRow.error) : '';
     if (!pts.length) {
       return (
         <p className="stock-service-history-empty">
-          No data for today yet. Live prices appear here after the next 60s refresh.
+          {noPriceReason
+            ? `No intraday points for ${symbol}: ${noPriceReason}.`
+            : 'No data for today yet. Live prices appear here after the next 60s refresh.'}
+          {' '}
           Set <code>REDIS_URL</code> on the server to cache today&apos;s prices across restarts.
         </p>
       );
