@@ -310,6 +310,40 @@
   font-variant-numeric: tabular-nums;
 }
 
+.sim-campaign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.sim-purge-panel {
+  margin: 0.75rem 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px dashed #9ca3af;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.sim-purge-panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.sim-purge-input {
+  min-width: 12rem;
+  flex: 1 1 180px;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.9rem;
+  color: var(--sim-text);
+  background: #fff;
+}
+
 .sim-control-row {
   display: flex;
   align-items: center;

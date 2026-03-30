@@ -180,6 +180,8 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/sim/runs/:run_id/control",
             post(sim_run_control_handler),
         )
+        .route("/api/v1/sim/purge", post(sim_purge_handler))
+        .route("/api/v1/stock-service/sim/purge", post(sim_purge_handler))
         // nginx rewrites `/api/v1/stock-service/(.*)` → `/api/v1/$1`
         // so we also need the canonical alias for debug.
         .route("/api/v1/debug/snapshot", get(debug_snapshot_handler))
@@ -1336,6 +1338,68 @@ async fn sim_run_holdings_handler(
 #[derive(serde::Deserialize)]
 struct SimControlBody {
     action: String,
+}
+
+#[derive(serde::Deserialize)]
+struct SimPurgeBody {
+    secret: String,
+}
+
+/// Wipe simulator Redis keys. Requires `SIMULATOR_PURGE_SECRET` on the server and matching JSON body `secret`.
+async fn sim_purge_handler(
+    State(state): State<AppState>,
+    Json(body): Json<SimPurgeBody>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    let expected = match std::env::var("SIMULATOR_PURGE_SECRET") {
+        Ok(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error":"Simulator purge is not enabled (set SIMULATOR_PURGE_SECRET on the server)"})),
+                )
+                    .into_response();
+            }
+            t.to_string()
+        }
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error":"Simulator purge is not enabled (set SIMULATOR_PURGE_SECRET on the server)"})),
+            )
+                .into_response();
+        }
+    };
+    if body.secret != expected {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"invalid secret"})),
+        )
+            .into_response();
+    }
+    match simulator::purge_all_runs(redis).await {
+        Ok(removed) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "runs_removed_from_index": removed,
+                "message": "In-flight simulator tasks may still write until they exit; stop stuck runs before purge if needed."
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
 }
 
 async fn sim_run_control_handler(

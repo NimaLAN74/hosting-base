@@ -436,6 +436,36 @@ pub async fn get_run_meta(
     }
 }
 
+/// Delete all run indices and per-run Redis keys (sim:run:*). Does not stop in-flight tokio tasks.
+pub async fn purge_all_runs(redis: &redis::aio::ConnectionManager) -> Result<usize, String> {
+    let mut conn = redis.clone();
+    let ids: Vec<String> = conn
+        .lrange(RUN_INDEX_KEY, 0, -1)
+        .await
+        .map_err(|e| e.to_string())?;
+    let n = ids.len();
+    for run_id in ids {
+        let keys = [
+            run_meta_key(&run_id),
+            run_events_key(&run_id),
+            run_decisions_key(&run_id),
+            run_fills_key(&run_id),
+            run_curve_key(&run_id),
+            run_bias_key(&run_id),
+            run_orders_key(&run_id),
+            run_risk_key(&run_id),
+            run_readiness_key(&run_id),
+            run_holdings_key(&run_id),
+            run_control_key(&run_id),
+        ];
+        for k in keys {
+            let _: () = conn.del(k).await.map_err(|e| e.to_string())?;
+        }
+    }
+    let _: () = conn.del(RUN_INDEX_KEY).await.map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
 pub async fn list_runs(
     redis: &redis::aio::ConnectionManager,
     limit: usize,

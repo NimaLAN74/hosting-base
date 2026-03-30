@@ -1,8 +1,15 @@
 """
-Stock Service - Simulator replay DAG
+Stock Service - Simulator DAG
 
-Runs the multi-exchange replay simulator on a schedule so we continuously detect
-bias, process gaps, and missing data issues from realistic execution replay.
+Keeps a **single active** live (or replay) simulator run when none exists, on a
+short interval. Default payload targets **~6+ months** of wall-clock steps at
+60s cadence (`max_cycles` ≈ 500k). Change policy via env without editing code:
+
+- `SIM_REPLAY_RESTART_POLICY=always` (default): when no run is active, start one
+  (including after the previous run finished with MAX_CYCLES_REACHED or MANUAL_STOP).
+- `SIM_REPLAY_RESTART_POLICY=bankrupt_only`: only auto-start when the latest
+  completed run ended in **BANKRUPT** (or there are no runs). Use this if you want
+  one long campaign per manual reset instead of chaining runs after each completion.
 """
 
 import json
@@ -40,8 +47,16 @@ def run_simulator_replay(**context):
         print("Simulator run already active; skip trigger.")
         return
 
-    # Start a new run when no active run exists.
-    # This includes initial bootstrap and explicit restart after bankrupt termination.
+    restart_policy = os.getenv("SIM_REPLAY_RESTART_POLICY", "always").strip().lower()
+    if restart_policy == "bankrupt_only" and latest and latest_status == "completed":
+        if latest_stop_reason != "BANKRUPT":
+            print(
+                f"SIM_REPLAY_RESTART_POLICY=bankrupt_only: latest run completed with "
+                f"stop_reason={latest_stop_reason or 'n/a'}; skip auto-start until BANKRUPT or manual purge."
+            )
+            return
+
+    # Start a new run when no active run exists (policy allows).
     if latest and latest_status == "completed" and latest_stop_reason == "BANKRUPT":
         print("Latest run ended BANKRUPT; starting replacement run.")
     elif latest:
@@ -57,7 +72,8 @@ def run_simulator_replay(**context):
         # Fast replay, but not unrealistically extreme.
         "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "60000")),
         "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),
-        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "250000")),
+        # ~500k cycles at 60s step ≈ 347 days wall-clock (upper bound; live mode also skips closed markets).
+        "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "500000")),
     }
     target_days = max(7, min(days, 365))
     candidate_days = [target_days, 126, 90, 60, 30, 14, 7]

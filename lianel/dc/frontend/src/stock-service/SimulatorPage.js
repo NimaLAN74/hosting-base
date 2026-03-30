@@ -4,6 +4,22 @@ import PageTemplate from '../PageTemplate';
 import './SimulatorPage.css';
 
 const RUNS_URL = '/api/v1/stock-service/sim/runs';
+const PURGE_URL = '/api/v1/stock-service/sim/purge';
+
+/** Default campaign: live quotes, 60s cadence, ~6-month readiness window, high max_cycles. */
+const SIX_MONTH_LIVE_PRESET = {
+  days: 126,
+  top: 16,
+  quantile: 0.2,
+  short_enabled: true,
+  initial_capital_usd: 100,
+  replay_delay_ms: 60000,
+  reinvest_profit: true,
+  live_market_data: true,
+  max_cycles: 500000,
+  readiness_min_days: 126,
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function fetchJson(url, opts = {}) {
@@ -69,17 +85,11 @@ export default function SimulatorPage() {
   const [explainData, setExplainData] = useState(null);
   const [explainError, setExplainError] = useState('');
 
-  const [form, setForm] = useState({
-    days: 7,
-    top: 16,
-    quantile: 0.2,
-    short_enabled: true,
-    initial_capital_usd: 100,
-    replay_delay_ms: 250,
-    reinvest_profit: true,
-  });
+  const [form, setForm] = useState(() => ({ ...SIX_MONTH_LIVE_PRESET }));
   const [startLoading, setStartLoading] = useState(false);
   const [startMsg, setStartMsg] = useState('');
+  const [purgeSecret, setPurgeSecret] = useState('');
+  const [purgeLoading, setPurgeLoading] = useState(false);
   const [controlLoading, setControlLoading] = useState(false);
   const [controlMsg, setControlMsg] = useState('');
   const readinessUnavailableRunsRef = useRef(new Set());
@@ -337,50 +347,128 @@ export default function SimulatorPage() {
     }
   }, [selectedOrder, loadExplain]);
 
-  const handleStart = async () => {
-    setStartLoading(true);
+  const startRunWithPayload = useCallback(
+    async (payload) => {
+      const bodyObj = payload ?? form;
+      setStartLoading(true);
+      setStartMsg('');
+      try {
+        let lastError = null;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          const r = await fetch(RUNS_URL, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify(bodyObj),
+          });
+          const j = await r.json().catch(() => null);
+          if (r.ok) {
+            setStartMsg(`Run started: ${j.run_id}`);
+            clearRunPanels();
+            setSelectedRunId(j.run_id);
+            await loadRuns();
+            return;
+          }
+          const info = normalizeErrorPayload(j, r.status);
+          lastError = info;
+          if (info.retryable && attempt < 3) {
+            setStartMsg(`Upstream market data unavailable, retrying (${attempt}/2)...`);
+            await sleep(2000 * attempt);
+            continue;
+          }
+          break;
+        }
+        const msg = lastError?.message || 'Unknown start failure';
+        if (/not enough|selection produced too few symbols|aligned days/i.test(msg)) {
+          setStartMsg(`Start failed: ${msg}. Reduce Days/Top symbols or retry when more market data is available.`);
+        } else {
+          setStartMsg(`Start failed: ${msg}`);
+        }
+      } catch (e) {
+        setStartMsg(`Start failed: ${String(e?.message || e)}`);
+      } finally {
+        setStartLoading(false);
+      }
+    },
+    [form, clearRunPanels, loadRuns]
+  );
+
+  const handleStart = () => startRunWithPayload(null);
+
+  const resetLocalPage = useCallback(() => {
+    clearRunPanels();
+    setSelectedRunId('');
+    setForm({ ...SIX_MONTH_LIVE_PRESET });
+    setStartMsg('');
+    setPurgeSecret('');
+    loadRuns();
+  }, [clearRunPanels, loadRuns]);
+
+  const handlePurgeServer = useCallback(async () => {
+    if (!purgeSecret.trim()) {
+      setStartMsg('Set the purge secret before erasing server runs.');
+      return;
+    }
+    if (!window.confirm('Erase ALL simulator runs from the server Redis index? In-flight tasks may still write briefly.')) return;
+    setPurgeLoading(true);
     setStartMsg('');
     try {
-      let lastError = null;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        const r = await fetch(RUNS_URL, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify(form),
-        });
-        const j = await r.json().catch(() => null);
-        if (r.ok) {
-          setStartMsg(`Run started: ${j.run_id}`);
-          clearRunPanels();
-          setSelectedRunId(j.run_id);
-          await loadRuns();
-          return;
-        }
-        const info = normalizeErrorPayload(j, r.status);
-        lastError = info;
-        if (info.retryable && attempt < 3) {
-          setStartMsg(`Upstream market data unavailable, retrying (${attempt}/2)...`);
-          await sleep(2000 * attempt);
-          continue;
-        }
-        break;
+      const r = await fetch(PURGE_URL, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ secret: purgeSecret }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) {
+        setStartMsg(`Purge failed: ${j?.error || r.status}`);
+        return;
       }
-      const msg = lastError?.message || 'Unknown start failure';
-      if (/not enough|selection produced too few symbols|aligned days/i.test(msg)) {
-        setStartMsg(`Start failed: ${msg}. Reduce Days/Top symbols or retry when more market data is available.`);
-      } else {
-        setStartMsg(`Start failed: ${msg}`);
-      }
+      setStartMsg(`Server purge OK (${j?.runs_removed_from_index ?? 0} runs removed from index). Refreshing list…`);
+      clearRunPanels();
+      setSelectedRunId('');
+      await loadRuns();
     } catch (e) {
-      setStartMsg(`Start failed: ${String(e?.message || e)}`);
+      setStartMsg(`Purge failed: ${String(e?.message || e)}`);
     } finally {
-      setStartLoading(false);
+      setPurgeLoading(false);
     }
-  };
+  }, [purgeSecret, clearRunPanels, loadRuns]);
+
+  const handlePurgeAndStart = useCallback(async () => {
+    if (!purgeSecret.trim()) {
+      setStartMsg('Set the purge secret before erase-and-start.');
+      return;
+    }
+    if (!window.confirm('Erase ALL server simulator runs, then start a new 6-month LIVE run?')) return;
+    setPurgeLoading(true);
+    setStartMsg('');
+    try {
+      const r = await fetch(PURGE_URL, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ secret: purgeSecret }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) {
+        setStartMsg(`Purge failed: ${j?.error || r.status}`);
+        return;
+      }
+      setForm({ ...SIX_MONTH_LIVE_PRESET });
+      clearRunPanels();
+      setSelectedRunId('');
+      await loadRuns();
+      await startRunWithPayload({ ...SIX_MONTH_LIVE_PRESET });
+    } catch (e) {
+      setStartMsg(`Erase-and-start failed: ${String(e?.message || e)}`);
+    } finally {
+      setPurgeLoading(false);
+    }
+  }, [purgeSecret, clearRunPanels, loadRuns, startRunWithPayload]);
 
   const handleSelectRun = useCallback((runId) => {
     if (!runId || runId === selectedRunId) return;
@@ -423,10 +511,21 @@ export default function SimulatorPage() {
         <div className="sim-grid sim-grid--two">
           <section className="sim-card">
             <h3>Start New Simulation</h3>
-            <p className="sim-note">Configure capital and model parameters. Use defaults for baseline governance burn-in.</p>
+            <p className="sim-note">
+              Defaults target a <strong>6-month live campaign</strong> (126-day readiness window, 60s refresh, live quotes).
+              Airflow keeps one active run unless you set <code>SIM_REPLAY_RESTART_POLICY=bankrupt_only</code> on the host.
+            </p>
+            <div className="sim-campaign-actions">
+              <button type="button" className="sim-btn sim-btn--secondary" onClick={resetLocalPage} disabled={purgeLoading || startLoading}>
+                Clear page &amp; reset form
+              </button>
+              <button type="button" className="sim-btn sim-btn--secondary" onClick={() => setForm({ ...SIX_MONTH_LIVE_PRESET })} disabled={purgeLoading || startLoading}>
+                Apply 6-month live preset
+              </button>
+            </div>
             <div className="sim-form-grid">
               <label>Days
-                <input type="number" min="5" max="30" value={form.days} onChange={(e) => setForm((f) => ({ ...f, days: Number(e.target.value || 7) }))} />
+                <input type="number" min="7" max="365" value={form.days} onChange={(e) => setForm((f) => ({ ...f, days: Number(e.target.value || 7) }))} />
               </label>
               <label>Top symbols
                 <input type="number" min="6" max="40" value={form.top} onChange={(e) => setForm((f) => ({ ...f, top: Number(e.target.value || 16) }))} />
@@ -440,6 +539,12 @@ export default function SimulatorPage() {
               <label>Replay delay (ms)
                 <input type="number" min="0" step="50" value={form.replay_delay_ms} onChange={(e) => setForm((f) => ({ ...f, replay_delay_ms: Number(e.target.value || 250) }))} />
               </label>
+              <label>Max cycles
+                <input type="number" min="1000" max="1000000" step="1000" value={form.max_cycles} onChange={(e) => setForm((f) => ({ ...f, max_cycles: Number(e.target.value || 500000) }))} />
+              </label>
+              <label>Readiness min days
+                <input type="number" min="7" max="365" value={form.readiness_min_days} onChange={(e) => setForm((f) => ({ ...f, readiness_min_days: Number(e.target.value || 126) }))} />
+              </label>
               <label className="sim-check">
                 <input type="checkbox" checked={form.short_enabled} onChange={(e) => setForm((f) => ({ ...f, short_enabled: e.target.checked }))} />
                 Allow short side
@@ -448,8 +553,34 @@ export default function SimulatorPage() {
                 <input type="checkbox" checked={form.reinvest_profit} onChange={(e) => setForm((f) => ({ ...f, reinvest_profit: e.target.checked }))} />
                 Reinvest PnL
               </label>
+              <label className="sim-check">
+                <input type="checkbox" checked={form.live_market_data} onChange={(e) => setForm((f) => ({ ...f, live_market_data: e.target.checked }))} />
+                Live market data (real-time quotes)
+              </label>
             </div>
-            <button className="sim-btn" disabled={startLoading} onClick={handleStart}>
+            <div className="sim-purge-panel">
+              <p className="sim-control-hint">
+                To wipe the server run list, set env <code>SIMULATOR_PURGE_SECRET</code> on stock-service, enter it here, then erase.
+              </p>
+              <div className="sim-purge-panel__row">
+                <input
+                  className="sim-purge-input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Purge secret (server)"
+                  value={purgeSecret}
+                  onChange={(e) => setPurgeSecret(e.target.value)}
+                  disabled={purgeLoading || startLoading}
+                />
+                <button type="button" className="sim-btn sim-btn--secondary" disabled={purgeLoading || startLoading} onClick={handlePurgeServer}>
+                  {purgeLoading ? 'Working…' : 'Erase all runs (server)'}
+                </button>
+                <button type="button" className="sim-btn" disabled={purgeLoading || startLoading} onClick={handlePurgeAndStart}>
+                  Erase all &amp; start 6-month live
+                </button>
+              </div>
+            </div>
+            <button className="sim-btn" disabled={startLoading || purgeLoading} onClick={handleStart}>
               {startLoading ? 'Starting...' : 'Start Run'}
             </button>
             {startMsg && <p className="sim-note">{startMsg}</p>}

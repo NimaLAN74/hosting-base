@@ -27,6 +27,8 @@ services:
       IBKR_GATEWAY_SESSION_COOKIE_FILE: ${IBKR_GATEWAY_SESSION_COOKIE_FILE:-/app/ibkr-cookie/cookie.txt}
       # Optional: cache today's intraday points (set REDIS_URL so restarts don't lose today's chart)
       REDIS_URL: ${REDIS_URL:-}
+      # Optional: enables POST /api/v1/stock-service/sim/purge (UI & operators only)
+      SIMULATOR_PURGE_SECRET: ${SIMULATOR_PURGE_SECRET:-}
       RUST_LOG: info
     volumes:
       - ./stock-service-ibkr:/app/ibkr-conf:ro
