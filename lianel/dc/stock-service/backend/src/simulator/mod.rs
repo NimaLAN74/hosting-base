@@ -34,6 +34,10 @@ pub struct SimRunRequest {
     pub max_cycles: usize,
     #[serde(default = "default_live_market_data")]
     pub live_market_data: bool,
+    #[serde(default = "default_edge_cost_buffer_bps")]
+    pub edge_cost_buffer_bps: f64,
+    #[serde(default = "default_min_signal_abs_return_bps")]
+    pub min_signal_abs_return_bps: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +247,12 @@ fn default_max_cycles() -> usize {
 }
 fn default_live_market_data() -> bool {
     true
+}
+fn default_edge_cost_buffer_bps() -> f64 {
+    6.0
+}
+fn default_min_signal_abs_return_bps() -> f64 {
+    8.0
 }
 
 fn hhmm_utc_from_ts(ts: u64) -> String {
@@ -671,6 +681,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         // In live mode, one cycle should represent a real-time step, not a tight loop.
         req.replay_delay_ms = req.replay_delay_ms.max(60_000);
     }
+    req.edge_cost_buffer_bps = req.edge_cost_buffer_bps.clamp(0.0, 150.0);
+    req.min_signal_abs_return_bps = req.min_signal_abs_return_bps.clamp(0.0, 200.0);
 
     let run_id = generate_run_id();
     let created_at = now_ts();
@@ -977,6 +989,47 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 }
 
                 let side = if ret_prev >= 0.0 { "LONG" } else { "SHORT" }.to_string();
+                let signal_abs_return = ret_prev.exp_m1().abs();
+                let estimated_cost_bps = exchange.ibkr_commission_bps
+                    + exchange.exchange_fee_bps
+                    + exchange.clearing_fee_bps
+                    + exchange.regulatory_fee_bps
+                    + exchange.fx_fee_bps
+                    + exchange.tax_bps
+                    + exchange.spread_bps
+                    + exchange.slippage_bps
+                    + exchange.market_impact_bps
+                    + if side == "SHORT" { exchange.borrow_fee_bps } else { 0.0 };
+                let required_edge = (estimated_cost_bps + req.edge_cost_buffer_bps) / 10_000.0;
+                let min_signal = req.min_signal_abs_return_bps / 10_000.0;
+                if is_halt || signal_abs_return < min_signal || signal_abs_return <= required_edge {
+                    let skip_reason = if is_halt {
+                        "skip_halt_or_stale_quote"
+                    } else if signal_abs_return < min_signal {
+                        "skip_signal_too_small"
+                    } else {
+                        "skip_edge_below_cost_floor"
+                    };
+                    let _ = push_event(
+                        &redis,
+                        &run_id_cloned,
+                        "TradeSkipped",
+                        Some(exchange.code.to_string()),
+                        json!({
+                            "symbol": sym,
+                            "side": side,
+                            "ret_prev_ln": ret_prev,
+                            "signal_abs_return": signal_abs_return,
+                            "estimated_cost_bps": estimated_cost_bps,
+                            "edge_cost_buffer_bps": req.edge_cost_buffer_bps,
+                            "required_edge": required_edge,
+                            "min_signal_abs_return_bps": req.min_signal_abs_return_bps,
+                            "reason": skip_reason
+                        }),
+                    )
+                    .await;
+                    continue;
+                }
                 *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
                 let (hybrid_score, rationale) = selected_scores
                     .get(&sym)
@@ -1008,6 +1061,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "auction_window": exchange.auction_window,
                         "borrow_available": exchange.short_borrow_available,
                         "is_halt": is_halt,
+                        "signal_abs_return": signal_abs_return,
+                        "estimated_cost_bps": estimated_cost_bps,
+                        "required_edge": required_edge,
                         "live_market_data": req.live_market_data,
                     }),
                     rationale: rationale_extended,
