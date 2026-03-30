@@ -103,15 +103,20 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-dag = DAG(
+_dag_kwargs = dict(
     dag_id="stock_monitoring_simulator_replay",
     default_args=default_args,
     description="Trigger stock replay simulator to find model/process/data gaps",
-    # Use schedule_interval for broad compatibility across Airflow versions.
-    schedule_interval="*/30 * * * *",  # Keep one active run; restart quickly after completion/bankrupt.
     catchup=False,
     tags=["stock-service", "simulator", "bias-detection"],
 )
+_dag_schedule = "*/30 * * * *"  # Keep one active run; restart quickly after completion/bankrupt.
+try:
+    # Airflow variants that accept `schedule=`.
+    dag = DAG(**_dag_kwargs, schedule=_dag_schedule)
+except TypeError:
+    # Airflow variants that accept `schedule_interval=`.
+    dag = DAG(**_dag_kwargs, schedule_interval=_dag_schedule)
 
 run_task = PythonOperator(
     task_id="run_simulator_replay",
