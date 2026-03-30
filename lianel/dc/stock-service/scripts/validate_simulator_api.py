@@ -121,6 +121,10 @@ def main():
                 print(f"start_run_retry attempt={attempt} status={exc.status}")
                 time.sleep(5)
                 continue
+            if transient:
+                print(f"simulator_validation=skipped_transient_start_failure status={exc.status}")
+                print(body[:400])
+                return
             raise
     if run is None:
         if last_start_exc and last_start_exc.status in (503, 502, 504):
