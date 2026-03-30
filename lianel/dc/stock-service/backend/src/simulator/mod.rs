@@ -694,7 +694,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     }
 
     let aligned_ts = daily_strategy::aligned_timestamps(&bars_by_symbol);
-    let replay_base_ts: Vec<i64> = if aligned_ts.len() >= 3 {
+    let replay_base_ts: Vec<u64> = if aligned_ts.len() >= 3 {
         aligned_ts
     } else {
         // Fallback: when strict all-symbol overlap is too short, replay on the densest symbol's
@@ -703,7 +703,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             .values()
             .max_by_key(|bars| bars.len())
             .map(|bars| {
-                let mut ts = bars.iter().map(|b| b.ts).collect::<Vec<_>>();
+                let mut ts = bars.iter().map(|b| b.t).collect::<Vec<_>>();
                 ts.sort_unstable();
                 ts.dedup();
                 ts
