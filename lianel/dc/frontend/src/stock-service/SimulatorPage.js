@@ -46,6 +46,20 @@ function fmtTs(ts) {
   return d.toLocaleString('sv-SE', { hour12: false });
 }
 
+/** UTC calendar day YYYY-MM-DD for a unix-seconds timestamp (replay filter). */
+function utcYmdFromTs(tsSec) {
+  const t = Number(tsSec || 0);
+  if (!t) return '';
+  return new Date(t * 1000).toISOString().slice(0, 10);
+}
+
+function sideActionLabel(side) {
+  const s = String(side || '').toUpperCase();
+  if (s === 'SHORT') return 'SELL (short)';
+  if (s === 'LONG') return 'BUY (long)';
+  return s || '—';
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (s.includes('fail') || s.includes('bankrupt') || s.includes('kill')) return 'bad';
@@ -110,23 +124,31 @@ export default function SimulatorPage() {
   );
 
   const blotterOrders = useMemo(() => {
+    const live = runStatus?.live_market_data === true;
     const sorted = [...orders].sort((a, b) => {
-      const ta = Number(a?.wall_clock_ts || a?.ts || 0);
-      const tb = Number(b?.wall_clock_ts || b?.ts || 0);
+      const ta = live ? Number(a?.wall_clock_ts || a?.ts || 0) : Number(a?.ts || 0);
+      const tb = live ? Number(b?.wall_clock_ts || b?.ts || 0) : Number(b?.ts || 0);
       return tb - ta;
     });
     if (!onlyTodayOrders) return sorted;
-    const today = new Date();
-    const y = today.getFullYear();
-    const m = today.getMonth();
-    const d = today.getDate();
-    return sorted.filter((o) => {
-      const t = Number(o?.wall_clock_ts || o?.ts || 0);
-      if (!t) return false;
-      const dt = new Date(t * 1000);
-      return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
-    });
-  }, [orders, onlyTodayOrders]);
+    if (live) {
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = today.getMonth();
+      const d = today.getDate();
+      return sorted.filter((o) => {
+        const t = Number(o?.wall_clock_ts || o?.ts || 0);
+        if (!t) return false;
+        const dt = new Date(t * 1000);
+        return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+      });
+    }
+    // Replay: wall_clock_ts is always "now" on the server — filter by latest *simulation* bar date instead.
+    const days = sorted.map((o) => utcYmdFromTs(o.ts)).filter(Boolean);
+    if (!days.length) return sorted;
+    const latestDay = days.reduce((a, b) => (a > b ? a : b));
+    return sorted.filter((o) => utcYmdFromTs(o.ts) === latestDay);
+  }, [orders, onlyTodayOrders, runStatus?.live_market_data]);
 
   const latestRisk = useMemo(() => (riskSeries.length > 0 ? riskSeries[riskSeries.length - 1] : null), [riskSeries]);
   const runStartedEvent = useMemo(
@@ -732,7 +754,7 @@ export default function SimulatorPage() {
             <>
               {runLooksStuck && (
                 <p className="sim-order-hint" role="status">
-                  <strong>Stuck run?</strong> This run has been &quot;running&quot; for several minutes with zero completed cycles.
+                  <strong>Stuck run?</strong> This run has been &quot;running&quot; for several minutes with zero completed steps.
                   The Airflow job also refuses to start another run while any run is active. Try <strong>Stop Run</strong>, then start again,
                   or pick a completed run above.
                 </p>
@@ -745,7 +767,23 @@ export default function SimulatorPage() {
                 <div>{runStatus.status === 'running' ? 'Current equity' : 'Ending'}:{' '}
                   <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
                 <div>PnL: <b>{runStatus.pnl_usd != null ? `$${Number(runStatus.pnl_usd).toFixed(2)}` : '—'}</b></div>
-                <div>Cycles: <b>{Number(runStatus.cycles_completed || 0)}</b></div>
+                <div>Steps completed: <b>{Number(runStatus.cycles_completed || 0)}</b></div>
+                {runStatus.live_market_data === false &&
+                  runStatus.replay_steps_total != null &&
+                  Number(runStatus.replay_steps_total) > 0 && (
+                    <>
+                      <div>
+                        Replay bar (step):{' '}
+                        <b>
+                          {runStatus.replay_step_current != null ? runStatus.replay_step_current : '—'} /{' '}
+                          {runStatus.replay_steps_total}
+                        </b>
+                      </div>
+                      <div>
+                        Bar trading date (UTC): <b>{runStatus.replay_trading_date_utc || '—'}</b>
+                      </div>
+                    </>
+                  )}
                 <div>Readiness score: <b>{runStatus.readiness_score != null ? Number(runStatus.readiness_score).toFixed(3) : '—'}</b></div>
                 <div>Readiness: <b>{runStatus.readiness_passed == null ? '—' : (runStatus.readiness_passed ? 'PASS' : 'NOT YET')}</b></div>
               </div>
@@ -769,7 +807,7 @@ export default function SimulatorPage() {
                 <>
                   <div className="sim-holdings-meta sim-status-grid">
                     <div>As of: <b>{fmtTs(holdings.ts)}</b></div>
-                    <div>Cycle: <b>{Number(holdings.cycle_index || 0)}</b></div>
+                    <div>Step: <b>{Number(holdings.cycle_index || 0)}</b></div>
                     <div>Equity: <b>${Number(holdings.equity_usd || 0).toFixed(2)}</b></div>
                     <div>Deployed (sim): <b>${Number(holdings.deployed_usd || 0).toFixed(2)}</b></div>
                     <div>Unallocated: <b>${Number(holdings.cash_residual_usd || 0).toFixed(2)}</b></div>
@@ -799,7 +837,7 @@ export default function SimulatorPage() {
                               <td>{row.exchange}</td>
                               <td>
                                 <span className={`sim-pill sim-pill--${String(row.side).includes('SHORT') ? 'bad' : 'good'}`}>
-                                  {row.side}
+                                  {sideActionLabel(row.side)}
                                 </span>
                               </td>
                               <td className="sim-num">${Number(row.notional_usd || 0).toFixed(2)}</td>
@@ -873,7 +911,10 @@ export default function SimulatorPage() {
                   <span className={`sim-pill sim-pill--${readiness.pass ? 'good' : 'warn'}`}>
                     {readiness.pass ? 'Gate Pass' : 'Gate Not Passed'}
                   </span>
-                  <span className="sim-note">Score {Number(readiness.score || 0).toFixed(3)} • Days {readiness.evaluated_days}/{readiness.min_days_required}</span>
+                  <span className="sim-note">
+                    Score {Number(readiness.score || 0).toFixed(3)} • Steps {readiness.evaluated_days}/
+                    {readiness.min_days_required} (gate uses step count; for replay one step ≈ one aligned trading day)
+                  </span>
                 </div>
                 <div className="sim-note"><b>Recommendation:</b> {readiness.recommendation}</div>
               </>
@@ -898,11 +939,15 @@ export default function SimulatorPage() {
                       checked={onlyTodayOrders}
                       onChange={(e) => setOnlyTodayOrders(e.target.checked)}
                     />
-                    {"Today's trades only"}
+                    {runStatus?.live_market_data === false
+                      ? 'Latest replay bar only'
+                      : "Today's trades only"}
                   </label>
                 </div>
                 <p id="sim-blotter-filter-hint" className="sim-control-hint">
-                  {"Uses your device's local calendar date on the order timestamp (wall clock when present, otherwise simulator time)."}
+                  {runStatus?.live_market_data === false
+                    ? 'Replay mode: filters by the latest simulated trading day (UTC date of order ts). Wall clock is not used.'
+                    : "Live mode: uses your device's local calendar on wall-clock time when present."}
                 </p>
               </div>
               <p className="sim-blotter-count" aria-live="polite">
@@ -926,7 +971,10 @@ export default function SimulatorPage() {
                     className={`sim-run-row ${selectedOrderKey === key ? 'active' : ''}`}
                     onClick={() => setSelectedOrderKey(key)}
                   >
-                    <span>{fmtTs(o.wall_clock_ts || o.ts)} · {o.symbol} · {o.side}</span>
+                    <span>
+                      {fmtTs(runStatus?.live_market_data === false ? o.ts : (o.wall_clock_ts || o.ts))} · {o.symbol} ·{' '}
+                      {sideActionLabel(o.side)}
+                    </span>
                     <span className={`sim-pill sim-pill--${tone}`}>{o.status}</span>
                     <span>${Number(o.filled_notional_usd || 0).toFixed(2)}</span>
                   </button>
@@ -979,7 +1027,7 @@ export default function SimulatorPage() {
             {explainData && (
               <>
                 <div className="sim-status-grid">
-                  <div>Model side: <b>{explainData?.decision?.side || '—'}</b></div>
+                  <div>Position side: <b>{sideActionLabel(explainData?.decision?.side)}</b></div>
                   <div>Hybrid score: <b>{Number(explainData?.decision?.hybrid_score || 0).toFixed(4)}</b></div>
                   <div>Decision time: <b>{fmtTs(explainData?.decision?.decision_ts)}</b></div>
                   <div>Run: <b>{explainData?.run?.run_id || '—'}</b></div>
@@ -1002,11 +1050,12 @@ export default function SimulatorPage() {
                   {(explainData?.decision?.rationale || []).map((r) => <li key={r}>{r}</li>)}
                   {(explainData?.decision?.rationale || []).length === 0 && <li>No rationale entries.</li>}
                 </ul>
-                <div className="sim-subtitle">Execution Attribution</div>
+                  <div className="sim-subtitle">Execution Attribution</div>
                 <div className="sim-keyvals">
                   {(explainData?.fills || []).map((f) => {
                     const buyPx = Number(f.buy_px) > 0 ? Number(f.buy_px) : Number(f.open_px || 0);
                     const sellPx = Number(f.sell_px) > 0 ? Number(f.sell_px) : Number(f.close_px || 0);
+                    const isShort = String(explainData?.decision?.side || '').toUpperCase() === 'SHORT';
                     const ibkr = Number(f.ibkr_commission_usd || 0);
                     const ex = Number(f.exchange_fee_usd || 0);
                     const clear = Number(f.clearing_fee_usd || 0);
@@ -1019,13 +1068,16 @@ export default function SimulatorPage() {
                     const totalCost = Number.isFinite(Number(f.total_cost_usd))
                       ? Number(f.total_cost_usd || 0)
                       : (ibkr + ex + clear + reg + fx + tax + slip + impact + borrow);
+                    const legLabel = isShort
+                      ? `Short sell $${sellPx.toFixed(4)} (${f.sell_session_time_utc || 'close'}) → cover buy $${buyPx.toFixed(4)} (${f.buy_session_time_utc || 'open'})`
+                      : `Buy $${buyPx.toFixed(4)} (${f.buy_session_time_utc || 'open'}) → sell $${sellPx.toFixed(4)} (${f.sell_session_time_utc || 'close'})`;
                     return (
                       <div key={`${f.exec_ts}-${f.order_id || f.decision_id}`} className="sim-kv-row">
                         <span>{fmtTs(f.exec_ts)} · {f.order_id || f.decision_id}</span>
                         <span>
-                          Buy ${buyPx.toFixed(4)} ({f.buy_session_time_utc || 'open'}) →
-                          Sell ${sellPx.toFixed(4)} ({f.sell_session_time_utc || 'close'}) |
-                          Notional ${Number(f.qty_notional_usd || 0).toFixed(2)} |
+                          {legLabel}
+                          {' '}
+                          | Notional ${Number(f.qty_notional_usd || 0).toFixed(2)} |
                           PnL ${Number(f.pnl_usd || 0).toFixed(2)} |
                           total cost ${totalCost.toFixed(4)}
                           {' '}({`ibkr ${ibkr.toFixed(4)}, ex ${ex.toFixed(4)}, clear ${clear.toFixed(4)}, reg ${reg.toFixed(4)}, fx ${fx.toFixed(4)}, tax ${tax.toFixed(4)}, slip ${slip.toFixed(4)}, impact ${impact.toFixed(4)}, borrow ${borrow.toFixed(4)}`})

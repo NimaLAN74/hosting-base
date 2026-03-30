@@ -68,6 +68,15 @@ pub struct SimRunMeta {
     /// `None` = run started before this field existed; do not infer LIVE vs REPLAY from it.
     #[serde(default)]
     pub live_market_data: Option<bool>,
+    /// Replay only: current bar index in the aligned window (1 ..= replay_steps_total).
+    #[serde(default)]
+    pub replay_step_current: Option<usize>,
+    /// Replay only: number of simulation steps in one forward pass (one step per aligned trading day).
+    #[serde(default)]
+    pub replay_steps_total: Option<usize>,
+    /// Replay only: UTC calendar date (YYYY-MM-DD) of the execution bar for this step.
+    #[serde(default)]
+    pub replay_trading_date_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -300,6 +309,14 @@ fn hhmm_utc_from_ts(ts: u64) -> String {
         .single()
         .unwrap_or_else(Utc::now);
     format!("{:02}:{:02}", dt.hour(), dt.minute())
+}
+
+fn ymd_utc_from_ts(ts: u64) -> String {
+    use chrono::{TimeZone, Utc};
+    Utc.timestamp_opt(ts as i64, 0)
+        .single()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
 }
 
 fn parse_hhmm_utc(v: &str) -> Option<(u32, u32)> {
@@ -901,6 +918,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         replay_symbols = bars_by_symbol.keys().cloned().collect();
     }
 
+    // Replay: one forward pass through the aligned bar window (no looping the same days until max_cycles).
+    if !req.live_market_data && replay_ts.len() >= 2 {
+        let steps_in_window = replay_ts.len().saturating_sub(1).max(1);
+        req.max_cycles = req.max_cycles.min(steps_in_window);
+    }
+
     let mut exch_set = std::collections::BTreeSet::<String>::new();
     for sym in &replay_symbols {
         exch_set.insert(exchanges::infer_exchange(sym).code.to_string());
@@ -924,6 +947,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         readiness_score: None,
         readiness_passed: None,
         live_market_data: Some(req.live_market_data),
+        replay_step_current: None,
+        replay_steps_total: if req.live_market_data {
+            None
+        } else {
+            Some(replay_ts.len().saturating_sub(1).max(1))
+        },
+        replay_trading_date_utc: None,
     };
     set_meta(&redis, &meta).await?;
     {
@@ -1013,7 +1043,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     break;
                 }
                 if day_idx >= replay_ts.len() {
-                    day_idx = 1;
+                    stop_reason = "REPLAY_HORIZON_COMPLETE".to_string();
+                    break;
                 }
                 let exec = replay_ts[day_idx];
                 let decision = replay_ts[day_idx - 1];
@@ -1640,6 +1671,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             );
             meta.readiness_score = Some(readiness.score);
             meta.readiness_passed = Some(readiness.pass);
+            if req.live_market_data {
+                meta.replay_step_current = None;
+                meta.replay_steps_total = None;
+                meta.replay_trading_date_utc = None;
+            } else {
+                meta.replay_step_current = Some(day_idx);
+                meta.replay_steps_total = Some(replay_ts.len().saturating_sub(1).max(1));
+                meta.replay_trading_date_utc = Some(ymd_utc_from_ts(exec_ts));
+            }
             // Live snapshot for UI polling (status endpoint reads Redis meta only at start/end otherwise).
             meta.ending_equity_usd = Some(equity);
             meta.pnl_usd = Some(equity - req.initial_capital_usd);

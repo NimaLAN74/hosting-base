@@ -102,24 +102,29 @@ jobs:
           echo "Syncing DAG files to remote host..."
           
           # Create DAGs directory if it doesn't exist
+          # Airflow containers on this host mount /root/hosting-base/lianel/dc/dags (see docker inspect).
+          # Also sync /root/lianel/dc/dags for compose copies and legacy paths.
           ssh -i ~/.ssh/deploy_key \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "mkdir -p /root/lianel/dc/dags && chmod 755 /root/lianel/dc/dags" || {
-            echo "❌ Error: Failed to create DAGs directory on remote host"
+            "mkdir -p /root/lianel/dc/dags /root/hosting-base/lianel/dc/dags && chmod 755 /root/lianel/dc/dags /root/hosting-base/lianel/dc/dags" || {
+            echo "❌ Error: Failed to create DAGs directories on remote host"
             exit 1
           }
           
-          # Sync all DAG files using rsync
-          # Use -v for verbose, -z for compression, --delete to remove old files
-          rsync -avz \
-            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT}" \
-            --delete \
-            --exclude='*.pyc' \
-            --exclude='__pycache__' \
-            --exclude='.git' \
+          RSYNC_COMMON=( -avz --delete --exclude='*.pyc' --exclude='__pycache__' --exclude='.git' )
+          RSYNC_SSH=( -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts -p ${REMOTE_PORT}" )
+          
+          # Sync all DAG files using rsync (canonical Airflow mount first)
+          rsync "${RSYNC_COMMON[@]}" "${RSYNC_SSH[@]}" \
+            lianel/dc/dags/ \
+            ${REMOTE_USER}@${REMOTE_HOST}:/root/hosting-base/lianel/dc/dags/ || {
+            echo "❌ Error: rsync to hosting-base dags path failed"
+            exit 1
+          }
+          rsync "${RSYNC_COMMON[@]}" "${RSYNC_SSH[@]}" \
             lianel/dc/dags/ \
             ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/ || {
             echo "❌ Error: rsync failed"
@@ -127,14 +132,14 @@ jobs:
             # Fallback: use scp for individual files
             for file in lianel/dc/dags/*.py; do
               if [ -f "$file" ]; then
-                scp -i ~/.ssh/deploy_key \
-                  -o StrictHostKeyChecking=no \
-                  -o UserKnownHostsFile=~/.ssh/known_hosts \
-                  -P ${REMOTE_PORT} \
-                  "$file" \
-                  ${REMOTE_USER}@${REMOTE_HOST}:/root/lianel/dc/dags/ || {
-                  echo "⚠️  Warning: Failed to copy $file"
-                }
+                for dest in /root/hosting-base/lianel/dc/dags/ /root/lianel/dc/dags/; do
+                  scp -i ~/.ssh/deploy_key \
+                    -o StrictHostKeyChecking=no \
+                    -o UserKnownHostsFile=~/.ssh/known_hosts \
+                    -P ${REMOTE_PORT} \
+                    "$file" \
+                    "${REMOTE_USER}@${REMOTE_HOST}:${dest}" || echo "⚠️  Warning: Failed to copy $file -> $dest"
+                done
               fi
             done
           }
@@ -154,7 +159,7 @@ jobs:
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -p ${REMOTE_PORT} \
             ${REMOTE_USER}@${REMOTE_HOST} \
-            "ls -la /root/lianel/dc/dags/*.py | wc -l && echo 'DAG files found'"
+            "echo -n 'hosting-base dags: ' && ls -1 /root/hosting-base/lianel/dc/dags/*.py 2>/dev/null | wc -l; echo -n 'lianel/dc dags: ' && ls -1 /root/lianel/dc/dags/*.py 2>/dev/null | wc -l"
           
           echo "✅ Verification complete"
 
@@ -212,7 +217,7 @@ jobs:
           echo "## 🔄 Airflow DAGs Synced" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Source**: Repository DAGs directory" >> $GITHUB_STEP_SUMMARY
-          echo "- **Destination**: \`${{ secrets.REMOTE_HOST }}:/root/lianel/dc/dags/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Destinations**: \`/root/hosting-base/lianel/dc/dags/\` (Airflow mount) and \`/root/lianel/dc/dags/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "DAG files will be automatically detected by Airflow scheduler." >> $GITHUB_STEP_SUMMARY
