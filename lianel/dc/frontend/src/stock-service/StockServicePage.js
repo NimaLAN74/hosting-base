@@ -127,8 +127,12 @@ export default function StockServicePage() {
   const [paperTradeOrderPlan, setPaperTradeOrderPlan] = useState(null);
   const [paperTradeOrderPlanLoading, setPaperTradeOrderPlanLoading] = useState(false);
   const [paperTradeOrderPlanError, setPaperTradeOrderPlanError] = useState(null);
+  const watchlistInFlightRef = useRef(false);
+  const dailySignalsInFlightRef = useRef(false);
 
   const loadWatchlist = useCallback(() => {
+    if (watchlistInFlightRef.current) return;
+    watchlistInFlightRef.current = true;
     setWatchlistLoading(true);
     setWatchlistError(null);
     fetch(WATCHLIST_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
@@ -153,7 +157,10 @@ export default function StockServicePage() {
         setWatchlist(null);
         setWatchlistError('Could not load watchlist. Check your connection and try again.');
       })
-      .finally(() => setWatchlistLoading(false));
+      .finally(() => {
+        watchlistInFlightRef.current = false;
+        setWatchlistLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -162,8 +169,11 @@ export default function StockServicePage() {
     return () => clearInterval(id);
   }, [loadWatchlist]);
 
-  const loadDailySignals = useCallback(() => {
-    setDailySignalsLoading(true);
+  const loadDailySignals = useCallback((opts = {}) => {
+    if (dailySignalsInFlightRef.current) return;
+    dailySignalsInFlightRef.current = true;
+    const background = Boolean(opts.background);
+    if (!background) setDailySignalsLoading(true);
     setDailySignalsError(null);
     setDailySignalsSource('model');
     fetch(DAILY_SIGNALS_MODEL_URL, { credentials: 'include', headers: { Accept: 'application/json' } })
@@ -207,7 +217,10 @@ export default function StockServicePage() {
         setDailySignals(null);
         setDailySignalsSource('model');
       })
-      .finally(() => setDailySignalsLoading(false));
+      .finally(() => {
+        dailySignalsInFlightRef.current = false;
+        setDailySignalsLoading(false);
+      });
   }, []);
 
   const loadSelection = useCallback(() => {
@@ -267,7 +280,7 @@ export default function StockServicePage() {
 
   useEffect(() => {
     loadDailySignals();
-    const id = setInterval(loadDailySignals, DAILY_SIGNALS_REFRESH_MS);
+    const id = setInterval(() => loadDailySignals({ background: true }), DAILY_SIGNALS_REFRESH_MS);
     return () => clearInterval(id);
   }, [loadDailySignals]);
 

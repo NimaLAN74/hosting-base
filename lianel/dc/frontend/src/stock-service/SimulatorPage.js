@@ -58,7 +58,7 @@ export default function SimulatorPage() {
 
   const [exchangeFilter, setExchangeFilter] = useState('ALL');
   const [refreshEnabled, setRefreshEnabled] = useState(true);
-  const [refreshMs, setRefreshMs] = useState(5000);
+  const [refreshMs, setRefreshMs] = useState(60000);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshTs, setLastRefreshTs] = useState(0);
 
@@ -80,6 +80,7 @@ export default function SimulatorPage() {
   const [controlLoading, setControlLoading] = useState(false);
   const [controlMsg, setControlMsg] = useState('');
   const readinessUnavailableRunsRef = useRef(new Set());
+  const runRefreshInFlightRef = useRef(false);
 
   const exchanges = useMemo(() => {
     const set = new Set();
@@ -127,6 +128,8 @@ export default function SimulatorPage() {
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
+    if (runRefreshInFlightRef.current) return;
+    runRefreshInFlightRef.current = true;
     setIsRefreshing(true);
     const statusUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/status`;
     const timelineUrl = exchangeFilter === 'ALL'
@@ -213,6 +216,7 @@ export default function SimulatorPage() {
 
     setLastRefreshTs(Date.now());
     setIsRefreshing(false);
+    runRefreshInFlightRef.current = false;
   }, [selectedRunId, exchangeFilter, selectedOrderKey]);
 
   useEffect(() => {
@@ -388,10 +392,10 @@ export default function SimulatorPage() {
                 <input type="checkbox" checked={refreshEnabled} onChange={(e) => setRefreshEnabled(e.target.checked)} />
                 Auto refresh
               </label>
-              <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value || 5000))}>
-                <option value={2500}>2.5s</option>
-                <option value={5000}>5s</option>
-                <option value={10000}>10s</option>
+              <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value || 60000))}>
+                <option value={30000}>30s</option>
+                <option value={60000}>60s</option>
+                <option value={120000}>120s</option>
               </select>
               <select value={exchangeFilter} onChange={(e) => setExchangeFilter(e.target.value)}>
                 {exchanges.map((x) => (<option key={x} value={x}>{x}</option>))}
