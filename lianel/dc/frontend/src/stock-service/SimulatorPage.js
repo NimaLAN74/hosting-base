@@ -80,7 +80,7 @@ export default function SimulatorPage() {
   const [controlLoading, setControlLoading] = useState(false);
   const [controlMsg, setControlMsg] = useState('');
   const readinessUnavailableRunsRef = useRef(new Set());
-  const runRefreshInFlightRef = useRef(false);
+  const latestRunLoadTokenRef = useRef(0);
 
   const exchanges = useMemo(() => {
     const set = new Set();
@@ -95,6 +95,24 @@ export default function SimulatorPage() {
 
   const latestRisk = useMemo(() => (riskSeries.length > 0 ? riskSeries[riskSeries.length - 1] : null), [riskSeries]);
 
+  const clearRunPanels = useCallback(() => {
+    setRunStatus(null);
+    setRunStatusError('');
+    setTimeline([]);
+    setTimelineError('');
+    setOrders([]);
+    setOrdersError('');
+    setRiskSeries([]);
+    setRiskError('');
+    setReadiness(null);
+    setReadinessError('');
+    setBiasFindings([]);
+    setBiasError('');
+    setSelectedOrderKey('');
+    setExplainData(null);
+    setExplainError('');
+  }, []);
+
   const loadRuns = useCallback(async () => {
     setRunsLoading(true);
     setRunsError('');
@@ -102,8 +120,12 @@ export default function SimulatorPage() {
       const j = await fetchJson(`${RUNS_URL}?limit=40`);
       const nextRuns = Array.isArray(j?.runs) ? j.runs : [];
       setRuns(nextRuns);
-      if (!selectedRunId && nextRuns.length > 0) setSelectedRunId(nextRuns[0].run_id);
+      if (!selectedRunId && nextRuns.length > 0) {
+        clearRunPanels();
+        setSelectedRunId(nextRuns[0].run_id);
+      }
       if (selectedRunId && !nextRuns.some((r) => r.run_id === selectedRunId) && nextRuns.length > 0) {
+        clearRunPanels();
         setSelectedRunId(nextRuns[0].run_id);
       }
     } catch (e) {
@@ -111,7 +133,7 @@ export default function SimulatorPage() {
     } finally {
       setRunsLoading(false);
     }
-  }, [selectedRunId]);
+  }, [selectedRunId, clearRunPanels]);
 
   const loadExplain = useCallback(async (decisionId) => {
     setExplainError('');
@@ -128,8 +150,8 @@ export default function SimulatorPage() {
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
-    if (runRefreshInFlightRef.current) return;
-    runRefreshInFlightRef.current = true;
+    const loadToken = Date.now() + Math.random();
+    latestRunLoadTokenRef.current = loadToken;
     setIsRefreshing(true);
     const statusUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/status`;
     const timelineUrl = exchangeFilter === 'ALL'
@@ -149,6 +171,7 @@ export default function SimulatorPage() {
       fetchJson(riskUrl),
       shouldQueryReadiness ? fetchJson(readinessUrl) : Promise.resolve(null),
     ]);
+    if (latestRunLoadTokenRef.current !== loadToken) return;
 
     if (statusRes.status === 'fulfilled') {
       setRunStatus(statusRes.value);
@@ -216,7 +239,6 @@ export default function SimulatorPage() {
 
     setLastRefreshTs(Date.now());
     setIsRefreshing(false);
-    runRefreshInFlightRef.current = false;
   }, [selectedRunId, exchangeFilter, selectedOrderKey]);
 
   useEffect(() => {
@@ -261,9 +283,9 @@ export default function SimulatorPage() {
         const j = await r.json().catch(() => null);
         if (r.ok) {
           setStartMsg(`Run started: ${j.run_id}`);
+          clearRunPanels();
           setSelectedRunId(j.run_id);
           await loadRuns();
-          await loadSelectedRun();
           return;
         }
         const info = normalizeErrorPayload(j, r.status);
@@ -287,6 +309,12 @@ export default function SimulatorPage() {
       setStartLoading(false);
     }
   };
+
+  const handleSelectRun = useCallback((runId) => {
+    if (!runId || runId === selectedRunId) return;
+    clearRunPanels();
+    setSelectedRunId(runId);
+  }, [selectedRunId, clearRunPanels]);
 
   const sendControl = async (action) => {
     setControlMsg('');
@@ -369,7 +397,7 @@ export default function SimulatorPage() {
                   <button
                     key={r.run_id}
                     className={`sim-run-row ${selectedRunId === r.run_id ? 'active' : ''}`}
-                    onClick={() => setSelectedRunId(r.run_id)}
+                    onClick={() => handleSelectRun(r.run_id)}
                   >
                     <span className="sim-run-id">{r.run_id}</span>
                     <span className={`sim-pill sim-pill--${tone}`}>{r.status}</span>
