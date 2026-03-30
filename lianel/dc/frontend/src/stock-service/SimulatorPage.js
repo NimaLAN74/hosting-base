@@ -55,6 +55,8 @@ export default function SimulatorPage() {
   const [readinessError, setReadinessError] = useState('');
   const [biasFindings, setBiasFindings] = useState([]);
   const [biasError, setBiasError] = useState('');
+  const [holdings, setHoldings] = useState(null);
+  const [holdingsError, setHoldingsError] = useState('');
 
   const [exchangeFilter, setExchangeFilter] = useState('ALL');
   const [refreshEnabled, setRefreshEnabled] = useState(true);
@@ -125,6 +127,11 @@ export default function SimulatorPage() {
       : 'REPLAY (historical bars)';
   }, [runStartedEvent]);
 
+  const holdingsDeployedTotal = useMemo(() => {
+    const d = Number(holdings?.deployed_usd || 0);
+    return d > 0 ? d : 1;
+  }, [holdings]);
+
   const clearRunPanels = useCallback(() => {
     setRunStatus(null);
     setRunStatusError('');
@@ -138,6 +145,8 @@ export default function SimulatorPage() {
     setReadinessError('');
     setBiasFindings([]);
     setBiasError('');
+    setHoldings(null);
+    setHoldingsError('');
     setSelectedOrderKey('');
     setExplainData(null);
     setExplainError('');
@@ -191,15 +200,25 @@ export default function SimulatorPage() {
     const ordersUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/orders?limit=2000`;
     const riskUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/risk?limit=500`;
     const readinessUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/readiness`;
+    const holdingsUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/holdings`;
     const shouldQueryReadiness = !readinessUnavailableRunsRef.current.has(selectedRunId);
 
-    const [statusRes, timelineRes, biasRes, ordersRes, riskRes, readinessRes] = await Promise.allSettled([
+    const fetchHoldingsSnapshot = () =>
+      fetch(holdingsUrl, { credentials: 'include', headers: { Accept: 'application/json' } }).then(async (r) => {
+        if (r.status === 404) return null;
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(j?.error || `Failed (${r.status})`);
+        return j?.holdings ?? null;
+      });
+
+    const [statusRes, timelineRes, biasRes, ordersRes, riskRes, readinessRes, holdingsRes] = await Promise.allSettled([
       fetchJson(statusUrl),
       fetchJson(timelineUrl),
       fetchJson(biasUrl),
       fetchJson(ordersUrl),
       fetchJson(riskUrl),
       shouldQueryReadiness ? fetchJson(readinessUrl) : Promise.resolve(null),
+      fetchHoldingsSnapshot(),
     ]);
     if (latestRunLoadTokenRef.current !== loadToken) return;
 
@@ -269,6 +288,14 @@ export default function SimulatorPage() {
         setReadiness(null);
         setReadinessError(msg || 'Failed to load readiness');
       }
+    }
+
+    if (holdingsRes.status === 'fulfilled') {
+      setHoldings(holdingsRes.value);
+      setHoldingsError('');
+    } else {
+      setHoldings(null);
+      setHoldingsError(String(holdingsRes.reason?.message || holdingsRes.reason || 'Failed to load holdings'));
     }
 
     setLastRefreshTs(Date.now());
@@ -492,6 +519,82 @@ export default function SimulatorPage() {
                 <button className="sim-btn sim-btn-danger" type="button" disabled={controlLoading} onClick={() => sendControl('stop')}>Stop Run</button>
                 {controlMsg && <span className="sim-note">{controlMsg}</span>}
               </div>
+
+              <h3 className="sim-subtitle">Simulated holdings (latest cycle)</h3>
+              {holdingsError && <p className="sim-error">{holdingsError}</p>}
+              {!holdingsError && !holdings && runStatus?.status === 'running' && (
+                <p className="sim-note">Holdings appear after the first cycle completes (usually within one refresh interval).</p>
+              )}
+              {!holdingsError && !holdings && runStatus?.status && runStatus.status !== 'running' && (
+                <p className="sim-note">No holdings snapshot for this run (older run or no completed cycles).</p>
+              )}
+              {holdings && (
+                <>
+                  <div className="sim-holdings-meta sim-status-grid">
+                    <div>As of: <b>{fmtTs(holdings.ts)}</b></div>
+                    <div>Cycle: <b>{Number(holdings.cycle_index || 0)}</b></div>
+                    <div>Equity: <b>${Number(holdings.equity_usd || 0).toFixed(2)}</b></div>
+                    <div>Deployed (sim): <b>${Number(holdings.deployed_usd || 0).toFixed(2)}</b></div>
+                    <div>Unallocated: <b>${Number(holdings.cash_residual_usd || 0).toFixed(2)}</b></div>
+                    <div>Universe: <b>{Number(holdings.universe_symbol_count || 0)}</b> symbols</div>
+                  </div>
+                  <p className="sim-note sim-holdings-note">{holdings.note || ''}</p>
+                  {!holdings.legs?.length && (
+                    <p className="sim-note">No filled legs this cycle (skipped, rejected, or market closed).</p>
+                  )}
+                  {!!holdings.legs?.length && (
+                    <div className="sim-holdings-wrap">
+                      <table className="sim-holdings-table">
+                        <thead>
+                          <tr>
+                            <th>Symbol</th>
+                            <th>Exch</th>
+                            <th>Side</th>
+                            <th className="sim-num">Notional</th>
+                            <th className="sim-num">Mark</th>
+                            <th className="sim-num">~Shares</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {holdings.legs.map((row, idx) => (
+                            <tr key={`${row.symbol}-${row.exchange}-${row.side}-${idx}`}>
+                              <td><b>{row.symbol}</b></td>
+                              <td>{row.exchange}</td>
+                              <td>
+                                <span className={`sim-pill sim-pill--${String(row.side).includes('SHORT') ? 'bad' : 'good'}`}>
+                                  {row.side}
+                                </span>
+                              </td>
+                              <td className="sim-num">${Number(row.notional_usd || 0).toFixed(2)}</td>
+                              <td className="sim-num">${Number(row.mark_px || 0).toFixed(4)}</td>
+                              <td className="sim-num">{Number(row.shares_approx || 0).toFixed(4)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="sim-holdings-chart" aria-hidden="true">
+                        <div className="sim-holdings-chart-title">Share of deployed notional (this cycle)</div>
+                        {holdings.legs.map((row, idx) => {
+                          const w = (100 * Number(row.notional_usd || 0)) / holdingsDeployedTotal;
+                          const isShort = String(row.side).includes('SHORT');
+                          return (
+                            <div key={`bar-${row.symbol}-${row.exchange}-${row.side}-${idx}`} className="sim-holdings-bar-row">
+                              <span className="sim-holdings-bar-label">{row.symbol}</span>
+                              <div className="sim-holdings-bar-track">
+                                <div
+                                  className={`sim-holdings-bar-fill ${isShort ? 'sim-holdings-bar-fill--short' : ''}`}
+                                  style={{ width: `${Math.min(100, Math.max(2, w))}%` }}
+                                />
+                              </div>
+                              <span className="sim-holdings-bar-val">${Number(row.notional_usd || 0).toFixed(2)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </>
           )}
         </section>

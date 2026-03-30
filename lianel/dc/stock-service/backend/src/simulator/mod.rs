@@ -211,6 +211,31 @@ pub struct SimBiasFinding {
     pub details: serde_json::Value,
 }
 
+/// One simulated position leg for the current cycle (not a multi-day carry book).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimHoldingsLegRow {
+    pub symbol: String,
+    pub exchange: String,
+    pub side: String,
+    pub notional_usd: f64,
+    pub mark_px: f64,
+    pub shares_approx: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimHoldingsSnapshot {
+    pub run_id: String,
+    pub ts: u64,
+    pub cycle_index: usize,
+    pub equity_usd: f64,
+    pub deployed_usd: f64,
+    pub cash_residual_usd: f64,
+    pub universe_symbol_count: usize,
+    pub legs: Vec<SimHoldingsLegRow>,
+    #[serde(default)]
+    pub note: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimExplainResponse {
     pub run: SimRunMeta,
@@ -347,6 +372,9 @@ fn run_risk_key(run_id: &str) -> String {
 }
 fn run_readiness_key(run_id: &str) -> String {
     format!("sim:run:{run_id}:readiness")
+}
+fn run_holdings_key(run_id: &str) -> String {
+    format!("sim:run:{run_id}:holdings_latest")
 }
 fn run_control_key(run_id: &str) -> String {
     format!("sim:run:{run_id}:control")
@@ -512,6 +540,37 @@ pub async fn get_readiness_report(
     let raw: Option<String> = conn.get(run_readiness_key(run_id)).await.map_err(|e| e.to_string())?;
     match raw {
         Some(v) => serde_json::from_str::<SimReadinessReport>(&v)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+async fn set_holdings_latest(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    snap: &SimHoldingsSnapshot,
+) -> Result<(), String> {
+    let mut conn = redis.clone();
+    let raw = serde_json::to_string(snap).map_err(|e| e.to_string())?;
+    let _: () = conn
+        .set(run_holdings_key(run_id), raw)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn get_holdings_snapshot(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+) -> Result<Option<SimHoldingsSnapshot>, String> {
+    let mut conn = redis.clone();
+    let raw: Option<String> = conn
+        .get(run_holdings_key(run_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    match raw {
+        Some(v) => serde_json::from_str::<SimHoldingsSnapshot>(&v)
             .map(Some)
             .map_err(|e| e.to_string()),
         None => Ok(None),
@@ -1470,6 +1529,66 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             }
             cycle_idx += 1;
             meta.cycles_completed = cycle_idx;
+
+            let mut legs: Vec<SimHoldingsLegRow> = fills
+                .iter()
+                .filter_map(|f| {
+                    if f.qty_notional_usd <= f64::EPSILON {
+                        return None;
+                    }
+                    let mark = if f.close_px > 0.0 {
+                        f.close_px
+                    } else {
+                        f.open_px.max(f.buy_px)
+                    };
+                    let shares = if mark > 0.0 {
+                        f.qty_notional_usd / mark
+                    } else {
+                        0.0
+                    };
+                    Some(SimHoldingsLegRow {
+                        symbol: f.symbol.clone(),
+                        exchange: f.exchange.clone(),
+                        side: f.side.clone(),
+                        notional_usd: f.qty_notional_usd,
+                        mark_px: mark,
+                        shares_approx: shares,
+                    })
+                })
+                .collect();
+            legs.sort_by(|a, b| {
+                b.notional_usd
+                    .partial_cmp(&a.notional_usd)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let deployed_usd: f64 = legs.iter().map(|l| l.notional_usd).sum();
+            let snap = SimHoldingsSnapshot {
+                run_id: run_id_cloned.clone(),
+                ts: exec_ts,
+                cycle_index: cycle_idx,
+                equity_usd: equity,
+                deployed_usd,
+                cash_residual_usd: (equity - deployed_usd).max(0.0),
+                universe_symbol_count: symbol_count,
+                legs,
+                note: "Simulated book for this cycle: each leg is the filled notional for the latest step (LONG/SHORT vs mark price). PnL is realized each cycle; this is not a multi-day carry portfolio.".to_string(),
+            };
+            let _ = set_holdings_latest(&redis, &run_id_cloned, &snap).await;
+            let _ = push_event(
+                &redis,
+                &run_id_cloned,
+                "HoldingsSnapshot",
+                None,
+                json!({
+                    "ts": snap.ts,
+                    "cycle_index": snap.cycle_index,
+                    "equity_usd": snap.equity_usd,
+                    "deployed_usd": snap.deployed_usd,
+                    "leg_count": snap.legs.len(),
+                }),
+            )
+            .await;
+
             let explain_coverage = if total_decisions == 0 {
                 1.0
             } else {

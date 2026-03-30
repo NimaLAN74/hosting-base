@@ -179,6 +179,24 @@ def main():
         raise RuntimeError("Risk snapshot series is empty")
     print(f"risk_points={len(risk)}")
 
+    holdings_url = f"{base}/api/v1/stock-service/sim/runs/{run_id}/holdings"
+    holdings_payload = None
+    for _attempt in range(10):
+        try:
+            holdings_payload = http_json(holdings_url, insecure=args.insecure_ssl)
+            break
+        except HttpJsonError as exc:
+            if exc.status == 404:
+                time.sleep(0.4)
+                continue
+            raise
+    if not holdings_payload or "holdings" not in holdings_payload:
+        raise RuntimeError("Holdings snapshot missing after retries")
+    snap = holdings_payload["holdings"]
+    if not isinstance(snap, dict) or "cycle_index" not in snap:
+        raise RuntimeError("Holdings snapshot malformed")
+    print(f"holdings_cycle={snap.get('cycle_index')} legs={len(snap.get('legs') or [])}")
+
     readiness = http_json(
         f"{base}/api/v1/stock-service/sim/runs/{run_id}/readiness",
         insecure=args.insecure_ssl,

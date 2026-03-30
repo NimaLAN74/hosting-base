@@ -320,3 +320,123 @@
   border-bottom: none;
 }
 
+.sim-holdings-meta {
+  margin-top: 0.25rem;
+}
+
+.sim-holdings-note {
+  margin: 0.35rem 0 0.65rem;
+  max-width: 58rem;
+}
+
+.sim-holdings-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .sim-holdings-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sim-holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  color: var(--sim-text);
+  background: #ffffff;
+  border: 1px solid var(--sim-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sim-holdings-table th,
+.sim-holdings-table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.sim-holdings-table thead th {
+  background: #f3f4f6;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sim-muted);
+}
+
+.sim-holdings-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.sim-holdings-table tbody tr:hover {
+  background: #f9fafb;
+}
+
+.sim-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-holdings-chart {
+  border: 1px solid var(--sim-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: #fafafa;
+}
+
+.sim-holdings-chart-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--sim-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.sim-holdings-bar-row {
+  display: grid;
+  grid-template-columns: 3.2rem 1fr 4.5rem;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.sim-holdings-bar-label {
+  font-weight: 600;
+  color: var(--sim-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-holdings-bar-track {
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sim-holdings-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f766e, #14b8a6);
+  min-width: 2px;
+}
+
+.sim-holdings-bar-fill--short {
+  background: linear-gradient(90deg, #991b1b, #f87171);
+}
+
+.sim-holdings-bar-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--sim-muted);
+  font-size: 0.8rem;
+}
+

@@ -170,6 +170,11 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/sim/runs/:run_id/readiness",
             get(sim_run_readiness_handler),
         )
+        .route("/api/v1/sim/runs/:run_id/holdings", get(sim_run_holdings_handler))
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/holdings",
+            get(sim_run_holdings_handler),
+        )
         .route("/api/v1/sim/runs/:run_id/control", post(sim_run_control_handler))
         .route(
             "/api/v1/stock-service/sim/runs/:run_id/control",
@@ -1288,6 +1293,36 @@ async fn sim_run_readiness_handler(
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "readiness not found for run" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+async fn sim_run_holdings_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    match simulator::get_holdings_snapshot(redis, &run_id).await {
+        Ok(Some(h)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "run_id": run_id, "holdings": h })),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "holdings snapshot not available yet (first cycle not finished)" })),
         )
             .into_response(),
         Err(e) => (
