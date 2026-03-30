@@ -114,6 +114,16 @@ export default function SimulatorPage() {
   }, [orders, onlyTodayOrders]);
 
   const latestRisk = useMemo(() => (riskSeries.length > 0 ? riskSeries[riskSeries.length - 1] : null), [riskSeries]);
+  const runStartedEvent = useMemo(
+    () => timeline.find((e) => e?.kind === 'RunStarted') || null,
+    [timeline]
+  );
+  const runDataModeLabel = useMemo(() => {
+    if (!runStartedEvent) return '—';
+    return runStartedEvent?.payload?.live_market_data
+      ? 'LIVE (real-time quotes)'
+      : 'REPLAY (historical bars)';
+  }, [runStartedEvent]);
 
   const clearRunPanels = useCallback(() => {
     setRunStatus(null);
@@ -466,6 +476,7 @@ export default function SimulatorPage() {
               <div className="sim-status-grid">
                 <div>Status: <b>{runStatus.status}</b></div>
                 <div>Stop reason: <b>{runStatus.stop_reason || '—'}</b></div>
+                <div>Data mode: <b>{runDataModeLabel}</b></div>
                 <div>Initial: <b>${Number(runStatus.initial_capital_usd || 0).toFixed(2)}</b></div>
                 <div>Ending: <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
                 <div>PnL: <b>{runStatus.pnl_usd != null ? `$${Number(runStatus.pnl_usd).toFixed(2)}` : '—'}</b></div>

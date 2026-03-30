@@ -3,7 +3,7 @@
   --sim-card-bg: #ffffff;
   --sim-border: #d1d5db;
   --sim-text: #111827;
-  --sim-muted: #374151;
+  --sim-muted: #1f2937;
   --sim-primary: #0f766e;
   --sim-primary-dark: #115e59;
   --sim-secondary: #1f2937;
@@ -12,7 +12,7 @@
   --sim-good-bg: #ecfdf5;
   --sim-good-text: #065f46;
   --sim-warn-bg: #fffbeb;
-  --sim-warn-text: #92400e;
+  --sim-warn-text: #78350f;
   --sim-bad-bg: #fef2f2;
   --sim-bad-text: #991b1b;
 }
@@ -24,7 +24,8 @@
 .sim-stage-title {
   margin: 0 0 0.55rem;
   color: var(--sim-text);
-  font-size: 1.05rem;
+  font-size: 1.1rem;
+  font-weight: 700;
 }
 
 .sim-grid {
@@ -43,6 +44,7 @@
   border: 1px solid var(--sim-border);
   border-radius: 10px;
   padding: 0.95rem;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
 }
 
 .sim-card h3 {
@@ -52,7 +54,7 @@
 
 .sim-note {
   color: var(--sim-muted);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .sim-back-link {
@@ -67,7 +69,7 @@
 
 .sim-error {
   color: var(--sim-danger);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   background: var(--sim-bad-bg);
   border: 1px solid #fecaca;
   border-radius: 8px;
@@ -132,6 +134,7 @@
   font-weight: 600;
   padding: 0.5rem 0.85rem;
   cursor: pointer;
+  min-height: 36px;
 }
 
 .sim-btn:hover {
@@ -209,13 +212,24 @@
   border-radius: 8px;
   background: #f9fafb;
   padding: 0.5rem 0.55rem;
-  font-size: 0.84rem;
+  font-size: 0.88rem;
   color: var(--sim-text);
 }
 
 .sim-run-row {
   text-align: left;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.sim-run-row:hover {
+  border-color: #6b7280;
+  background: #f3f4f6;
+}
+
+.sim-run-row:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }
 
 .sim-run-row.active {
