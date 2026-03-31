@@ -42,6 +42,16 @@ pub struct SimRunRequest {
     pub min_hold_seconds: u64,
     #[serde(default = "default_symbol_cooldown_seconds")]
     pub symbol_cooldown_seconds: u64,
+    /// Live mode: maximum allowed quote age (seconds) based on watchlist `updated_at`.
+    /// If exceeded, the simulator will skip trading that symbol and record a TradeSkipped event.
+    #[serde(default = "default_live_max_quote_age_seconds")]
+    pub live_max_quote_age_seconds: u64,
+    /// Live mode: if true, require bid+ask to be present and sane (ask >= bid) before trading.
+    #[serde(default = "default_live_require_bid_ask")]
+    pub live_require_bid_ask: bool,
+    /// Live mode: maximum allowed spread (bps) when bid+ask are present. Above this, skip trading.
+    #[serde(default = "default_live_max_spread_bps")]
+    pub live_max_spread_bps: f64,
     /// Replay: when `true`, start fails if strict IBKR day alignment across symbols is shorter than `days`
     /// (no silent shrink). When omitted, defaults to **true** if `days >= 126`, else false.
     #[serde(default)]
@@ -310,6 +320,23 @@ fn default_min_hold_seconds() -> u64 {
 }
 fn default_symbol_cooldown_seconds() -> u64 {
     180
+}
+fn default_live_max_quote_age_seconds() -> u64 {
+    // Watchlist refreshes every ~60s; allow some slack for network / refresh jitter.
+    120
+}
+fn default_live_require_bid_ask() -> bool {
+    false
+}
+fn default_live_max_spread_bps() -> f64 {
+    250.0
+}
+
+fn parse_rfc3339_ts_seconds(v: &str) -> Option<u64> {
+    use chrono::{DateTime, FixedOffset};
+    DateTime::<FixedOffset>::parse_from_rfc3339(v)
+        .ok()
+        .and_then(|dt| dt.timestamp().try_into().ok())
 }
 
 fn hhmm_utc_from_ts(ts: u64) -> String {
@@ -1185,6 +1212,28 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     let px_source = q
                         .and_then(|q| q.price_source.clone())
                         .unwrap_or_else(|| "UNKNOWN".to_string());
+                    let quote_updated_at = q.and_then(|q| q.updated_at.as_deref()).unwrap_or("");
+                    let quote_ts = parse_rfc3339_ts_seconds(quote_updated_at);
+                    if let Some(ts) = quote_ts {
+                        let age = exec_ts.saturating_sub(ts);
+                        if req.live_max_quote_age_seconds > 0 && age > req.live_max_quote_age_seconds {
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "TradeSkipped",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "reason": "skip_stale_quote",
+                                    "quote_updated_at": quote_updated_at,
+                                    "quote_age_seconds": age,
+                                    "max_allowed_quote_age_seconds": req.live_max_quote_age_seconds
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
+                    }
                     let Some(px_now_mid) = px_now else {
                         missing_price_rows += 1;
                         total_rows += 1;
@@ -1202,6 +1251,21 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         (Some(b), Some(a)) if a >= b => Some((b, a)),
                         _ => None,
                     };
+                    if req.live_require_bid_ask && live_bid_ask.is_none() {
+                        let _ = push_event(
+                            &redis,
+                            &run_id_cloned,
+                            "TradeSkipped",
+                            Some(exchange.code.to_string()),
+                            json!({
+                                "symbol": sym,
+                                "reason": "skip_missing_bid_ask",
+                                "note": "live_require_bid_ask=true"
+                            }),
+                        )
+                        .await;
+                        continue;
+                    }
                     (
                         px_prev_mid,
                         px_now_mid,
@@ -1262,6 +1326,26 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         }
                     })
                     .unwrap_or(exchange.spread_bps);
+                if req.live_market_data
+                    && req.live_max_spread_bps > 0.0
+                    && observed_spread_bps.is_finite()
+                    && observed_spread_bps > req.live_max_spread_bps
+                {
+                    let _ = push_event(
+                        &redis,
+                        &run_id_cloned,
+                        "TradeSkipped",
+                        Some(exchange.code.to_string()),
+                        json!({
+                            "symbol": sym,
+                            "reason": "skip_spread_too_wide",
+                            "observed_spread_bps": observed_spread_bps,
+                            "max_allowed_spread_bps": req.live_max_spread_bps
+                        }),
+                    )
+                    .await;
+                    continue;
+                }
                 let estimated_cost_bps = exchange.ibkr_commission_bps
                     + exchange.exchange_fee_bps
                     + exchange.clearing_fee_bps

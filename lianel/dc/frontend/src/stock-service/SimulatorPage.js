@@ -20,6 +20,9 @@ const SIX_MONTH_LIVE_PRESET = {
   max_cycles: 500000,
   readiness_min_days: 126,
   replay_require_full_horizon: false,
+  live_max_quote_age_seconds: 120,
+  live_require_bid_ask: false,
+  live_max_spread_bps: 250,
 };
 
 /** Replay on IBKR daily bars: one step per aligned trading day; fails start if overlap &lt; days (reliable 126d training). */
@@ -35,6 +38,9 @@ const RESEARCH_126_REPLAY_PRESET = {
   max_cycles: 200000,
   readiness_min_days: 126,
   replay_require_full_horizon: true,
+  live_max_quote_age_seconds: 120,
+  live_require_bid_ask: false,
+  live_max_spread_bps: 250,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -638,11 +644,41 @@ export default function SimulatorPage() {
               <label className="sim-check">
                 <input
                   type="checkbox"
+                  checked={Boolean(form.live_require_bid_ask)}
+                  onChange={(e) => setForm((f) => ({ ...f, live_require_bid_ask: e.target.checked }))}
+                  disabled={!form.live_market_data}
+                />
+                Live: require bid/ask (skip if missing)
+              </label>
+              <label className="sim-check">
+                <input
+                  type="checkbox"
                   checked={Boolean(form.replay_require_full_horizon)}
                   onChange={(e) => setForm((f) => ({ ...f, replay_require_full_horizon: e.target.checked }))}
                   disabled={form.live_market_data}
                 />
                 Require full replay horizon for replay (server fails start if aligned IBKR days &lt; Days; recommended for 126d model runs)
+              </label>
+              <label>Live: max quote age (seconds)
+                <input
+                  type="number"
+                  min="0"
+                  max="600"
+                  value={Number(form.live_max_quote_age_seconds || 0)}
+                  onChange={(e) => setForm((f) => ({ ...f, live_max_quote_age_seconds: Number(e.target.value || 0) }))}
+                  disabled={!form.live_market_data}
+                />
+              </label>
+              <label>Live: max spread (bps)
+                <input
+                  type="number"
+                  min="0"
+                  max="2000"
+                  step="1"
+                  value={Number(form.live_max_spread_bps || 0)}
+                  onChange={(e) => setForm((f) => ({ ...f, live_max_spread_bps: Number(e.target.value || 0) }))}
+                  disabled={!form.live_market_data}
+                />
               </label>
             </div>
             <div className="sim-purge-panel">
