@@ -901,8 +901,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .max(req.readiness_min_days)
         .min(if req.live_market_data { 1_000_000 } else { 20_000 });
     if req.live_market_data {
-        // In live mode, one cycle should represent a real-time step, not a tight loop.
-        req.replay_delay_ms = req.replay_delay_ms.max(60_000);
+        // In live mode, one cycle should represent a real-time step (paced by replay_delay_ms).
+        // Keep user-provided cadence, but enforce a small floor so we don't busy-loop.
+        req.replay_delay_ms = req.replay_delay_ms.max(250);
     }
     req.edge_cost_buffer_bps = req.edge_cost_buffer_bps.clamp(0.0, 150.0);
     req.min_signal_abs_return_bps = req.min_signal_abs_return_bps.clamp(0.0, 200.0);
