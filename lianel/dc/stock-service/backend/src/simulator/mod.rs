@@ -276,6 +276,16 @@ pub struct SimExplainResponse {
     pub market_context: serde_json::Value,
 }
 
+#[derive(Debug, Clone)]
+struct OpenPosition {
+    side: String, // "LONG" | "SHORT"
+    entry_ts: u64,
+    entry_px: f64,
+    notional_usd: f64,
+    shares: f64,
+    market_data_source: String,
+}
+
 fn default_days() -> usize {
     7
 }
@@ -1115,6 +1125,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         let mut live_last_decision_ts = now_ts().saturating_sub(1);
         let mut last_fill_ts_by_symbol: HashMap<String, u64> = HashMap::new();
         let mut cooldown_until_by_symbol: HashMap<String, u64> = HashMap::new();
+        let mut positions: HashMap<String, OpenPosition> = HashMap::new();
+        let short_margin_requirement = 0.50_f64;
 
         meta.status = "running".to_string();
         meta.started_at_ts = Some(now_ts());
@@ -1174,6 +1186,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             let mut decision_rows: Vec<SimDecisionTrace> = Vec::new();
             let mut fills: Vec<SimFillLedgerRow> = Vec::new();
             let mut orders: Vec<SimOrderLedgerRow> = Vec::new();
+            let mut mid_by_symbol: HashMap<String, f64> = HashMap::new();
             let symbols: Vec<String> = replay_symbols.clone();
             let symbol_count = symbols.len();
             let quote_snapshot = if req.live_market_data {
@@ -1182,7 +1195,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             } else {
                 None
             };
-            let per_leg_notional = if symbol_count == 0 {
+            let target_leg_notional = if symbol_count == 0 {
                 0.0
             } else {
                 equity.max(0.0) / symbol_count as f64
@@ -1308,6 +1321,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     missing_price_rows += 1;
                     continue;
                 }
+                mid_by_symbol.insert(sym.clone(), close_px);
 
                 let side = if ret_prev >= 0.0 { "LONG" } else { "SHORT" }.to_string();
                 let signal_abs_return = ret_prev.exp_m1().abs();
@@ -1483,82 +1497,195 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 total_decisions += 1;
                 explained_decisions += 1;
 
-                let order_id = format!("o-{}-{}", exec_ts, sym);
-                let order_type = if exchange.auction_window { "MOO" } else { "LIMIT" };
-                let mut order_reasons = vec![
-                    format!("hybrid_score={:.6}", hybrid_score),
-                    format!("ret_prev_ln={:.6}", ret_prev),
-                    format!("exchange={}", exchange.code),
-                    format!("borrow_available={}", exchange.short_borrow_available),
-                ];
-                if is_halt {
-                    order_reasons.push("simulated_halt_spread_widened".to_string());
-                }
-                let short_blocked = side == "SHORT" && !exchange.short_borrow_available;
-                let fill_ratio = if short_blocked { 0.0 } else if per_leg_notional > exchange.depth_notional_usd {
-                    (exchange.depth_notional_usd / per_leg_notional).clamp(0.1, 1.0)
-                } else {
-                    1.0
-                };
-                let submitted = SimOrderLedgerRow {
-                    order_id: order_id.clone(),
-                    decision_id: decision_id.clone(),
-                    run_id: run_id_cloned.clone(),
-                    ts: decision_ts,
-                    wall_clock_ts: now_ts(),
-                    symbol: sym.clone(),
-                    exchange: exchange.code.to_string(),
-                    side: side.clone(),
-                    order_type: order_type.to_string(),
-                    tif: "DAY".to_string(),
-                    qty_notional_usd: per_leg_notional,
-                    intended_px: open_px,
-                    status: "submitted".to_string(),
-                    filled_notional_usd: 0.0,
-                    remaining_notional_usd: per_leg_notional,
-                    venue_latency_ms: exchange.latency_ms,
-                    reasons: order_reasons.clone(),
-                };
-                orders.push(submitted);
+                // Stateful portfolio simulation:
+                // - open position when none exists and signal passes
+                // - close position only on signal flip after min_hold_seconds
+                let half_spread = (observed_spread_bps / 10_000.0) / 2.0;
+                let desired_side = side.clone();
 
-                let ret_simple = (close_px / open_px) - 1.0;
-                let direction = if side == "LONG" { 1.0 } else { -1.0 };
-                let filled_notional = per_leg_notional * fill_ratio;
-                let remaining_notional = (per_leg_notional - filled_notional).max(0.0);
-                let ibkr_commission_usd = filled_notional * (exchange.ibkr_commission_bps / 10_000.0);
-                let exchange_fee_usd = filled_notional * (exchange.exchange_fee_bps / 10_000.0);
-                let clearing_fee_usd = filled_notional * (exchange.clearing_fee_bps / 10_000.0);
-                let regulatory_fee_usd = filled_notional * (exchange.regulatory_fee_bps / 10_000.0);
-                let fx_fee_usd = filled_notional * (exchange.fx_fee_bps / 10_000.0);
-                let tax_usd = filled_notional * (exchange.tax_bps / 10_000.0);
+                // Close on flip (after hold window)
+                if let Some(pos) = positions.get(&sym).cloned() {
+                    let elapsed = exec_ts.saturating_sub(pos.entry_ts);
+                    if elapsed >= req.min_hold_seconds && desired_side != pos.side {
+                        let notional = pos.notional_usd;
+                        let exit_px = if pos.side == "LONG" {
+                            close_px * (1.0 - half_spread)
+                        } else {
+                            close_px * (1.0 + half_spread)
+                        };
+                        if exit_px.is_finite() && exit_px > 0.0 {
+                            let order_id = format!("o-close-{}-{}", exec_ts, sym);
+                            let decision_id = format!("d-close-{}-{}", exec_ts, sym);
+                            let order_type = if exchange.auction_window { "MOC" } else { "LIMIT" };
+                            let ibkr_commission_usd = notional * (exchange.ibkr_commission_bps / 10_000.0);
+                            let exchange_fee_usd = notional * (exchange.exchange_fee_bps / 10_000.0);
+                            let clearing_fee_usd = notional * (exchange.clearing_fee_bps / 10_000.0);
+                            let regulatory_fee_usd = notional * (exchange.regulatory_fee_bps / 10_000.0);
+                            let fx_fee_usd = notional * (exchange.fx_fee_bps / 10_000.0);
+                            let tax_usd = notional * (exchange.tax_bps / 10_000.0);
+                            let fee_usd = ibkr_commission_usd
+                                + exchange_fee_usd
+                                + clearing_fee_usd
+                                + regulatory_fee_usd
+                                + fx_fee_usd
+                                + tax_usd;
+                            let spread_cost_usd = notional * (observed_spread_bps / 10_000.0);
+                            let slippage_usd = notional * (exchange.slippage_bps / 10_000.0);
+                            let impact_usd = notional * (exchange.market_impact_bps / 10_000.0);
+                            let borrow_fee_usd = if pos.side == "SHORT" {
+                                notional * (exchange.borrow_fee_bps / 10_000.0)
+                            } else {
+                                0.0
+                            };
+                            let total_cost_usd = fee_usd + slippage_usd + spread_cost_usd + impact_usd + borrow_fee_usd;
+
+                            // Cash movements + realized pnl
+                            let (pnl_usd, buy_px, sell_px, buy_ts, sell_ts) = if pos.side == "LONG" {
+                                let proceeds = pos.shares * exit_px;
+                                let pnl = proceeds - pos.notional_usd - total_cost_usd;
+                                cash_usd += proceeds - total_cost_usd;
+                                (pnl, pos.entry_px, exit_px, pos.entry_ts, exec_ts)
+                            } else {
+                                let cover_cost = pos.shares * exit_px;
+                                let pnl = pos.notional_usd - cover_cost - total_cost_usd;
+                                cash_usd -= cover_cost + total_cost_usd;
+                                (pnl, exit_px, pos.entry_px, exec_ts, pos.entry_ts)
+                            };
+
+                            orders.push(SimOrderLedgerRow {
+                                order_id: order_id.clone(),
+                                decision_id: decision_id.clone(),
+                                run_id: run_id_cloned.clone(),
+                                ts: exec_ts,
+                                wall_clock_ts: now_ts(),
+                                symbol: sym.clone(),
+                                exchange: exchange.code.to_string(),
+                                side: if pos.side == "LONG" { "SELL".to_string() } else { "BUY".to_string() },
+                                order_type: order_type.to_string(),
+                                tif: "DAY".to_string(),
+                                qty_notional_usd: notional,
+                                intended_px: exit_px,
+                                status: "filled".to_string(),
+                                filled_notional_usd: notional,
+                                remaining_notional_usd: 0.0,
+                                venue_latency_ms: exchange.latency_ms,
+                                reasons: vec![
+                                    "close_on_signal_flip".to_string(),
+                                    format!("held_seconds={}", elapsed),
+                                ],
+                            });
+
+                            fills.push(SimFillLedgerRow {
+                                decision_id,
+                                run_id: run_id_cloned.clone(),
+                                exec_ts,
+                                symbol: sym.clone(),
+                                exchange: exchange.code.to_string(),
+                                side: pos.side.clone(),
+                                qty_notional_usd: notional,
+                                open_px: pos.entry_px,
+                                close_px: exit_px,
+                                buy_px,
+                                sell_px,
+                                buy_ts,
+                                sell_ts,
+                                buy_session_time_utc: hhmm_utc_from_ts(buy_ts),
+                                sell_session_time_utc: hhmm_utc_from_ts(sell_ts),
+                                market_data_source: pos.market_data_source.clone(),
+                                ret_simple: if pos.entry_px > 0.0 { (exit_px / pos.entry_px) - 1.0 } else { 0.0 },
+                                fee_usd,
+                                ibkr_commission_usd,
+                                exchange_fee_usd,
+                                clearing_fee_usd,
+                                regulatory_fee_usd,
+                                fx_fee_usd,
+                                tax_usd,
+                                slippage_usd,
+                                pnl_usd,
+                                latency_ms: exchange.latency_ms,
+                                order_id: Some(order_id),
+                                fill_ratio: 1.0,
+                                borrow_fee_usd,
+                                market_impact_usd: impact_usd + spread_cost_usd,
+                                total_cost_usd,
+                            });
+
+                            positions.remove(&sym);
+                            last_fill_ts_by_symbol.insert(sym.clone(), exec_ts);
+                            if pnl_usd < 0.0 && req.symbol_cooldown_seconds > 0 {
+                                cooldown_until_by_symbol.insert(
+                                    sym.clone(),
+                                    exec_ts.saturating_add(req.symbol_cooldown_seconds),
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Open if no position exists
+                if desired_side == "SHORT" && !req.short_enabled {
+                    continue;
+                }
+                if desired_side == "SHORT" && !exchange.short_borrow_available {
+                    continue;
+                }
+                let notional = target_leg_notional.min(cash_usd.max(0.0)).max(0.0);
+                if notional <= f64::EPSILON {
+                    continue;
+                }
+                if desired_side == "SHORT" {
+                    let margin_req = notional * short_margin_requirement;
+                    if cash_usd < margin_req {
+                        continue;
+                    }
+                }
+
+                let entry_px = if desired_side == "LONG" {
+                    close_px * (1.0 + half_spread)
+                } else {
+                    close_px * (1.0 - half_spread)
+                };
+                if !(entry_px.is_finite() && entry_px > 0.0) {
+                    continue;
+                }
+                let shares = notional / entry_px;
+
+                let order_id = format!("o-open-{}-{}", exec_ts, sym);
+                let decision_id = format!("d-{}-{}", exec_ts, sym);
+                let order_type = if exchange.auction_window { "MOO" } else { "LIMIT" };
+                let ibkr_commission_usd = notional * (exchange.ibkr_commission_bps / 10_000.0);
+                let exchange_fee_usd = notional * (exchange.exchange_fee_bps / 10_000.0);
+                let clearing_fee_usd = notional * (exchange.clearing_fee_bps / 10_000.0);
+                let regulatory_fee_usd = notional * (exchange.regulatory_fee_bps / 10_000.0);
+                let fx_fee_usd = notional * (exchange.fx_fee_bps / 10_000.0);
+                let tax_usd = notional * (exchange.tax_bps / 10_000.0);
                 let fee_usd = ibkr_commission_usd
                     + exchange_fee_usd
                     + clearing_fee_usd
                     + regulatory_fee_usd
                     + fx_fee_usd
                     + tax_usd;
-                let spread_cost_usd = filled_notional * (observed_spread_bps / 10_000.0);
-                let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
-                let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
-                let borrow_fee_usd = if side == "SHORT" {
-                    filled_notional * (exchange.borrow_fee_bps / 10_000.0)
+                let spread_cost_usd = notional * (observed_spread_bps / 10_000.0);
+                let slippage_usd = notional * (exchange.slippage_bps / 10_000.0);
+                let impact_usd = notional * (exchange.market_impact_bps / 10_000.0);
+                let borrow_fee_usd = if desired_side == "SHORT" {
+                    notional * (exchange.borrow_fee_bps / 10_000.0)
                 } else {
                     0.0
                 };
-                let pnl_usd = (direction * filled_notional * ret_simple)
-                    - fee_usd
-                    - slippage_usd
-                    - spread_cost_usd
-                    - impact_usd
-                    - borrow_fee_usd;
                 let total_cost_usd = fee_usd + slippage_usd + spread_cost_usd + impact_usd + borrow_fee_usd;
-                let status = if short_blocked {
-                    "rejected"
-                } else if fill_ratio < 0.999 {
-                    "partially_filled"
+
+                // Cash impact at entry
+                if desired_side == "LONG" {
+                    if cash_usd < notional + total_cost_usd {
+                        continue;
+                    }
+                    cash_usd -= notional + total_cost_usd;
                 } else {
-                    "filled"
-                };
+                    cash_usd += notional - total_cost_usd;
+                }
+
                 orders.push(SimOrderLedgerRow {
                     order_id: order_id.clone(),
                     decision_id: decision_id.clone(),
@@ -1567,75 +1694,66 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     wall_clock_ts: now_ts(),
                     symbol: sym.clone(),
                     exchange: exchange.code.to_string(),
-                    side: side.clone(),
+                    side: if desired_side == "LONG" { "BUY".to_string() } else { "SELL_SHORT".to_string() },
                     order_type: order_type.to_string(),
                     tif: "DAY".to_string(),
-                    qty_notional_usd: per_leg_notional,
-                    intended_px: open_px,
-                    status: status.to_string(),
-                    filled_notional_usd: filled_notional,
-                    remaining_notional_usd: remaining_notional,
-                    venue_latency_ms: exchange.latency_ms + exchange.auction_extra_latency_ms,
-                    reasons: order_reasons,
+                    qty_notional_usd: notional,
+                    intended_px: entry_px,
+                    status: "filled".to_string(),
+                    filled_notional_usd: notional,
+                    remaining_notional_usd: 0.0,
+                    venue_latency_ms: exchange.latency_ms,
+                    reasons: vec![
+                        format!("hybrid_score={:.6}", hybrid_score),
+                        format!("ret_prev_ln={:.6}", ret_prev),
+                        format!("spread_bps={:.2}", observed_spread_bps),
+                    ],
                 });
-                if filled_notional > f64::EPSILON {
-                    let half_spread = (observed_spread_bps / 10_000.0) / 2.0;
-                    let (buy_px, sell_px) = if side == "LONG" {
-                        (open_px * (1.0 + half_spread), close_px * (1.0 - half_spread))
-                    } else {
-                        // SHORT: sell first (bid-ish), buy back later (ask-ish)
-                        (close_px * (1.0 + half_spread), open_px * (1.0 - half_spread))
-                    };
-                    fills.push(SimFillLedgerRow {
-                        decision_id: decision_id.clone(),
-                        run_id: run_id_cloned.clone(),
-                        exec_ts,
-                        symbol: sym.clone(),
-                        exchange: exchange.code.to_string(),
-                        side,
-                        qty_notional_usd: filled_notional,
-                        open_px,
-                        close_px,
-                        buy_px,
-                        sell_px,
-                        buy_ts: exec_ts,
-                        sell_ts: exec_ts,
-                        buy_session_time_utc: if req.live_market_data {
-                            hhmm_utc_from_ts(exec_ts)
-                        } else {
-                            exchange.session_open_utc.to_string()
-                        },
-                        sell_session_time_utc: if req.live_market_data {
-                            hhmm_utc_from_ts(exec_ts)
-                        } else {
-                            exchange.session_close_utc.to_string()
-                        },
-                        market_data_source,
-                        ret_simple,
-                        fee_usd,
-                        ibkr_commission_usd,
-                        exchange_fee_usd,
-                        clearing_fee_usd,
-                        regulatory_fee_usd,
-                        fx_fee_usd,
-                        tax_usd,
-                        slippage_usd,
-                        pnl_usd,
-                        latency_ms: exchange.latency_ms,
-                        order_id: Some(order_id),
-                        fill_ratio,
-                        borrow_fee_usd,
-                        market_impact_usd: impact_usd + spread_cost_usd,
-                        total_cost_usd,
-                    });
-                }
-                if filled_notional > f64::EPSILON {
-                    last_fill_ts_by_symbol.insert(sym.clone(), exec_ts);
-                    if pnl_usd < 0.0 && req.symbol_cooldown_seconds > 0 {
-                        cooldown_until_by_symbol
-                            .insert(sym.clone(), exec_ts.saturating_add(req.symbol_cooldown_seconds));
-                    }
-                }
+
+                // Record a decision trace for the OPEN action only.
+                let trace = SimDecisionTrace {
+                    decision_id: decision_id.clone(),
+                    run_id: run_id_cloned.clone(),
+                    decision_ts,
+                    symbol: sym.clone(),
+                    exchange: exchange.code.to_string(),
+                    side: desired_side.clone(),
+                    weight: 1.0 / symbol_count.max(1) as f64,
+                    hybrid_score,
+                    features: json!({
+                        "ret_prev_ln": ret_prev,
+                        "signal_abs_return": signal_abs_return,
+                        "observed_spread_bps": observed_spread_bps,
+                        "quote_source": market_data_source,
+                    }),
+                    rationale: vec![
+                        "stateful_portfolio: open_position".to_string(),
+                        format!("edge_required={:.5}", required_edge),
+                    ],
+                    short_explanation: format!(
+                        "{} {} for ${:.2} at {:.4} ({}), holding until signal flips.",
+                        if desired_side == "LONG" { "BUY" } else { "SELL_SHORT" },
+                        sym,
+                        notional,
+                        entry_px,
+                        exchange.code
+                    ),
+                };
+                decision_rows.push(trace);
+                total_decisions += 1;
+                explained_decisions += 1;
+
+                positions.insert(
+                    sym.clone(),
+                    OpenPosition {
+                        side: desired_side,
+                        entry_ts: exec_ts,
+                        entry_px,
+                        notional_usd: notional,
+                        shares,
+                        market_data_source: market_data_source.clone(),
+                    },
+                );
             }
 
             for d in &decision_rows {
@@ -1726,14 +1844,26 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 )
                 .await;
             }
-            if req.reinvest_profit {
-                equity += pnl_day;
-                if equity < 0.0 {
-                    equity = 0.0;
+            // Equity is derived from cash + marked positions (stateful carry). Realized PnL is already applied to cash.
+            benchmark_equity += benchmark_day;
+            // Mark-to-market positions using the latest available mid prices for this cycle.
+            let mut deployed_usd = 0.0;
+            let mut equity_mtm = cash_usd;
+            for (sym, pos) in positions.iter() {
+                if let Some(px) = mid_by_symbol.get(sym).copied().filter(|p| p.is_finite() && *p > 0.0) {
+                    if pos.side == "LONG" {
+                        let mv = pos.shares * px;
+                        deployed_usd += mv;
+                        equity_mtm += mv;
+                    } else {
+                        // For shorts, cash includes entry proceeds; subtract current liability.
+                        let liab = pos.shares * px;
+                        deployed_usd += liab;
+                        equity_mtm -= liab;
+                    }
                 }
             }
-            benchmark_equity += benchmark_day;
-            cash_usd = equity;
+            equity = equity_mtm.max(0.0);
             peak_equity = peak_equity.max(equity);
             daily_pnls.push(pnl_day);
             let drawdown = if peak_equity > 0.0 {
@@ -1752,7 +1882,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             } else {
                 leg_returns.iter().sum::<f64>() / leg_returns.len() as f64
             };
-            let gross_exposure = per_leg_notional * symbol_count as f64;
+            let gross_exposure = deployed_usd;
             let weights = if symbol_count == 0 {
                 vec![1.0]
             } else {
@@ -1822,29 +1952,20 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             cycle_idx += 1;
             meta.cycles_completed = cycle_idx;
 
-            let mut legs: Vec<SimHoldingsLegRow> = fills
+            let mut legs: Vec<SimHoldingsLegRow> = positions
                 .iter()
-                .filter_map(|f| {
-                    if f.qty_notional_usd <= f64::EPSILON {
+                .filter_map(|(sym, pos)| {
+                    let mark = mid_by_symbol.get(sym).copied().unwrap_or(pos.entry_px);
+                    if !(mark.is_finite() && mark > 0.0) {
                         return None;
                     }
-                    let mark = if f.close_px > 0.0 {
-                        f.close_px
-                    } else {
-                        f.open_px.max(f.buy_px)
-                    };
-                    let shares = if mark > 0.0 {
-                        f.qty_notional_usd / mark
-                    } else {
-                        0.0
-                    };
                     Some(SimHoldingsLegRow {
-                        symbol: f.symbol.clone(),
-                        exchange: f.exchange.clone(),
-                        side: f.side.clone(),
-                        notional_usd: f.qty_notional_usd,
+                        symbol: sym.clone(),
+                        exchange: exchanges::infer_exchange(sym).code.to_string(),
+                        side: pos.side.clone(),
+                        notional_usd: pos.notional_usd,
                         mark_px: mark,
-                        shares_approx: shares,
+                        shares_approx: pos.shares,
                     })
                 })
                 .collect();
@@ -1853,17 +1974,20 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     .partial_cmp(&a.notional_usd)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
-            let deployed_usd: f64 = legs.iter().map(|l| l.notional_usd).sum();
+            let deployed_usd: f64 = legs
+                .iter()
+                .map(|l| (l.shares_approx * l.mark_px).abs())
+                .sum();
             let snap = SimHoldingsSnapshot {
                 run_id: run_id_cloned.clone(),
                 ts: exec_ts,
                 cycle_index: cycle_idx,
                 equity_usd: equity,
                 deployed_usd,
-                cash_residual_usd: (equity - deployed_usd).max(0.0),
+                cash_residual_usd: cash_usd.max(0.0),
                 universe_symbol_count: symbol_count,
                 legs,
-                note: "Simulated book for this cycle: each leg is the filled notional for the latest step (LONG/SHORT vs mark price). PnL is realized each cycle; this is not a multi-day carry portfolio.".to_string(),
+                note: "Stateful carry portfolio: legs are open positions carried across cycles; closes happen on signal flip after min_hold_seconds. Cash/equity are marked-to-market each cycle.".to_string(),
             };
             let _ = set_holdings_latest(&redis, &run_id_cloned, &snap).await;
             let _ = push_event(
