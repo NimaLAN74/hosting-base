@@ -20,9 +20,9 @@ const SIX_MONTH_LIVE_PRESET = {
   max_cycles: 500000,
   readiness_min_days: 126,
   replay_require_full_horizon: false,
-  live_max_quote_age_seconds: 120,
-  live_require_bid_ask: false,
-  live_max_spread_bps: 250,
+  live_max_quote_age_seconds: 60,
+  live_require_bid_ask: true,
+  live_max_spread_bps: 80,
 };
 
 /** Replay on IBKR daily bars: one step per aligned trading day; fails start if overlap &lt; days (reliable 126d training). */
@@ -38,9 +38,9 @@ const RESEARCH_126_REPLAY_PRESET = {
   max_cycles: 200000,
   readiness_min_days: 126,
   replay_require_full_horizon: true,
-  live_max_quote_age_seconds: 120,
-  live_require_bid_ask: false,
-  live_max_spread_bps: 250,
+  live_max_quote_age_seconds: 60,
+  live_require_bid_ask: true,
+  live_max_spread_bps: 80,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

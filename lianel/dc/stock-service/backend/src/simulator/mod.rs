@@ -322,14 +322,14 @@ fn default_symbol_cooldown_seconds() -> u64 {
     180
 }
 fn default_live_max_quote_age_seconds() -> u64 {
-    // Watchlist refreshes every ~60s; allow some slack for network / refresh jitter.
-    120
+    // Watchlist refreshes every ~60s; default to strict freshness for LIVE trading simulation.
+    60
 }
 fn default_live_require_bid_ask() -> bool {
-    false
+    true
 }
 fn default_live_max_spread_bps() -> f64 {
-    250.0
+    80.0
 }
 
 fn parse_rfc3339_ts_seconds(v: &str) -> Option<u64> {
