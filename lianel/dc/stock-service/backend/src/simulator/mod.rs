@@ -898,7 +898,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     req.readiness_min_days = req.readiness_min_days.max(126).min(365 * 3);
     req.max_cycles = req
         .max_cycles
-        .max(req.readiness_min_days)
+        .max(5)
         .min(if req.live_market_data { 1_000_000 } else { 20_000 });
     if req.live_market_data {
         // In live mode, one cycle should represent a real-time step (paced by replay_delay_ms).
@@ -1515,26 +1515,38 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                             close_px * (1.0 + half_spread)
                         };
                         if exit_px.is_finite() && exit_px > 0.0 {
+                            let fill_ratio = if notional > exchange.depth_notional_usd {
+                                (exchange.depth_notional_usd / notional).clamp(0.1, 1.0)
+                            } else {
+                                1.0
+                            };
+                            let filled_notional = notional * fill_ratio;
+                            let remaining_notional = (notional - filled_notional).max(0.0);
+                            let status = if fill_ratio < 0.999 {
+                                "partially_filled"
+                            } else {
+                                "filled"
+                            };
                             let order_id = format!("o-close-{}-{}", exec_ts, sym);
                             let decision_id = format!("d-close-{}-{}", exec_ts, sym);
                             let order_type = if exchange.auction_window { "MOC" } else { "LIMIT" };
-                            let ibkr_commission_usd = notional * (exchange.ibkr_commission_bps / 10_000.0);
-                            let exchange_fee_usd = notional * (exchange.exchange_fee_bps / 10_000.0);
-                            let clearing_fee_usd = notional * (exchange.clearing_fee_bps / 10_000.0);
-                            let regulatory_fee_usd = notional * (exchange.regulatory_fee_bps / 10_000.0);
-                            let fx_fee_usd = notional * (exchange.fx_fee_bps / 10_000.0);
-                            let tax_usd = notional * (exchange.tax_bps / 10_000.0);
+                            let ibkr_commission_usd = filled_notional * (exchange.ibkr_commission_bps / 10_000.0);
+                            let exchange_fee_usd = filled_notional * (exchange.exchange_fee_bps / 10_000.0);
+                            let clearing_fee_usd = filled_notional * (exchange.clearing_fee_bps / 10_000.0);
+                            let regulatory_fee_usd = filled_notional * (exchange.regulatory_fee_bps / 10_000.0);
+                            let fx_fee_usd = filled_notional * (exchange.fx_fee_bps / 10_000.0);
+                            let tax_usd = filled_notional * (exchange.tax_bps / 10_000.0);
                             let fee_usd = ibkr_commission_usd
                                 + exchange_fee_usd
                                 + clearing_fee_usd
                                 + regulatory_fee_usd
                                 + fx_fee_usd
                                 + tax_usd;
-                            let spread_cost_usd = notional * (observed_spread_bps / 10_000.0);
-                            let slippage_usd = notional * (exchange.slippage_bps / 10_000.0);
-                            let impact_usd = notional * (exchange.market_impact_bps / 10_000.0);
+                            let spread_cost_usd = filled_notional * (observed_spread_bps / 10_000.0);
+                            let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
+                            let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
                             let borrow_fee_usd = if pos.side == "SHORT" {
-                                notional * (exchange.borrow_fee_bps / 10_000.0)
+                                filled_notional * (exchange.borrow_fee_bps / 10_000.0)
                             } else {
                                 0.0
                             };
@@ -1542,17 +1554,43 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
 
                             // Cash movements + realized pnl
                             let (pnl_usd, buy_px, sell_px, buy_ts, sell_ts) = if pos.side == "LONG" {
-                                let proceeds = pos.shares * exit_px;
-                                let pnl = proceeds - pos.notional_usd - total_cost_usd;
+                                let shares_filled = pos.shares * fill_ratio;
+                                let proceeds = shares_filled * exit_px;
+                                let cost_basis = pos.notional_usd * fill_ratio;
+                                let pnl = proceeds - cost_basis - total_cost_usd;
                                 cash_usd += proceeds - total_cost_usd;
                                 (pnl, pos.entry_px, exit_px, pos.entry_ts, exec_ts)
                             } else {
-                                let cover_cost = pos.shares * exit_px;
-                                let pnl = pos.notional_usd - cover_cost - total_cost_usd;
+                                let shares_filled = pos.shares * fill_ratio;
+                                let cover_cost = shares_filled * exit_px;
+                                let proceeds_basis = pos.notional_usd * fill_ratio;
+                                let pnl = proceeds_basis - cover_cost - total_cost_usd;
                                 cash_usd -= cover_cost + total_cost_usd;
                                 (pnl, exit_px, pos.entry_px, exec_ts, pos.entry_ts)
                             };
 
+                            orders.push(SimOrderLedgerRow {
+                                order_id: order_id.clone(),
+                                decision_id: decision_id.clone(),
+                                run_id: run_id_cloned.clone(),
+                                ts: decision_ts,
+                                wall_clock_ts: now_ts(),
+                                symbol: sym.clone(),
+                                exchange: exchange.code.to_string(),
+                                side: if pos.side == "LONG" { "SELL".to_string() } else { "BUY".to_string() },
+                                order_type: order_type.to_string(),
+                                tif: "DAY".to_string(),
+                                qty_notional_usd: notional,
+                                intended_px: exit_px,
+                                status: "submitted".to_string(),
+                                filled_notional_usd: 0.0,
+                                remaining_notional_usd: notional,
+                                venue_latency_ms: exchange.latency_ms,
+                                reasons: vec![
+                                    "close_on_signal_flip".to_string(),
+                                    format!("held_seconds={}", elapsed),
+                                ],
+                            });
                             orders.push(SimOrderLedgerRow {
                                 order_id: order_id.clone(),
                                 decision_id: decision_id.clone(),
@@ -1566,13 +1604,14 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 tif: "DAY".to_string(),
                                 qty_notional_usd: notional,
                                 intended_px: exit_px,
-                                status: "filled".to_string(),
-                                filled_notional_usd: notional,
-                                remaining_notional_usd: 0.0,
+                                status: status.to_string(),
+                                filled_notional_usd: filled_notional,
+                                remaining_notional_usd: remaining_notional,
                                 venue_latency_ms: exchange.latency_ms,
                                 reasons: vec![
                                     "close_on_signal_flip".to_string(),
                                     format!("held_seconds={}", elapsed),
+                                    format!("fill_ratio={:.4}", fill_ratio),
                                 ],
                             });
 
@@ -1583,7 +1622,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 symbol: sym.clone(),
                                 exchange: exchange.code.to_string(),
                                 side: pos.side.clone(),
-                                qty_notional_usd: notional,
+                                qty_notional_usd: filled_notional,
                                 open_px: pos.entry_px,
                                 close_px: exit_px,
                                 buy_px,
@@ -1605,13 +1644,18 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 pnl_usd,
                                 latency_ms: exchange.latency_ms,
                                 order_id: Some(order_id),
-                                fill_ratio: 1.0,
+                                fill_ratio,
                                 borrow_fee_usd,
                                 market_impact_usd: impact_usd + spread_cost_usd,
                                 total_cost_usd,
                             });
 
-                            positions.remove(&sym);
+                            if fill_ratio >= 0.999 {
+                                positions.remove(&sym);
+                            } else if let Some(p) = positions.get_mut(&sym) {
+                                p.notional_usd = remaining_notional;
+                                p.shares = (p.shares - (p.shares * fill_ratio)).max(0.0);
+                            }
                             last_fill_ts_by_symbol.insert(sym.clone(), exec_ts);
                             if pnl_usd < 0.0 && req.symbol_cooldown_seconds > 0 {
                                 cooldown_until_by_symbol.insert(
@@ -1655,23 +1699,35 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 let order_id = format!("o-open-{}-{}", exec_ts, sym);
                 let decision_id = format!("d-{}-{}", exec_ts, sym);
                 let order_type = if exchange.auction_window { "MOO" } else { "LIMIT" };
-                let ibkr_commission_usd = notional * (exchange.ibkr_commission_bps / 10_000.0);
-                let exchange_fee_usd = notional * (exchange.exchange_fee_bps / 10_000.0);
-                let clearing_fee_usd = notional * (exchange.clearing_fee_bps / 10_000.0);
-                let regulatory_fee_usd = notional * (exchange.regulatory_fee_bps / 10_000.0);
-                let fx_fee_usd = notional * (exchange.fx_fee_bps / 10_000.0);
-                let tax_usd = notional * (exchange.tax_bps / 10_000.0);
+                let fill_ratio = if notional > exchange.depth_notional_usd {
+                    (exchange.depth_notional_usd / notional).clamp(0.1, 1.0)
+                } else {
+                    1.0
+                };
+                let filled_notional = notional * fill_ratio;
+                let remaining_notional = (notional - filled_notional).max(0.0);
+                let status = if fill_ratio < 0.999 {
+                    "partially_filled"
+                } else {
+                    "filled"
+                };
+                let ibkr_commission_usd = filled_notional * (exchange.ibkr_commission_bps / 10_000.0);
+                let exchange_fee_usd = filled_notional * (exchange.exchange_fee_bps / 10_000.0);
+                let clearing_fee_usd = filled_notional * (exchange.clearing_fee_bps / 10_000.0);
+                let regulatory_fee_usd = filled_notional * (exchange.regulatory_fee_bps / 10_000.0);
+                let fx_fee_usd = filled_notional * (exchange.fx_fee_bps / 10_000.0);
+                let tax_usd = filled_notional * (exchange.tax_bps / 10_000.0);
                 let fee_usd = ibkr_commission_usd
                     + exchange_fee_usd
                     + clearing_fee_usd
                     + regulatory_fee_usd
                     + fx_fee_usd
                     + tax_usd;
-                let spread_cost_usd = notional * (observed_spread_bps / 10_000.0);
-                let slippage_usd = notional * (exchange.slippage_bps / 10_000.0);
-                let impact_usd = notional * (exchange.market_impact_bps / 10_000.0);
+                let spread_cost_usd = filled_notional * (observed_spread_bps / 10_000.0);
+                let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
+                let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
                 let borrow_fee_usd = if desired_side == "SHORT" {
-                    notional * (exchange.borrow_fee_bps / 10_000.0)
+                    filled_notional * (exchange.borrow_fee_bps / 10_000.0)
                 } else {
                     0.0
                 };
@@ -1679,14 +1735,38 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
 
                 // Cash impact at entry
                 if desired_side == "LONG" {
-                    if cash_usd < notional + total_cost_usd {
+                    if cash_usd < filled_notional + total_cost_usd {
                         continue;
                     }
-                    cash_usd -= notional + total_cost_usd;
+                    cash_usd -= filled_notional + total_cost_usd;
                 } else {
-                    cash_usd += notional - total_cost_usd;
+                    cash_usd += filled_notional - total_cost_usd;
                 }
 
+                // Submitted then filled/partially_filled.
+                orders.push(SimOrderLedgerRow {
+                    order_id: order_id.clone(),
+                    decision_id: decision_id.clone(),
+                    run_id: run_id_cloned.clone(),
+                    ts: decision_ts,
+                    wall_clock_ts: now_ts(),
+                    symbol: sym.clone(),
+                    exchange: exchange.code.to_string(),
+                    side: if desired_side == "LONG" { "BUY".to_string() } else { "SELL_SHORT".to_string() },
+                    order_type: order_type.to_string(),
+                    tif: "DAY".to_string(),
+                    qty_notional_usd: notional,
+                    intended_px: entry_px,
+                    status: "submitted".to_string(),
+                    filled_notional_usd: 0.0,
+                    remaining_notional_usd: notional,
+                    venue_latency_ms: exchange.latency_ms,
+                    reasons: vec![
+                        format!("hybrid_score={:.6}", hybrid_score),
+                        format!("ret_prev_ln={:.6}", ret_prev),
+                        format!("spread_bps={:.2}", observed_spread_bps),
+                    ],
+                });
                 orders.push(SimOrderLedgerRow {
                     order_id: order_id.clone(),
                     decision_id: decision_id.clone(),
@@ -1700,14 +1780,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     tif: "DAY".to_string(),
                     qty_notional_usd: notional,
                     intended_px: entry_px,
-                    status: "filled".to_string(),
-                    filled_notional_usd: notional,
-                    remaining_notional_usd: 0.0,
+                    status: status.to_string(),
+                    filled_notional_usd: filled_notional,
+                    remaining_notional_usd: remaining_notional,
                     venue_latency_ms: exchange.latency_ms,
                     reasons: vec![
                         format!("hybrid_score={:.6}", hybrid_score),
                         format!("ret_prev_ln={:.6}", ret_prev),
                         format!("spread_bps={:.2}", observed_spread_bps),
+                        format!("fill_ratio={:.4}", fill_ratio),
                     ],
                 });
 
@@ -1750,8 +1831,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         side: desired_side,
                         entry_ts: exec_ts,
                         entry_px,
-                        notional_usd: notional,
-                        shares,
+                        notional_usd: filled_notional,
+                        shares: shares * fill_ratio,
                         market_data_source: market_data_source.clone(),
                     },
                 );
