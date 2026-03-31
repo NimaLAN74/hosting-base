@@ -10,6 +10,7 @@ on:
       - main
     paths:
       - "lianel/dc/stock-service/backend/src/simulator/**"
+      - "lianel/dc/stock-service/backend/src/watchlist.rs"
       - "lianel/dc/stock-service/backend/src/app.rs"
       - "lianel/dc/stock-service/scripts/validate_simulator_api.py"
       - ".github/workflows/stock-service-simulator-validation.yml"

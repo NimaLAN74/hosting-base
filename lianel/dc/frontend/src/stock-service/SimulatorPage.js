@@ -19,6 +19,22 @@ const SIX_MONTH_LIVE_PRESET = {
   live_market_data: true,
   max_cycles: 500000,
   readiness_min_days: 126,
+  replay_require_full_horizon: false,
+};
+
+/** Replay on IBKR daily bars: one step per aligned trading day; fails start if overlap &lt; days (reliable 126d training). */
+const RESEARCH_126_REPLAY_PRESET = {
+  days: 126,
+  top: 12,
+  quantile: 0.2,
+  short_enabled: true,
+  initial_capital_usd: 100,
+  replay_delay_ms: 0,
+  reinvest_profit: true,
+  live_market_data: false,
+  max_cycles: 200000,
+  readiness_min_days: 126,
+  replay_require_full_horizon: true,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,7 +48,9 @@ async function fetchJson(url, opts = {}) {
 
 function normalizeErrorPayload(payload, status) {
   const msg = String(payload?.error || `Failed (${status})`);
-  const retryableByBody = /history failed|chart data unavailable|temporar|unavailable/i.test(msg);
+  const retryableByBody =
+    /history failed|chart data unavailable|temporar|unavailable/i.test(msg) &&
+    !/replay_require_full_horizon/i.test(msg);
   return {
     message: msg,
     retryable: Boolean(payload?.retryable) || status === 503 || retryableByBody,
@@ -575,7 +593,14 @@ export default function SimulatorPage() {
               <button type="button" className="sim-btn sim-btn--secondary" onClick={() => setForm({ ...SIX_MONTH_LIVE_PRESET })} disabled={purgeLoading || startLoading}>
                 Apply 6-month live preset
               </button>
+              <button type="button" className="sim-btn sim-btn--secondary" onClick={() => setForm({ ...RESEARCH_126_REPLAY_PRESET })} disabled={purgeLoading || startLoading}>
+                126d research replay (IBKR daily)
+              </button>
             </div>
+            <p className="sim-control-hint">
+              Research replay uses strict calendar alignment across symbols. If start fails with <code>replay_require_full_horizon</code>, reduce Top symbols or disable the checkbox below.
+              Export training/bias JSON from a completed run: <strong>Research export</strong> in section 3.
+            </p>
             <div className="sim-form-grid">
               <label>Days
                 <input type="number" min="7" max="365" value={form.days} onChange={(e) => setForm((f) => ({ ...f, days: Number(e.target.value || 7) }))} />
@@ -609,6 +634,15 @@ export default function SimulatorPage() {
               <label className="sim-check">
                 <input type="checkbox" checked={form.live_market_data} onChange={(e) => setForm((f) => ({ ...f, live_market_data: e.target.checked }))} />
                 Live market data (real-time quotes)
+              </label>
+              <label className="sim-check">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.replay_require_full_horizon)}
+                  onChange={(e) => setForm((f) => ({ ...f, replay_require_full_horizon: e.target.checked }))}
+                  disabled={form.live_market_data}
+                />
+                Require full replay horizon for replay (server fails start if aligned IBKR days &lt; Days; recommended for 126d model runs)
               </label>
             </div>
             <div className="sim-purge-panel">
@@ -768,6 +802,12 @@ export default function SimulatorPage() {
                   <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
                 <div>PnL: <b>{runStatus.pnl_usd != null ? `$${Number(runStatus.pnl_usd).toFixed(2)}` : '—'}</b></div>
                 <div>Steps completed: <b>{Number(runStatus.cycles_completed || 0)}</b></div>
+                {runStatus.replay_aligned_trading_days_available != null && runStatus.live_market_data === false && (
+                  <div>
+                    IBKR aligned days (max): <b>{runStatus.replay_aligned_trading_days_available}</b>
+                    {runStatus.replay_require_full_horizon ? ' · full horizon required' : ''}
+                  </div>
+                )}
                 {runStatus.live_market_data === false &&
                   runStatus.replay_steps_total != null &&
                   Number(runStatus.replay_steps_total) > 0 && (
@@ -1095,6 +1135,20 @@ export default function SimulatorPage() {
         <div className="sim-grid sim-grid--two">
           <section className="sim-card">
             <h3>Bias and Data Quality Findings</h3>
+            {selectedRunId && (
+              <p className="sim-note">
+                <a
+                  className="sim-back-link"
+                  href={`/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/research-export`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open research export (JSON)
+                </a>
+                {' — '}
+                decisions, fills, event counts, bias findings for offline training and QA.
+              </p>
+            )}
             {biasError && <p className="sim-error">{biasError}</p>}
             {!biasError && biasFindings.length === 0 && <p className="sim-note">No findings in current run.</p>}
             {biasFindings.map((f, i) => (

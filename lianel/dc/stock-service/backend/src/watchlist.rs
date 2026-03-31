@@ -314,6 +314,18 @@ fn conid_from_trsrv_entry(val: &serde_json::Value) -> Option<u64> {
 #[derive(Clone, Debug, Serialize)]
 pub struct WatchlistQuote {
     pub symbol: String,
+    /// IBKR "last" (field 31), if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last: Option<f64>,
+    /// IBKR bid (field 84), if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bid: Option<f64>,
+    /// IBKR ask (field 86), if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask: Option<f64>,
+    /// Which price we exposed via `price` (LAST|MID|BID|ASK|NONE|FALLBACK_DAILY_CLOSE).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_source: Option<String>,
     pub price: Option<f64>,
     pub currency: Option<String>,
     pub updated_at: Option<String>,
@@ -340,6 +352,10 @@ impl Default for WatchlistCache {
             .iter()
             .map(|s| WatchlistQuote {
                 symbol: (*s).to_string(),
+                last: None,
+                bid: None,
+                ask: None,
+                price_source: Some("NONE".to_string()),
                 price: None,
                 currency: Some("USD".to_string()),
                 updated_at: None,
@@ -692,19 +708,22 @@ pub async fn refresh_from_ibkr(
             .or_else(|| item.get(field).and_then(|v| v.as_str()).and_then(parse_ibkr_number))
     }
 
-    // Prefer last (31); if missing use bid/ask midpoint or single side (delayed / pre-flight).
-    fn best_price_from_snapshot_item(item: &serde_json::Value) -> Option<f64> {
+    /// Extract numeric last/bid/ask and also compute a best-effort `price` + `price_source`.
+    fn extract_snapshot_prices(item: &serde_json::Value) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<String>) {
         let last = parse_snapshot_f64(item, "31").filter(|p| p.is_finite() && *p > 0.0);
-        if last.is_some() {
-            return last;
-        }
         let bid = parse_snapshot_f64(item, "84").filter(|p| p.is_finite() && *p > 0.0);
         let ask = parse_snapshot_f64(item, "86").filter(|p| p.is_finite() && *p > 0.0);
+        if let Some(l) = last {
+            return (Some(l), bid, ask, Some(l), Some("LAST".to_string()));
+        }
         match (bid, ask) {
-            (Some(b), Some(a)) => Some((b + a) / 2.0),
-            (Some(b), None) => Some(b),
-            (None, Some(a)) => Some(a),
-            _ => None,
+            (Some(b), Some(a)) if a >= b && b > 0.0 => {
+                let mid = (b + a) / 2.0;
+                (None, Some(b), Some(a), Some(mid), Some("MID".to_string()))
+            }
+            (Some(b), None) => (None, Some(b), None, Some(b), Some("BID".to_string())),
+            (None, Some(a)) => (None, None, Some(a), Some(a), Some("ASK".to_string())),
+            _ => (None, bid, ask, None, Some("NONE".to_string())),
         }
     }
 
@@ -743,7 +762,7 @@ pub async fn refresh_from_ibkr(
                         symbol = s;
                     }
                 }
-                let price = best_price_from_snapshot_item(&item);
+                let (last, bid, ask, price, price_source) = extract_snapshot_prices(&item);
                 let error = if price.is_none() {
                     Some(
                         "no price (needs market data subscription, or pre-flight / delayed quote)"
@@ -756,6 +775,10 @@ pub async fn refresh_from_ibkr(
                     symbol.clone(),
                     WatchlistQuote {
                         symbol,
+                        last,
+                        bid,
+                        ask,
+                        price_source,
                         price,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
@@ -769,6 +792,10 @@ pub async fn refresh_from_ibkr(
                         (*s).to_string(),
                         WatchlistQuote {
                             symbol: (*s).to_string(),
+                            last: None,
+                            bid: None,
+                            ask: None,
+                            price_source: Some("NONE".to_string()),
                             price: None,
                             currency: Some("USD".to_string()),
                             updated_at: Some(as_of.clone()),
@@ -788,6 +815,10 @@ pub async fn refresh_from_ibkr(
                     (*s).to_string(),
                     WatchlistQuote {
                         symbol: (*s).to_string(),
+                        last: None,
+                        bid: None,
+                        ask: None,
+                        price_source: Some("NONE".to_string()),
                         price: None,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
@@ -802,6 +833,10 @@ pub async fn refresh_from_ibkr(
                     (*s).to_string(),
                     WatchlistQuote {
                         symbol: (*s).to_string(),
+                        last: None,
+                        bid: None,
+                        ask: None,
+                        price_source: Some("NONE".to_string()),
                         price: None,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
@@ -831,6 +866,10 @@ pub async fn refresh_from_ibkr(
                     (*s).to_string(),
                     WatchlistQuote {
                         symbol: (*s).to_string(),
+                        last: None,
+                        bid: None,
+                        ask: None,
+                        price_source: Some("NONE".to_string()),
                         price: None,
                         currency: Some("USD".to_string()),
                         updated_at: Some(as_of.clone()),
@@ -1092,6 +1131,10 @@ pub fn fallback_response() -> WatchlistResponse {
         .iter()
         .map(|s| WatchlistQuote {
             symbol: (*s).to_string(),
+            last: None,
+            bid: None,
+            ask: None,
+            price_source: Some("NONE".to_string()),
             price: None,
             currency: Some("USD".to_string()),
             updated_at: None,
@@ -1113,6 +1156,10 @@ pub async fn get_watchlist_response(cache: &RwLock<WatchlistCache>) -> Watchlist
         .map(|s| {
             g.quotes.get(*s).cloned().unwrap_or_else(|| WatchlistQuote {
                 symbol: (*s).to_string(),
+                last: None,
+                bid: None,
+                ask: None,
+                price_source: Some("NONE".to_string()),
                 price: None,
                 currency: Some("USD".to_string()),
                 updated_at: None,

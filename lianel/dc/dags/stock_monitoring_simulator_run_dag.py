@@ -10,6 +10,12 @@ short interval. Default payload targets **~6+ months** of wall-clock steps at
 - `SIM_REPLAY_RESTART_POLICY=bankrupt_only`: only auto-start when the latest
   completed run ended in **BANKRUPT** (or there are no runs). Use this if you want
   one long campaign per manual reset instead of chaining runs after each completion.
+
+Research / 126d training replay (IBKR daily bars, strict overlap):
+
+- `SIM_REPLAY_RESEARCH_MODE=true`: sets `live_market_data=false`, `replay_delay_ms=0` (override with
+  `SIM_REPLAY_DELAY_MS`), and defaults `SIM_REPLAY_REQUIRE_FULL_HORIZON=true` so the run **fails**
+  if aligned history is shorter than `SIM_REPLAY_DAYS` (no silent shrink).
 """
 
 import json
@@ -66,16 +72,26 @@ def run_simulator_replay(**context):
     elif latest:
         print(f"No active run. Latest status={latest_status or 'unknown'} stop_reason={latest_stop_reason or 'n/a'}. Starting new run.")
 
+    research_mode = os.getenv("SIM_REPLAY_RESEARCH_MODE", "").strip().lower() in ("1", "true", "yes")
+    if research_mode:
+        live_md = False
+        replay_delay = int(os.getenv("SIM_REPLAY_DELAY_MS", "0"))
+        require_full = os.getenv("SIM_REPLAY_REQUIRE_FULL_HORIZON", "true").lower() in ("1", "true", "yes")
+    else:
+        live_md = os.getenv("SIM_REPLAY_LIVE_MARKET_DATA", "true").lower() in ("1", "true", "yes")
+        replay_delay = int(os.getenv("SIM_REPLAY_DELAY_MS", "60000"))
+        require_full = os.getenv("SIM_REPLAY_REQUIRE_FULL_HORIZON", "false").lower() in ("1", "true", "yes")
+
     base_payload = {
         "top": int(os.getenv("SIM_REPLAY_TOP", "16")),
         "quantile": float(os.getenv("SIM_REPLAY_QUANTILE", "0.2")),
         "short_enabled": os.getenv("SIM_REPLAY_SHORT_ENABLED", "true").lower() in ("1", "true", "yes"),
         "initial_capital_usd": float(os.getenv("SIM_REPLAY_INITIAL_CAPITAL_USD", "100")),
         "reinvest_profit": os.getenv("SIM_REPLAY_REINVEST", "true").lower() in ("1", "true", "yes"),
-        "live_market_data": os.getenv("SIM_REPLAY_LIVE_MARKET_DATA", "true").lower() in ("1", "true", "yes"),
-        # Fast replay, but not unrealistically extreme.
-        "replay_delay_ms": int(os.getenv("SIM_REPLAY_DELAY_MS", "60000")),
+        "live_market_data": live_md,
+        "replay_delay_ms": replay_delay,
         "readiness_min_days": int(os.getenv("SIM_REPLAY_READINESS_MIN_DAYS", "126")),
+        "replay_require_full_horizon": require_full,
         # ~500k cycles at 60s step ≈ 347 days wall-clock (upper bound; live mode also skips closed markets).
         "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "500000")),
     }

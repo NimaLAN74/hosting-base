@@ -175,6 +175,14 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/stock-service/sim/runs/:run_id/holdings",
             get(sim_run_holdings_handler),
         )
+        .route(
+            "/api/v1/sim/runs/:run_id/research-export",
+            get(sim_run_research_export_handler),
+        )
+        .route(
+            "/api/v1/stock-service/sim/runs/:run_id/research-export",
+            get(sim_run_research_export_handler),
+        )
         .route("/api/v1/sim/runs/:run_id/control", post(sim_run_control_handler))
         .route(
             "/api/v1/stock-service/sim/runs/:run_id/control",
@@ -1046,6 +1054,13 @@ struct SimTimelineQuery {
     limit: Option<usize>,
 }
 
+#[derive(serde::Deserialize)]
+struct SimResearchExportQuery {
+    decisions_limit: Option<usize>,
+    fills_limit: Option<usize>,
+    events_scan: Option<usize>,
+}
+
 async fn sim_run_start_handler(
     State(state): State<AppState>,
     Json(body): Json<simulator::SimRunRequest>,
@@ -1069,6 +1084,7 @@ async fn sim_run_start_handler(
             } else if lower.contains("not enough")
                 || lower.contains("selection produced too few symbols")
                 || lower.contains("need at least")
+                || lower.contains("replay_require_full_horizon")
             {
                 StatusCode::UNPROCESSABLE_ENTITY
             } else {
@@ -1230,6 +1246,93 @@ async fn sim_run_bias_handler(
         )
             .into_response(),
     }
+}
+
+/// Single JSON bundle for offline training / bias review: meta, decisions (features), fills (labels), event counts, bias findings.
+async fn sim_run_research_export_handler(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Query(q): Query<SimResearchExportQuery>,
+) -> impl IntoResponse {
+    let Some(redis) = state.redis.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"Redis not configured (simulator requires redis)"})),
+        )
+            .into_response();
+    };
+    let meta = match simulator::get_run_meta(redis, &run_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "run not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response();
+        }
+    };
+    let dl = q.decisions_limit.unwrap_or(8_000).min(20_000);
+    let fl = q.fills_limit.unwrap_or(8_000).min(20_000);
+    let es = q.events_scan.unwrap_or(15_000).min(50_000);
+    let decisions = match simulator::list_decision_traces(redis, &run_id, dl).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response();
+        }
+    };
+    let fills = match simulator::list_fill_ledger_rows(redis, &run_id, fl).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response();
+        }
+    };
+    let event_summary = match simulator::summarize_run_events(redis, &run_id, es).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response();
+        }
+    };
+    let bias_findings = match simulator::get_bias_report(redis, &run_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response();
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "run": meta,
+            "decisions": decisions,
+            "fills": fills,
+            "event_summary": event_summary,
+            "bias_findings": bias_findings,
+            "notes": "Replay: one step per aligned IBKR trading day. decisions[].features + rationale for inputs; fills for realized outcomes; bias_findings and event_summary.trade_skipped_events for quality and friction."
+        })),
+    )
+        .into_response()
 }
 
 async fn sim_run_orders_handler(

@@ -5,7 +5,7 @@ use crate::watchlist;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod exchanges;
@@ -42,6 +42,10 @@ pub struct SimRunRequest {
     pub min_hold_seconds: u64,
     #[serde(default = "default_symbol_cooldown_seconds")]
     pub symbol_cooldown_seconds: u64,
+    /// Replay: when `true`, start fails if strict IBKR day alignment across symbols is shorter than `days`
+    /// (no silent shrink). When omitted, defaults to **true** if `days >= 126`, else false.
+    #[serde(default)]
+    pub replay_require_full_horizon: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +81,12 @@ pub struct SimRunMeta {
     /// Replay only: UTC calendar date (YYYY-MM-DD) of the execution bar for this step.
     #[serde(default)]
     pub replay_trading_date_utc: Option<String>,
+    /// Replay: aligned trading days available (strict intersection) before shrinking to `days_requested`.
+    #[serde(default)]
+    pub replay_aligned_trading_days_available: Option<usize>,
+    /// Whether this run required a full replay horizon at start (for auditing).
+    #[serde(default)]
+    pub replay_require_full_horizon: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,6 +650,61 @@ pub async fn set_control_action(
     Ok(())
 }
 
+pub async fn list_decision_traces(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    limit: usize,
+) -> Result<Vec<SimDecisionTrace>, String> {
+    let lim = limit.clamp(1, 20_000) as isize;
+    let mut conn = redis.clone();
+    let rows: Vec<String> = conn
+        .lrange(run_decisions_key(run_id), 0, lim - 1)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| serde_json::from_str::<SimDecisionTrace>(&r).ok())
+        .collect())
+}
+
+pub async fn list_fill_ledger_rows(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    limit: usize,
+) -> Result<Vec<SimFillLedgerRow>, String> {
+    let lim = limit.clamp(1, 20_000) as isize;
+    let mut conn = redis.clone();
+    let rows: Vec<String> = conn
+        .lrange(run_fills_key(run_id), 0, lim - 1)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| serde_json::from_str::<SimFillLedgerRow>(&r).ok())
+        .collect())
+}
+
+pub async fn summarize_run_events(
+    redis: &redis::aio::ConnectionManager,
+    run_id: &str,
+    scan_limit: usize,
+) -> Result<serde_json::Value, String> {
+    let cap = scan_limit.clamp(50, 50_000);
+    let events = get_timeline(redis, run_id, cap).await?;
+    let mut kind_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for e in &events {
+        *kind_counts.entry(e.kind.clone()).or_insert(0) += 1;
+    }
+    Ok(json!({
+        "run_id": run_id,
+        "events_scanned": events.len(),
+        "kind_counts": kind_counts,
+        "trade_skipped_events": kind_counts.get("TradeSkipped").copied().unwrap_or(0),
+        "decision_created_events": kind_counts.get("DecisionCreated").copied().unwrap_or(0),
+        "order_filled_events": kind_counts.get("OrderFilled").copied().unwrap_or(0),
+    }))
+}
+
 pub async fn explain_decision(
     redis: &redis::aio::ConnectionManager,
     run_id: &str,
@@ -742,6 +807,8 @@ fn compute_readiness(
         "READY_FOR_REAL_MONEY"
     } else if gate_perf && gate_data && gate_explain {
         "PROMISING_BUT_RISK_TUNING_REQUIRED"
+    } else if !gate_days {
+        "NOT_READY_NEED_LONGER_REPLAY_OR_LIVE_CAMPAIGN_USE_RESEARCH_EXPORT_AND_BIAS_REPORT"
     } else {
         "NOT_READY_CONTINUE_SIMULATION"
     };
@@ -841,7 +908,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     let mut bars_by_symbol: HashMap<String, Vec<crate::ibkr::HistoryBar>> = HashMap::new();
     let mut replay_symbols: Vec<String> = selected_symbols.clone();
     let mut replay_ts: Vec<u64> = Vec::new();
+    let mut replay_aligned_available: Option<usize> = None;
     let effective_days: usize;
+    let hist_period: &str = if req.days > 200 { "2y" } else { "1y" };
+    let require_full_replay = req
+        .replay_require_full_horizon
+        .unwrap_or_else(|| !req.live_market_data && req.days >= 126);
+
     if req.live_market_data {
         effective_days = req.days;
     } else {
@@ -852,7 +925,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             }
             let mut bars = None;
             for attempt in 1..=3 {
-                match client.fetch_history(*conid, "1y", "1d").await {
+                match client.fetch_history(*conid, hist_period, "1d").await {
                     Ok(result) => {
                         bars = Some(result);
                         break;
@@ -911,11 +984,29 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 _ => return Err("not enough aligned days to run requested simulation horizon".to_string()),
             }
         };
-        // Degrade gracefully when overlap is limited instead of hard-failing run startup.
-        let d = req.days.min(replay_base_ts.len().saturating_sub(1)).max(2);
+        let overlap_steps = replay_base_ts.len().saturating_sub(1).max(0);
+        if require_full_replay && overlap_steps < req.days {
+            return Err(format!(
+                "replay_require_full_horizon: need {} aligned trading days (strict intersection across {} symbols with history), IBKR overlap is only {}. Reduce SIM_REPLAY_TOP / universe, wait for longer shared history, or set replay_require_full_horizon=false to run on the available span.",
+                req.days,
+                bars_by_symbol.len(),
+                overlap_steps
+            ));
+        }
+        if !require_full_replay && overlap_steps < req.days {
+            tracing::warn!(
+                target: "lianel_stock_service::simulator",
+                requested = req.days,
+                overlap = overlap_steps,
+                "replay horizon shorter than requested; shrinking window (set replay_require_full_horizon=true to fail instead)"
+            );
+        }
+        // Degrade gracefully when overlap is limited and full horizon not required.
+        let d = req.days.min(overlap_steps.max(2)).max(2);
         replay_ts = replay_base_ts[replay_base_ts.len() - (d + 1)..].to_vec();
         effective_days = d;
         replay_symbols = bars_by_symbol.keys().cloned().collect();
+        replay_aligned_available = Some(overlap_steps);
     }
 
     // Replay: one forward pass through the aligned bar window (no looping the same days until max_cycles).
@@ -954,6 +1045,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             Some(replay_ts.len().saturating_sub(1).max(1))
         },
         replay_trading_date_utc: None,
+        replay_aligned_trading_days_available: replay_aligned_available,
+        replay_require_full_horizon: Some(require_full_replay && !req.live_market_data),
     };
     set_meta(&redis, &meta).await?;
     {
@@ -1079,25 +1172,44 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
 
             for sym in symbols {
                 let exchange = exchanges::infer_exchange(&sym);
-                let (open_px, close_px, ret_prev, is_halt, market_data_source) = if req.live_market_data {
+                let (open_px, close_px, ret_prev, is_halt, market_data_source, live_bid_ask) = if req.live_market_data {
                     if !is_exchange_open_now(&exchange, exec_ts) {
                         continue;
                     }
-                    let quote = quote_snapshot
-                        .as_ref()
-                        .and_then(|q| q.get(&sym))
+                    let q = quote_snapshot.as_ref().and_then(|m| m.get(&sym));
+                    let px_now = q
                         .and_then(|q| q.price)
                         .filter(|p| p.is_finite() && *p > 0.0);
-                    let Some(px_now) = quote else {
+                    let bid = q.and_then(|q| q.bid).filter(|p| p.is_finite() && *p > 0.0);
+                    let ask = q.and_then(|q| q.ask).filter(|p| p.is_finite() && *p > 0.0);
+                    let px_source = q
+                        .and_then(|q| q.price_source.clone())
+                        .unwrap_or_else(|| "UNKNOWN".to_string());
+                    let Some(px_now_mid) = px_now else {
                         missing_price_rows += 1;
                         total_rows += 1;
                         continue;
                     };
-                    let px_prev = live_prev_prices.get(&sym).copied().unwrap_or(px_now);
-                    live_prev_prices.insert(sym.clone(), px_now);
-                    let ret_prev = if px_prev > 0.0 { (px_now / px_prev).ln() } else { 0.0 };
-                    let is_halt = (px_now - px_prev).abs() <= f64::EPSILON;
-                    (px_prev, px_now, ret_prev, is_halt, "IBKR_LIVE_WATCHLIST_QUOTE".to_string())
+                    let px_prev_mid = live_prev_prices.get(&sym).copied().unwrap_or(px_now_mid);
+                    live_prev_prices.insert(sym.clone(), px_now_mid);
+                    let ret_prev = if px_prev_mid > 0.0 {
+                        (px_now_mid / px_prev_mid).ln()
+                    } else {
+                        0.0
+                    };
+                    let is_halt = (px_now_mid - px_prev_mid).abs() <= f64::EPSILON;
+                    let live_bid_ask = match (bid, ask) {
+                        (Some(b), Some(a)) if a >= b => Some((b, a)),
+                        _ => None,
+                    };
+                    (
+                        px_prev_mid,
+                        px_now_mid,
+                        ret_prev,
+                        is_halt,
+                        format!("IBKR_LIVE_WATCHLIST_SNAPSHOT({})", px_source),
+                        live_bid_ask,
+                    )
                 } else {
                     let Some(bars) = bars_by_symbol.get(&sym) else {
                         continue;
@@ -1118,7 +1230,14 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         _ => 0.0,
                     };
                     let is_halt = (next_bar.high - next_bar.low).abs() <= f64::EPSILON;
-                    (next_bar.open, next_bar.close, ret_prev, is_halt, "IBKR_HISTORY_REAL_BAR".to_string())
+                    (
+                        next_bar.open,
+                        next_bar.close,
+                        ret_prev,
+                        is_halt,
+                        "IBKR_HISTORY_REAL_BAR".to_string(),
+                        None,
+                    )
                 };
                 total_rows += 1;
                 if open_px <= 0.0 || close_px <= 0.0 {
@@ -1128,13 +1247,28 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
 
                 let side = if ret_prev >= 0.0 { "LONG" } else { "SHORT" }.to_string();
                 let signal_abs_return = ret_prev.exp_m1().abs();
+                // If we have live bid/ask, use the observed spread instead of a static exchange spread estimate.
+                let observed_spread_bps = live_bid_ask
+                    .and_then(|(b, a)| {
+                        if a > 0.0 && b > 0.0 && a >= b {
+                            let mid = (a + b) / 2.0;
+                            if mid > 0.0 {
+                                Some(((a - b) / mid) * 10_000.0)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(exchange.spread_bps);
                 let estimated_cost_bps = exchange.ibkr_commission_bps
                     + exchange.exchange_fee_bps
                     + exchange.clearing_fee_bps
                     + exchange.regulatory_fee_bps
                     + exchange.fx_fee_bps
                     + exchange.tax_bps
-                    + exchange.spread_bps
+                    + observed_spread_bps
                     + exchange.slippage_bps
                     + exchange.market_impact_bps
                     + if side == "SHORT" { exchange.borrow_fee_bps } else { 0.0 };
@@ -1319,7 +1453,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     + regulatory_fee_usd
                     + fx_fee_usd
                     + tax_usd;
-                let spread_cost_usd = filled_notional * (exchange.spread_bps / 10_000.0);
+                let spread_cost_usd = filled_notional * (observed_spread_bps / 10_000.0);
                 let slippage_usd = filled_notional * (exchange.slippage_bps / 10_000.0);
                 let impact_usd = filled_notional * (exchange.market_impact_bps / 10_000.0);
                 let borrow_fee_usd = if side == "SHORT" {
@@ -1361,6 +1495,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     reasons: order_reasons,
                 });
                 if filled_notional > f64::EPSILON {
+                    let half_spread = (observed_spread_bps / 10_000.0) / 2.0;
+                    let (buy_px, sell_px) = if side == "LONG" {
+                        (open_px * (1.0 + half_spread), close_px * (1.0 - half_spread))
+                    } else {
+                        // SHORT: sell first (bid-ish), buy back later (ask-ish)
+                        (close_px * (1.0 + half_spread), open_px * (1.0 - half_spread))
+                    };
                     fills.push(SimFillLedgerRow {
                         decision_id: decision_id.clone(),
                         run_id: run_id_cloned.clone(),
@@ -1371,8 +1512,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         qty_notional_usd: filled_notional,
                         open_px,
                         close_px,
-                        buy_px: open_px,
-                        sell_px: close_px,
+                        buy_px,
+                        sell_px,
                         buy_ts: exec_ts,
                         sell_ts: exec_ts,
                         buy_session_time_utc: if req.live_market_data {
