@@ -1658,7 +1658,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                             });
 
                             fills.push(SimFillLedgerRow {
-                                decision_id,
+                                decision_id: decision_id.clone(),
                                 run_id: run_id_cloned.clone(),
                                 exec_ts,
                                 symbol: sym.clone(),
@@ -1685,7 +1685,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 slippage_usd,
                                 pnl_usd,
                                 latency_ms: exchange.latency_ms,
-                                order_id: Some(order_id),
+                                order_id: Some(order_id.clone()),
                                 fill_ratio,
                                 borrow_fee_usd,
                                 market_impact_usd: impact_usd + spread_cost_usd,
