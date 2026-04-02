@@ -100,7 +100,14 @@ def run_simulator_replay(**context):
         "live_campaign_calendar_days": int(os.getenv("SIM_LIVE_CAMPAIGN_CALENDAR_DAYS", "126")),
     }
     target_days = max(7, min(days, 365))
-    candidate_days = [target_days, 126, 90, 60, 30, 14, 7]
+    # IMPORTANT:
+    # - LIVE runs must honor the requested campaign length (default 126) and should not silently
+    #   shrink to short windows.
+    # - Research replay with `replay_require_full_horizon=true` must also be strict (no fallback).
+    if live_md or require_full:
+        candidate_days = [target_days]
+    else:
+        candidate_days = [target_days, 126, 90, 60, 30, 14, 7]
     # Preserve order and uniqueness.
     unique_days = []
     seen = set()

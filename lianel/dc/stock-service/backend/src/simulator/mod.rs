@@ -2247,6 +2247,13 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
             day_idx += 1;
         }
 
+        // Replay runs can naturally terminate by reaching the end of the replay window exactly at
+        // `max_cycles` (we cap `max_cycles` to the window length). In that case, surface the more
+        // specific stop reason instead of the default MAX_CYCLES_REACHED.
+        if !req.live_market_data && day_idx >= replay_ts.len() && stop_reason == "MAX_CYCLES_REACHED" {
+            stop_reason = "REPLAY_HORIZON_COMPLETE".to_string();
+        }
+
         if total_rows > 0 {
             let missing_ratio = missing_price_rows as f64 / total_rows as f64;
             if missing_ratio > 0.10 {
