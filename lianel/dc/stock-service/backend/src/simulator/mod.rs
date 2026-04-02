@@ -56,6 +56,10 @@ pub struct SimRunRequest {
     /// (no silent shrink). When omitted, defaults to **true** if `days >= 126`, else false.
     #[serde(default)]
     pub replay_require_full_horizon: Option<bool>,
+    /// LIVE only: stop the run after this many **calendar** days of wall-clock time since `started_at_ts`
+    /// (`0` = no calendar deadline; rely on `max_cycles` / manual stop / bankrupt). Default **126**.
+    #[serde(default = "default_live_campaign_calendar_days")]
+    pub live_campaign_calendar_days: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +101,12 @@ pub struct SimRunMeta {
     /// Whether this run required a full replay horizon at start (for auditing).
     #[serde(default)]
     pub replay_require_full_horizon: Option<bool>,
+    /// LIVE: configured calendar-day campaign length from the request (`0` = unlimited).
+    #[serde(default)]
+    pub live_campaign_calendar_days: Option<usize>,
+    /// LIVE: unix seconds when the campaign stops by calendar rule (`None` if not applicable).
+    #[serde(default)]
+    pub live_campaign_deadline_ts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,6 +325,9 @@ fn default_readiness_min_days() -> usize {
 }
 fn default_max_cycles() -> usize {
     2_000
+}
+fn default_live_campaign_calendar_days() -> usize {
+    126
 }
 fn default_live_market_data() -> bool {
     true
@@ -1085,6 +1098,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         replay_trading_date_utc: None,
         replay_aligned_trading_days_available: replay_aligned_available,
         replay_require_full_horizon: Some(require_full_replay && !req.live_market_data),
+        live_campaign_calendar_days: if req.live_market_data {
+            Some(req.live_campaign_calendar_days)
+        } else {
+            None
+        },
+        live_campaign_deadline_ts: None,
     };
     set_meta(&redis, &meta).await?;
     {
@@ -1130,7 +1149,22 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         let short_margin_requirement = 0.50_f64;
 
         meta.status = "running".to_string();
-        meta.started_at_ts = Some(now_ts());
+        let start_wall_ts = now_ts();
+        meta.started_at_ts = Some(start_wall_ts);
+        let campaign_deadline_ts: Option<u64> = if req.live_market_data && req.live_campaign_calendar_days > 0 {
+            Some(
+                start_wall_ts.saturating_add(req.live_campaign_calendar_days as u64 * 86_400),
+            )
+        } else {
+            None
+        };
+        if req.live_market_data {
+            meta.live_campaign_calendar_days = Some(req.live_campaign_calendar_days);
+            meta.live_campaign_deadline_ts = campaign_deadline_ts;
+        } else {
+            meta.live_campaign_calendar_days = None;
+            meta.live_campaign_deadline_ts = None;
+        }
         let _ = set_meta(&redis, &meta).await;
         let _ = push_event(
             &redis,
@@ -1142,7 +1176,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 "days_effective": effective_days,
                 "symbols": replay_symbols.len(),
                 "initial_capital_usd": req.initial_capital_usd,
-                "live_market_data": req.live_market_data
+                "live_market_data": req.live_market_data,
+                "live_campaign_calendar_days": req.live_campaign_calendar_days,
+                "live_campaign_deadline_ts": campaign_deadline_ts
             }),
         )
         .await;
@@ -1163,6 +1199,12 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 if action == "pause" {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     continue;
+                }
+            }
+            if let Some(dl) = campaign_deadline_ts {
+                if now_ts() >= dl {
+                    stop_reason = "CAMPAIGN_CALENDAR_COMPLETE".to_string();
+                    break;
                 }
             }
             let (exec_ts, decision_ts) = if req.live_market_data {
@@ -1650,6 +1692,50 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 total_cost_usd,
                             });
 
+                            decision_rows.push(SimDecisionTrace {
+                                decision_id: decision_id.clone(),
+                                run_id: run_id_cloned.clone(),
+                                decision_ts,
+                                symbol: sym.clone(),
+                                exchange: exchange.code.to_string(),
+                                side: pos.side.clone(),
+                                weight: if symbol_count == 0 {
+                                    0.0
+                                } else {
+                                    1.0 / symbol_count as f64
+                                },
+                                hybrid_score,
+                                features: json!({
+                                    "action": "close_position",
+                                    "position_side": pos.side,
+                                    "new_signal_side": desired_side,
+                                    "held_seconds": elapsed,
+                                    "entry_px": pos.entry_px,
+                                    "exit_px": exit_px,
+                                    "ret_prev_ln": ret_prev,
+                                    "signal_abs_return": signal_abs_return,
+                                    "observed_spread_bps": observed_spread_bps,
+                                    "fill_ratio": fill_ratio,
+                                }),
+                                rationale: vec![
+                                    "stateful_portfolio: close_on_signal_flip".to_string(),
+                                    format!("held_seconds={}", elapsed),
+                                    format!("fill_ratio={:.4}", fill_ratio),
+                                    format!("pnl_usd={:.6}", pnl_usd),
+                                ],
+                                short_explanation: format!(
+                                    "Close {} {} after signal flip to {}: realized PnL ${:.2}, exit {:.4} on {}.",
+                                    pos.side,
+                                    sym,
+                                    desired_side,
+                                    pnl_usd,
+                                    exit_px,
+                                    exchange.code
+                                ),
+                            });
+                            total_decisions += 1;
+                            explained_decisions += 1;
+
                             if fill_ratio >= 0.999 {
                                 positions.remove(&sym);
                             } else if let Some(p) = positions.get_mut(&sym) {
@@ -1828,7 +1914,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 positions.insert(
                     sym.clone(),
                     OpenPosition {
-                        side: desired_side,
+                        side: desired_side.clone(),
                         entry_ts: exec_ts,
                         entry_px,
                         notional_usd: filled_notional,
@@ -1836,6 +1922,26 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         market_data_source: market_data_source.clone(),
                     },
                 );
+                let _ = push_event(
+                    &redis,
+                    &run_id_cloned,
+                    "PositionOpened",
+                    Some(exchange.code.to_string()),
+                    json!({
+                        "decision_id": decision_id,
+                        "order_id": order_id,
+                        "symbol": sym,
+                        "side": desired_side,
+                        "entry_px": entry_px,
+                        "filled_notional_usd": filled_notional,
+                        "fill_ratio": fill_ratio,
+                        "exec_ts": exec_ts,
+                        "wall_clock_ts": now_ts(),
+                        "market_data_source": market_data_source,
+                        "hybrid_score": hybrid_score,
+                    }),
+                )
+                .await;
             }
 
             for d in &decision_rows {
@@ -1923,6 +2029,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         "order_id": f.order_id,
                         "latency_ms": f.latency_ms,
                     }),
+                )
+                .await;
+                let fill_record = serde_json::to_value(f).unwrap_or_else(|_| json!({}));
+                let _ = push_event(
+                    &redis,
+                    &run_id_cloned,
+                    "TransactionRecorded",
+                    Some(f.exchange.clone()),
+                    fill_record,
                 )
                 .await;
             }

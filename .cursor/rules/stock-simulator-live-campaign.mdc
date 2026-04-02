@@ -1,0 +1,26 @@
+---
+description: Stock simulator LIVE campaigns — real quotes, simulated cash, logging, 126-day rule
+alwaysApply: true
+---
+
+# Stock service simulator — LIVE campaign requirements
+
+When working on `lianel/dc/stock-service/backend/src/simulator/`, the stock-service simulator UI, or Airflow `stock_monitoring_simulator_run_dag.py`:
+
+1. **LIVE mode** (`live_market_data: true`) must use **real market quotes** from the watchlist/IBKR path already wired in the backend. **Do not** place real brokerage orders; **only** simulated cash, positions, orders, and fills are allowed.
+
+2. **126-calendar-day LIVE campaign (default)**  
+   - The API field `live_campaign_calendar_days` defaults to **126** (wall-clock **calendar** days from `started_at_ts`).  
+   - **`0`** means no calendar deadline (run until `BANKRUPT`, `MANUAL_STOP`, or `max_cycles`).  
+   - On deadline the run must stop with **`stop_reason: CAMPAIGN_CALENDAR_COMPLETE`** (in addition to existing stop reasons).  
+   - Run meta should expose **`live_campaign_calendar_days`** and **`live_campaign_deadline_ts`** for the UI and operators.
+
+3. **Logging**  
+   - Persist **every simulated fill** to the fills ledger **and** emit timeline events as implemented (`OrderFilled`, **`TransactionRecorded`** with the full fill row JSON).  
+   - Emit **`PositionOpened`** when a carry position is opened.  
+   - Record **detailed decision traces** for both opens and closes (`SimDecisionTrace` / `DecisionCreated`), including close legs (signal flip after `min_hold_seconds`).
+
+4. **Presets and automation**  
+   - The **6-month LIVE** UI preset and the Airflow default payload should keep **`live_campaign_calendar_days: 126`** (or env `SIM_LIVE_CAMPAIGN_CALENDAR_DAYS`) unless the user explicitly asks to change the research policy.
+
+Relax or amend this rule only when the user clearly changes the product requirement (e.g. shorter campaigns, replay-only work).

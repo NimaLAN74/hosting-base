@@ -3,7 +3,9 @@ Stock Service - Simulator DAG
 
 Keeps a **single active** live (or replay) simulator run when none exists, on a
 short interval. Default payload targets **~6+ months** of wall-clock steps at
-60s cadence (`max_cycles` ≈ 500k). Change policy via env without editing code:
+60s cadence (`max_cycles` ≈ 500k). LIVE runs also send `live_campaign_calendar_days`
+(default **126**, override with `SIM_LIVE_CAMPAIGN_CALENDAR_DAYS`; `0` = no calendar cap).
+Change policy via env without editing code:
 
 - `SIM_REPLAY_RESTART_POLICY=always` (default): when no run is active, start one
   (including after the previous run finished with MAX_CYCLES_REACHED or MANUAL_STOP).
@@ -94,6 +96,8 @@ def run_simulator_replay(**context):
         "replay_require_full_horizon": require_full,
         # ~500k cycles at 60s step ≈ 347 days wall-clock (upper bound; live mode also skips closed markets).
         "max_cycles": int(os.getenv("SIM_REPLAY_MAX_CYCLES", "500000")),
+        # LIVE: wall-clock calendar-day cap (0 = unlimited). Default 126 ≈ six months.
+        "live_campaign_calendar_days": int(os.getenv("SIM_LIVE_CAMPAIGN_CALENDAR_DAYS", "126")),
     }
     target_days = max(7, min(days, 365))
     candidate_days = [target_days, 126, 90, 60, 30, 14, 7]

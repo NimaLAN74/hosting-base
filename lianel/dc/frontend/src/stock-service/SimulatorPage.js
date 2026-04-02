@@ -23,6 +23,8 @@ const SIX_MONTH_LIVE_PRESET = {
   live_max_quote_age_seconds: 60,
   live_require_bid_ask: true,
   live_max_spread_bps: 80,
+  /** Wall-clock LIVE campaign: stop after this many calendar days (or bankrupt / max_cycles). */
+  live_campaign_calendar_days: 126,
 };
 
 /** Replay on IBKR daily bars: one step per aligned trading day; fails start if overlap &lt; days (reliable 126d training). */
@@ -838,6 +840,18 @@ export default function SimulatorPage() {
                   <b>{runStatus.ending_equity_usd != null ? `$${Number(runStatus.ending_equity_usd).toFixed(2)}` : '—'}</b></div>
                 <div>PnL: <b>{runStatus.pnl_usd != null ? `$${Number(runStatus.pnl_usd).toFixed(2)}` : '—'}</b></div>
                 <div>Steps completed: <b>{Number(runStatus.cycles_completed || 0)}</b></div>
+                {runStatus.live_market_data === true && Number(runStatus.live_campaign_deadline_ts || 0) > 0 && (
+                  <div>
+                    LIVE wall-clock deadline (UTC):{' '}
+                    <b>{fmtTs(runStatus.live_campaign_deadline_ts)}</b>
+                    {runStatus.live_campaign_calendar_days != null && (
+                      <>
+                        {' '}
+                        · <b>{runStatus.live_campaign_calendar_days}</b> calendar days from start
+                      </>
+                    )}
+                  </div>
+                )}
                 {runStatus.replay_aligned_trading_days_available != null && runStatus.live_market_data === false && (
                   <div>
                     IBKR aligned days (max): <b>{runStatus.replay_aligned_trading_days_available}</b>
