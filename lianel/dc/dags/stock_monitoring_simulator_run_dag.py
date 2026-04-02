@@ -84,6 +84,12 @@ def run_simulator_replay(**context):
         replay_delay = int(os.getenv("SIM_REPLAY_DELAY_MS", "60000"))
         require_full = os.getenv("SIM_REPLAY_REQUIRE_FULL_HORIZON", "false").lower() in ("1", "true", "yes")
 
+    # Enforce the product requirement: LIVE campaigns should default to ~6 months (126 calendar days)
+    # and must not silently shrink to short windows due to env misconfiguration.
+    if live_md:
+        min_live_days = int(os.getenv("SIM_LIVE_MIN_DAYS", "126"))
+        days = max(days, min_live_days)
+
     base_payload = {
         "top": int(os.getenv("SIM_REPLAY_TOP", "16")),
         "quantile": float(os.getenv("SIM_REPLAY_QUANTILE", "0.2")),
