@@ -74,15 +74,22 @@ def run_simulator_replay(**context):
     elif latest:
         print(f"No active run. Latest status={latest_status or 'unknown'} stop_reason={latest_stop_reason or 'n/a'}. Starting new run.")
 
+    # Product default: run LIVE campaigns unless operators explicitly enable research replay mode.
+    # Some environments previously had SIM_REPLAY_RESEARCH_MODE=true, causing short REPLAY runs.
+    # To avoid violating the LIVE campaign requirement, we require an explicit opt-in flag.
+    force_live_default = os.getenv("SIM_FORCE_LIVE_DEFAULT", "true").strip().lower() in ("1", "true", "yes")
     research_mode = os.getenv("SIM_REPLAY_RESEARCH_MODE", "").strip().lower() in ("1", "true", "yes")
-    if research_mode:
+    research_opt_in = os.getenv("SIM_REPLAY_RESEARCH_OPT_IN", "").strip().lower() in ("1", "true", "yes")
+    use_research_mode = research_mode and research_opt_in and not force_live_default
+
+    if use_research_mode:
         live_md = False
         replay_delay = int(os.getenv("SIM_REPLAY_DELAY_MS", "0"))
         require_full = os.getenv("SIM_REPLAY_REQUIRE_FULL_HORIZON", "true").lower() in ("1", "true", "yes")
     else:
-        live_md = os.getenv("SIM_REPLAY_LIVE_MARKET_DATA", "true").lower() in ("1", "true", "yes")
+        live_md = True
         replay_delay = int(os.getenv("SIM_REPLAY_DELAY_MS", "60000"))
-        require_full = os.getenv("SIM_REPLAY_REQUIRE_FULL_HORIZON", "false").lower() in ("1", "true", "yes")
+        require_full = False
 
     # Enforce the product requirement: LIVE campaigns should default to ~6 months (126 calendar days)
     # and must not silently shrink to short windows due to env misconfiguration.
