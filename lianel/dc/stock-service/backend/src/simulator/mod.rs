@@ -297,7 +297,10 @@ struct OpenPosition {
 }
 
 fn default_days() -> usize {
-    7
+    // Product requirement: default campaigns are six months (126 calendar days).
+    // Short runs should be explicitly requested (e.g., via UI overrides) rather than happening
+    // silently via missing fields or automation defaults.
+    126
 }
 fn default_top() -> usize {
     16
@@ -901,8 +904,14 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         .ok_or_else(|| "IBKR not configured".to_string())?
         .clone();
 
-    // Allow short replay windows when aligned market data is sparse.
-    // Continuous six-month evidence still comes from readiness_min_days/max_cycles.
+    // Enforce campaign horizon defaults at the API boundary.
+    //
+    // - LIVE campaigns must default to ~6 months (126 calendar days) and should not silently shrink
+    //   due to missing fields or misconfigured automation.
+    // - REPLAY can still be shorter if explicitly requested, but the default is 126.
+    if req.live_market_data && req.live_campaign_calendar_days > 0 {
+        req.days = req.days.max(req.live_campaign_calendar_days);
+    }
     req.days = req.days.max(7).min(365);
     req.top = req.top.max(6).min(40);
     req.quantile = req.quantile.clamp(0.05, 0.45);
