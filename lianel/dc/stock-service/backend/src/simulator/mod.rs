@@ -913,6 +913,21 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         req.days = req.days.max(req.live_campaign_calendar_days);
     }
     req.days = req.days.max(7).min(365);
+
+    // Hard guardrail: prevent automation from silently running short REPLAY simulations that
+    // violate the 6‑month campaign requirement.
+    //
+    // If REPLAY is requested, require a 126‑day horizon (or longer) and strict full-horizon mode.
+    if !req.live_market_data {
+        if req.days < 126 {
+            return Err("Short REPLAY runs (<126 days) are disabled. Use LIVE (live_market_data=true) for the 126-day campaign, or run a 126-day REPLAY with replay_require_full_horizon=true."
+                .to_string());
+        }
+        if !req.replay_require_full_horizon.unwrap_or(false) {
+            return Err("REPLAY runs must set replay_require_full_horizon=true to avoid silent horizon shrink. Use LIVE for wall-clock campaigns."
+                .to_string());
+        }
+    }
     req.top = req.top.max(6).min(40);
     req.quantile = req.quantile.clamp(0.05, 0.45);
     req.initial_capital_usd = req.initial_capital_usd.max(25.0);
