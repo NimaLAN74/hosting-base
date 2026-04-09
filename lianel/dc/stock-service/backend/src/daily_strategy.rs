@@ -8,6 +8,15 @@ use crate::ibkr::{HistoryBar, IbkrOAuthClient};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+fn day_start_ts_utc(ts: u64) -> u64 {
+    use chrono::{Datelike, TimeZone, Utc};
+    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_else(Utc::now);
+    Utc.with_ymd_and_hms(dt.year(), dt.month(), dt.day(), 0, 0, 0)
+        .single()
+        .map(|d| d.timestamp().max(0) as u64)
+        .unwrap_or(ts)
+}
+
 /// Top/bottom fraction of the cross-section for long/short (20% each → 2 names on a 10-name list).
 pub const DEFAULT_QUANTILE: f64 = 0.2;
 
@@ -153,7 +162,9 @@ pub fn sort_dedupe_bars(mut bars: Vec<HistoryBar>) -> Vec<HistoryBar> {
 pub fn aligned_timestamps(bars_by_symbol: &HashMap<String, Vec<HistoryBar>>) -> Vec<u64> {
     let mut sets: Option<HashSet<u64>> = None;
     for bars in bars_by_symbol.values() {
-        let ts: HashSet<u64> = bars.iter().map(|b| b.t).collect();
+        // IBKR daily bars can have symbol-specific timestamps (exchange timezones / feed quirks).
+        // Align by UTC calendar day (00:00:00 UTC) instead of exact `t` seconds.
+        let ts: HashSet<u64> = bars.iter().map(|b| day_start_ts_utc(b.t)).collect();
         sets = Some(match sets {
             None => ts,
             Some(s) => s.intersection(&ts).copied().collect(),
@@ -216,7 +227,10 @@ fn forward_oc_return(o_next: f64, c_next: f64) -> Option<f64> {
 
 /// Build closes/opens aligned to common timeline `ts` for one symbol.
 fn series_on_timestamps(bars: &[HistoryBar], ts: &[u64]) -> Option<(Vec<f64>, Vec<f64>)> {
-    let map: HashMap<u64, &HistoryBar> = bars.iter().map(|b| (b.t, b)).collect();
+    let map: HashMap<u64, &HistoryBar> = bars
+        .iter()
+        .map(|b| (day_start_ts_utc(b.t), b))
+        .collect();
     let mut closes = Vec::with_capacity(ts.len());
     let mut opens = Vec::with_capacity(ts.len());
     for t in ts {
