@@ -1388,6 +1388,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     } else {
                         0.0
                     };
+                    let mut used_daily_fallback = false;
                     // If intraday move is flat (common with sparse/rounded watchlist prices),
                     // fall back to the most recent daily close/close return from IBKR history.
                     if ret_prev.abs() <= f64::EPSILON {
@@ -1398,11 +1399,15 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 let c0 = bars[n - 3].close;
                                 if c0 > 0.0 && c1 > 0.0 {
                                     ret_prev = (c1 / c0).ln();
+                                    used_daily_fallback = true;
                                 }
                             }
                         }
                     }
-                    let is_halt = (px_now_mid - px_prev_mid).abs() <= f64::EPSILON;
+                    // If we used daily fallback, do not treat this as a "halt" condition:
+                    // we still execute on real-time quotes, but the signal comes from daily returns.
+                    let is_halt = !used_daily_fallback
+                        && (px_now_mid - px_prev_mid).abs() <= f64::EPSILON;
                     let live_bid_ask = match (bid, ask) {
                         (Some(b), Some(a)) if a >= b => Some((b, a)),
                         _ => None,
