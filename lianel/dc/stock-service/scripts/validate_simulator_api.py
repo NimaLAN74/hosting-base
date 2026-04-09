@@ -170,15 +170,26 @@ def main():
     if not events:
         raise RuntimeError("Timeline is empty")
     print(f"timeline_events={len(events)}")
-    if not any(e.get("kind") in ("OrderSubmitted", "OrderFilled", "OrderPartiallyFilled") for e in events):
-        raise RuntimeError("Missing order lifecycle events in timeline")
+    has_order_events = any(
+        e.get("kind") in ("OrderSubmitted", "OrderFilled", "OrderPartiallyFilled") for e in events
+    )
+    if not has_order_events:
+        # LIVE runs can legitimately have 0 trades when guardrails reject all symbols (missing bid/ask,
+        # spreads too wide, stale quotes, etc.). That should not fail API validation.
+        if args.live and any(e.get("kind") == "TradeSkipped" for e in events):
+            print("order_events=none live_guardrails_active=true (ok)")
+        else:
+            raise RuntimeError("Missing order lifecycle events in timeline")
 
     orders = http_json(
         f"{base}/api/v1/stock-service/sim/runs/{run_id}/orders?limit=200",
         insecure=args.insecure_ssl,
     ).get("orders", [])
     if len(orders) == 0:
-        raise RuntimeError("Order ledger is empty")
+        if args.live:
+            print("orders=0 (ok for LIVE validation)")
+        else:
+            raise RuntimeError("Order ledger is empty")
     print(f"orders={len(orders)}")
 
     risk = http_json(
