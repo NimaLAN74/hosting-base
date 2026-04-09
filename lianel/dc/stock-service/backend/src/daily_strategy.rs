@@ -493,7 +493,15 @@ pub async fn compute_daily_signals(
     for (sym, conid) in symbol_conids {
         match client.fetch_history(*conid, "1y", "1d").await {
             Ok(bars) => {
-                bars_by_symbol.insert(sym.clone(), bars);
+                if bars.len() >= 30 {
+                    bars_by_symbol.insert(sym.clone(), bars);
+                } else {
+                    tracing::warn!(
+                        "daily-signals: history too short for {} ({} bars); skipping",
+                        sym,
+                        bars.len()
+                    );
+                }
             }
             Err(e) => {
                 tracing::warn!("daily-signals: history failed for {}: {}", sym, e);
@@ -514,8 +522,39 @@ pub async fn compute_daily_signals(
         );
     }
 
-    let ts = aligned_timestamps(&bars_by_symbol);
+    // Self-heal data gaps:
+    // IBKR can return partial/shifted history per symbol (feed gaps, symbol-specific holidays, etc.),
+    // which can collapse the strict intersection to 0. Drop the weakest-history symbols until we
+    // regain enough overlapping days to form 20d features.
+    let mut dropped_symbols: Vec<String> = Vec::new();
+    let mut ts = aligned_timestamps(&bars_by_symbol);
+    while ts.len() < 22 && bars_by_symbol.len() >= 3 {
+        let mut by_len: Vec<(String, usize)> = bars_by_symbol
+            .iter()
+            .map(|(s, b)| (s.clone(), b.len()))
+            .collect();
+        by_len.sort_by_key(|(_, n)| *n);
+        let drop = by_len.first().map(|(s, _)| s.clone());
+        let Some(sym) = drop else { break };
+        bars_by_symbol.remove(&sym);
+        dropped_symbols.push(sym);
+        ts = aligned_timestamps(&bars_by_symbol);
+    }
+
     let overlapping_days = ts.len();
+    if bars_by_symbol.len() < 3 {
+        return empty_daily_response(
+            requested_universe,
+            quantile,
+            short_enabled,
+            symbols_with_history,
+            overlapping_days,
+            format!(
+                "insufficient_symbols_after_gap_filter(dropped={})",
+                dropped_symbols.len()
+            ),
+        );
+    }
     if ts.is_empty() {
         return empty_daily_response(
             requested_universe,
@@ -523,7 +562,10 @@ pub async fn compute_daily_signals(
             short_enabled,
             symbols_with_history,
             0,
-            "no_overlapping_trading_days".to_string(),
+            format!(
+                "no_overlapping_trading_days(dropped={})",
+                dropped_symbols.len()
+            ),
         );
     }
     if ts.len() < 22 {
@@ -533,7 +575,11 @@ pub async fn compute_daily_signals(
             short_enabled,
             symbols_with_history,
             overlapping_days,
-            "insufficient_overlapping_history_for_features".to_string(),
+            format!(
+                "insufficient_overlapping_history_for_features(days={}, dropped={})",
+                ts.len(),
+                dropped_symbols.len()
+            ),
         );
     }
 
