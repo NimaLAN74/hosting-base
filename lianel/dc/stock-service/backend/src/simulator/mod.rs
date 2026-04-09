@@ -967,15 +967,55 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         req.quantile,
         req.short_enabled,
         120,
-        req.top,
+        // In LIVE mode we may need to drop symbols with missing bid/ask or extreme spreads.
+        // Ask for a larger candidate pool, then filter by quote quality.
+        if req.live_market_data { (req.top * 3).min(80) } else { req.top },
     )
     .await;
 
-    let selected_symbols: Vec<String> = selection
+    let mut selected_symbols: Vec<String> = selection
         .selected
         .iter()
         .map(|c| c.symbol.clone())
         .collect();
+    if req.live_market_data {
+        // Filter down to a tradeable universe based on current watchlist quote quality.
+        // This prevents the run from getting stuck skipping the same non-tradeable symbols.
+        selected_symbols.retain(|sym| {
+            let q = quotes.get(sym);
+            let px = q.and_then(|q| q.price).unwrap_or(0.0);
+            if !(px.is_finite() && px > 0.0) {
+                return false;
+            }
+            if req.live_require_bid_ask {
+                let bid = q.and_then(|q| q.bid).unwrap_or(0.0);
+                let ask = q.and_then(|q| q.ask).unwrap_or(0.0);
+                if !(bid.is_finite() && ask.is_finite() && bid > 0.0 && ask > 0.0 && ask >= bid) {
+                    return false;
+                }
+                if req.live_max_spread_bps > 0.0 {
+                    let mid = (bid + ask) / 2.0;
+                    if mid > 0.0 {
+                        let spread_bps = ((ask - bid) / mid) * 10_000.0;
+                        if spread_bps.is_finite() && spread_bps > req.live_max_spread_bps {
+                            return false;
+                        }
+                    }
+                }
+            }
+            if req.live_max_quote_age_seconds > 0 {
+                let updated_at = q.and_then(|q| q.updated_at.as_deref()).unwrap_or("");
+                if let Some(ts) = parse_rfc3339_ts_seconds(updated_at) {
+                    let age = now_ts().saturating_sub(ts);
+                    if age > req.live_max_quote_age_seconds {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+        selected_symbols.truncate(req.top);
+    }
     if selected_symbols.len() < 4 {
         return Err("selection produced too few symbols".to_string());
     }
