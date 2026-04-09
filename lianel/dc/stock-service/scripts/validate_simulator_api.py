@@ -57,21 +57,31 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--base-url", required=True)
     p.add_argument("--insecure-ssl", action="store_true")
-    p.add_argument("--days", type=int, default=7)
+    p.add_argument("--days", type=int, default=126)
+    p.add_argument("--live", action="store_true", help="Validate LIVE mode start/poll paths")
     args = p.parse_args()
 
     base = args.base_url.rstrip("/")
+    days = max(7, min(int(args.days), 365))
     start_payload = {
-        "days": max(5, min(args.days, 30)),
+        "days": days,
         "top": 12,
         "quantile": 0.2,
         "short_enabled": True,
         "initial_capital_usd": 100,
         "reinvest_profit": True,
-        # Keep CI validation fast/stable; production runs use live_market_data=true via DAG/UI.
-        "live_market_data": False,
-        "replay_delay_ms": 0,
+        "live_market_data": bool(args.live),
+        # Keep validation fast: cap cycles and pace live to avoid busy loop.
+        "max_cycles": 3,
+        "replay_delay_ms": 250 if args.live else 0,
+        "readiness_min_days": 126,
+        "replay_require_full_horizon": (not args.live),
     }
+    if args.live:
+        start_payload["live_campaign_calendar_days"] = 126
+        start_payload["live_max_quote_age_seconds"] = 300
+        start_payload["live_require_bid_ask"] = True
+        start_payload["live_max_spread_bps"] = 300
 
     run = None
     start_url = f"{base}/api/v1/stock-service/sim/runs"

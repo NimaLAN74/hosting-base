@@ -41,5 +41,6 @@ jobs:
           python lianel/dc/stock-service/scripts/validate_simulator_api.py \
             --base-url "$STOCK_SERVICE_BASE_URL" \
             --insecure-ssl \
-            --days 7
+            --days 126 \
+            --live
 
