@@ -1032,6 +1032,28 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
 
     if req.live_market_data {
         effective_days = req.days;
+        // LIVE: also fetch daily history for the selected universe so we can compute
+        // a robust daily signal when intraday quote changes are flat/noisy.
+        // This keeps execution on real-time quotes while avoiding "ret_prev_ln=0 forever".
+        let mut history_fetch_failures = 0usize;
+        for (sym, conid) in &pairs {
+            if !selected_symbols.iter().any(|s| s == sym) {
+                continue;
+            }
+            match client.fetch_history(*conid, hist_period, "1d").await {
+                Ok(result) => {
+                    bars_by_symbol.insert(sym.clone(), result);
+                }
+                Err(e) => {
+                    history_fetch_failures += 1;
+                    tracing::warn!("LIVE history fetch failed for {}: {}", sym, e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        if history_fetch_failures > selected_symbols.len().saturating_sub(2) {
+            return Err("LIVE mode: failed to fetch daily history for enough symbols".to_string());
+        }
     } else {
         let mut history_fetch_failures = 0usize;
         for (sym, conid) in &pairs {
@@ -1361,11 +1383,25 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     };
                     let px_prev_mid = live_prev_prices.get(&sym).copied().unwrap_or(px_now_mid);
                     live_prev_prices.insert(sym.clone(), px_now_mid);
-                    let ret_prev = if px_prev_mid > 0.0 {
+                    let mut ret_prev = if px_prev_mid > 0.0 {
                         (px_now_mid / px_prev_mid).ln()
                     } else {
                         0.0
                     };
+                    // If intraday move is flat (common with sparse/rounded watchlist prices),
+                    // fall back to the most recent daily close/close return from IBKR history.
+                    if ret_prev.abs() <= f64::EPSILON {
+                        if let Some(bars) = bars_by_symbol.get(&sym) {
+                            if bars.len() >= 3 {
+                                let n = bars.len();
+                                let c1 = bars[n - 2].close;
+                                let c0 = bars[n - 3].close;
+                                if c0 > 0.0 && c1 > 0.0 {
+                                    ret_prev = (c1 / c0).ln();
+                                }
+                            }
+                        }
+                    }
                     let is_halt = (px_now_mid - px_prev_mid).abs() <= f64::EPSILON;
                     let live_bid_ask = match (bid, ask) {
                         (Some(b), Some(a)) if a >= b => Some((b, a)),
