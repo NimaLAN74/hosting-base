@@ -336,10 +336,13 @@ fn default_live_market_data() -> bool {
     true
 }
 fn default_edge_cost_buffer_bps() -> f64 {
-    6.0
+    // Production calibration: keep a cost buffer, but not so large that the simulator never trades
+    // under real-world spreads/fees.
+    3.0
 }
 fn default_min_signal_abs_return_bps() -> f64 {
-    8.0
+    // Production calibration: allow smaller moves than 8bps; we still enforce cost/edge floors.
+    4.0
 }
 fn default_min_hold_seconds() -> u64 {
     300

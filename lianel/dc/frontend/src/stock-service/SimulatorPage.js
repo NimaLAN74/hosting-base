@@ -20,6 +20,9 @@ const SIX_MONTH_LIVE_PRESET = {
   max_cycles: 500000,
   readiness_min_days: 126,
   replay_require_full_horizon: false,
+  // Production calibration: avoid "no-trade" LIVE runs while keeping cost discipline.
+  edge_cost_buffer_bps: 3,
+  min_signal_abs_return_bps: 4,
   live_max_quote_age_seconds: 60,
   live_require_bid_ask: true,
   live_max_spread_bps: 80,
