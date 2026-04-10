@@ -1,0 +1,88 @@
+name: Remote SSO Logs Snapshot (oauth2-proxy + keycloak + airflow)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tail:
+        description: "How many log lines per container"
+        required: false
+        default: "250"
+      since:
+        description: "Optional docker logs --since (e.g. 30m, 2h). Leave empty for none."
+        required: false
+        default: "2h"
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: "Snapshot remote SSO logs"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Secrets
+        run: |
+          if [ -z "${{ secrets.REMOTE_HOST }}" ] || [ -z "${{ secrets.REMOTE_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ REMOTE_HOST, REMOTE_USER, SSH_PRIVATE_KEY must be set"
+            exit 1
+          fi
+          echo "✅ Secrets configured"
+
+      - name: Setup SSH
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH ready"
+
+      - name: Collect logs (keycloak, oauth2-proxy, nginx, airflow)
+        env:
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_PORT: ${{ secrets.REMOTE_PORT || '22' }}
+          TAIL: ${{ inputs.tail }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=45 \
+            -p "${REMOTE_PORT}" \
+            "${REMOTE_USER}@${REMOTE_HOST}" \
+            "bash -lc '
+              set -e
+              echo \"=== HOST ===\"
+              date -u
+              uname -a || true
+              docker ps --format \"table {{.Names}}\t{{.Status}}\t{{.Image}}\" | sed -n \"1,30p\"
+              echo
+
+              SINCE_ARG=\"\"
+              if [ -n \"${SINCE}\" ]; then
+                SINCE_ARG=\"--since ${SINCE}\"
+              fi
+
+              show_logs () {
+                local name=\"$1\"
+                echo \"=== docker logs: ${name} (tail=${TAIL} since=${SINCE:-none}) ===\"
+                if docker ps -a --format \"{{.Names}}\" | grep -qx \"${name}\"; then
+                  # shellcheck disable=SC2086
+                  docker logs ${SINCE_ARG} --tail \"${TAIL}\" \"${name}\" 2>&1 | tail -n \"${TAIL}\"
+                else
+                  echo \"(container not found)\"
+                fi
+                echo
+              }
+
+              show_logs keycloak
+              show_logs oauth2-proxy
+              show_logs nginx-proxy
+              show_logs dc-airflow-apiserver-1
+              show_logs dc-airflow-scheduler-1
+              show_logs dc-airflow-worker-1
+            '"
+
