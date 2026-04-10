@@ -1566,150 +1566,14 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     .await;
                     continue;
                 }
-                let estimated_cost_bps = exchange.ibkr_commission_bps
-                    + exchange.exchange_fee_bps
-                    + exchange.clearing_fee_bps
-                    + exchange.regulatory_fee_bps
-                    + exchange.fx_fee_bps
-                    + exchange.tax_bps
-                    + observed_spread_bps
-                    + exchange.slippage_bps
-                    + exchange.market_impact_bps
-                    + if side == "SHORT" { exchange.borrow_fee_bps } else { 0.0 };
-                let required_edge = (estimated_cost_bps + req.edge_cost_buffer_bps) / 10_000.0;
-                let min_signal = req.min_signal_abs_return_bps / 10_000.0;
-                if is_halt || signal_abs_return < min_signal || signal_abs_return <= required_edge {
-                    let skip_reason = if is_halt {
-                        "skip_halt_or_stale_quote"
-                    } else if signal_abs_return < min_signal {
-                        "skip_signal_too_small"
-                    } else {
-                        "skip_edge_below_cost_floor"
-                    };
-                    let _ = push_event(
-                        &redis,
-                        &run_id_cloned,
-                        "TradeSkipped",
-                        Some(exchange.code.to_string()),
-                        json!({
-                            "symbol": sym,
-                            "side": side,
-                            "ret_prev_ln": ret_prev,
-                            "signal_abs_return": signal_abs_return,
-                            "estimated_cost_bps": estimated_cost_bps,
-                            "edge_cost_buffer_bps": req.edge_cost_buffer_bps,
-                            "required_edge": required_edge,
-                            "min_signal_abs_return_bps": req.min_signal_abs_return_bps,
-                            "reason": skip_reason
-                        }),
-                    )
-                    .await;
-                    continue;
-                }
-                if req.min_hold_seconds > 0 {
-                    if let Some(last_fill_ts) = last_fill_ts_by_symbol.get(&sym).copied() {
-                        let elapsed = exec_ts.saturating_sub(last_fill_ts);
-                        if elapsed < req.min_hold_seconds {
-                            let _ = push_event(
-                                &redis,
-                                &run_id_cloned,
-                                "TradeSkipped",
-                                Some(exchange.code.to_string()),
-                                json!({
-                                    "symbol": sym,
-                                    "side": side,
-                                    "reason": "skip_min_hold_window",
-                                    "last_fill_ts": last_fill_ts,
-                                    "elapsed_seconds": elapsed,
-                                    "required_min_hold_seconds": req.min_hold_seconds
-                                }),
-                            )
-                            .await;
-                            continue;
-                        }
-                    }
-                }
-                if let Some(cooldown_until) = cooldown_until_by_symbol.get(&sym).copied() {
-                    if exec_ts < cooldown_until {
-                        let _ = push_event(
-                            &redis,
-                            &run_id_cloned,
-                            "TradeSkipped",
-                            Some(exchange.code.to_string()),
-                            json!({
-                                "symbol": sym,
-                                "side": side,
-                                "reason": "skip_symbol_cooldown",
-                                "cooldown_until_ts": cooldown_until,
-                                "remaining_seconds": cooldown_until.saturating_sub(exec_ts)
-                            }),
-                        )
-                        .await;
-                        continue;
-                    }
-                }
-                *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
-                let (hybrid_score, rationale) = selected_scores
-                    .get(&sym)
-                    .cloned()
-                    .unwrap_or((0.0, vec!["not-selected-fallback".to_string()]));
-                let decision_id = format!("d-{}-{}", decision_ts, sym);
-                let mut rationale_extended = rationale.clone();
-                rationale_extended.push(format!("session_open_utc={}", exchange.session_open_utc));
-                rationale_extended.push(format!("session_close_utc={}", exchange.session_close_utc));
-                let trace = SimDecisionTrace {
-                    decision_id: decision_id.clone(),
-                    run_id: run_id_cloned.clone(),
-                    decision_ts,
-                    symbol: sym.clone(),
-                    exchange: exchange.code.to_string(),
-                    side: side.clone(),
-                    weight: if symbol_count == 0 {
-                        0.0
-                    } else {
-                        1.0 / symbol_count as f64
-                    },
-                    hybrid_score,
-                    features: json!({
-                        "ret_prev_ln": ret_prev,
-                        "next_open": open_px,
-                        "next_close": close_px,
-                        "spread_bps": exchange.spread_bps,
-                        "depth_notional_usd": exchange.depth_notional_usd,
-                        "auction_window": exchange.auction_window,
-                        "borrow_available": exchange.short_borrow_available,
-                        "is_halt": is_halt,
-                        "signal_abs_return": signal_abs_return,
-                        "estimated_cost_bps": estimated_cost_bps,
-                        "required_edge": required_edge,
-                        "live_market_data": req.live_market_data,
-                    }),
-                    rationale: rationale_extended,
-                    short_explanation: format!(
-                        "{} {} using real market prices (buy {:.4} at {} UTC, sell {:.4} at {} UTC) because momentum {:.4} and hybrid score {:.4} favored {} on {}.",
-                        if side == "LONG" { "Buy" } else { "Sell short" },
-                        sym,
-                        open_px,
-                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_open_utc.to_string() },
-                        close_px,
-                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_close_utc.to_string() },
-                        ret_prev,
-                        hybrid_score,
-                        if side == "LONG" { "upside" } else { "downside" },
-                        exchange.code
-                    ),
-                };
-                decision_rows.push(trace.clone());
-                total_decisions += 1;
-                explained_decisions += 1;
-
                 // Stateful portfolio simulation:
-                // - open position when none exists and signal passes
-                // - close position only on signal flip after min_hold_seconds
+                // - close position on signal flip after min_hold_seconds (even if the *new* signal is weak);
+                // - open positions only when signal passes the edge/cost filters.
+                //
+                // IMPORTANT: Closing is risk-management / state transition and must not be blocked by
+                // min_signal_abs_return_bps or edge_cost_buffer_bps intended for *opening*.
                 let half_spread = (observed_spread_bps / 10_000.0) / 2.0;
                 let desired_side = side.clone();
-
-                // Close on flip (after hold window)
                 if let Some(pos) = positions.get(&sym).cloned() {
                     let elapsed = exec_ts.saturating_sub(pos.entry_ts);
                     if elapsed >= req.min_hold_seconds && desired_side != pos.side {
@@ -1916,6 +1780,143 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     }
                     continue;
                 }
+
+                let estimated_cost_bps = exchange.ibkr_commission_bps
+                    + exchange.exchange_fee_bps
+                    + exchange.clearing_fee_bps
+                    + exchange.regulatory_fee_bps
+                    + exchange.fx_fee_bps
+                    + exchange.tax_bps
+                    + observed_spread_bps
+                    + exchange.slippage_bps
+                    + exchange.market_impact_bps
+                    + if side == "SHORT" { exchange.borrow_fee_bps } else { 0.0 };
+                let required_edge = (estimated_cost_bps + req.edge_cost_buffer_bps) / 10_000.0;
+                let min_signal = req.min_signal_abs_return_bps / 10_000.0;
+                if is_halt || signal_abs_return < min_signal || signal_abs_return <= required_edge {
+                    let skip_reason = if is_halt {
+                        "skip_halt_or_stale_quote"
+                    } else if signal_abs_return < min_signal {
+                        "skip_signal_too_small"
+                    } else {
+                        "skip_edge_below_cost_floor"
+                    };
+                    let _ = push_event(
+                        &redis,
+                        &run_id_cloned,
+                        "TradeSkipped",
+                        Some(exchange.code.to_string()),
+                        json!({
+                            "symbol": sym,
+                            "side": side,
+                            "ret_prev_ln": ret_prev,
+                            "signal_abs_return": signal_abs_return,
+                            "estimated_cost_bps": estimated_cost_bps,
+                            "edge_cost_buffer_bps": req.edge_cost_buffer_bps,
+                            "required_edge": required_edge,
+                            "min_signal_abs_return_bps": req.min_signal_abs_return_bps,
+                            "reason": skip_reason
+                        }),
+                    )
+                    .await;
+                    continue;
+                }
+                if req.min_hold_seconds > 0 {
+                    if let Some(last_fill_ts) = last_fill_ts_by_symbol.get(&sym).copied() {
+                        let elapsed = exec_ts.saturating_sub(last_fill_ts);
+                        if elapsed < req.min_hold_seconds {
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "TradeSkipped",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "side": side,
+                                    "reason": "skip_min_hold_window",
+                                    "last_fill_ts": last_fill_ts,
+                                    "elapsed_seconds": elapsed,
+                                    "required_min_hold_seconds": req.min_hold_seconds
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
+                    }
+                }
+                if let Some(cooldown_until) = cooldown_until_by_symbol.get(&sym).copied() {
+                    if exec_ts < cooldown_until {
+                        let _ = push_event(
+                            &redis,
+                            &run_id_cloned,
+                            "TradeSkipped",
+                            Some(exchange.code.to_string()),
+                            json!({
+                                "symbol": sym,
+                                "side": side,
+                                "reason": "skip_symbol_cooldown",
+                                "cooldown_until_ts": cooldown_until,
+                                "remaining_seconds": cooldown_until.saturating_sub(exec_ts)
+                            }),
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+                *exchange_leg_count.entry(exchange.code.to_string()).or_insert(0) += 1;
+                let (hybrid_score, rationale) = selected_scores
+                    .get(&sym)
+                    .cloned()
+                    .unwrap_or((0.0, vec!["not-selected-fallback".to_string()]));
+                let decision_id = format!("d-{}-{}", decision_ts, sym);
+                let mut rationale_extended = rationale.clone();
+                rationale_extended.push(format!("session_open_utc={}", exchange.session_open_utc));
+                rationale_extended.push(format!("session_close_utc={}", exchange.session_close_utc));
+                let trace = SimDecisionTrace {
+                    decision_id: decision_id.clone(),
+                    run_id: run_id_cloned.clone(),
+                    decision_ts,
+                    symbol: sym.clone(),
+                    exchange: exchange.code.to_string(),
+                    side: side.clone(),
+                    weight: if symbol_count == 0 {
+                        0.0
+                    } else {
+                        1.0 / symbol_count as f64
+                    },
+                    hybrid_score,
+                    features: json!({
+                        "ret_prev_ln": ret_prev,
+                        "next_open": open_px,
+                        "next_close": close_px,
+                        "spread_bps": exchange.spread_bps,
+                        "depth_notional_usd": exchange.depth_notional_usd,
+                        "auction_window": exchange.auction_window,
+                        "borrow_available": exchange.short_borrow_available,
+                        "is_halt": is_halt,
+                        "signal_abs_return": signal_abs_return,
+                        "estimated_cost_bps": estimated_cost_bps,
+                        "required_edge": required_edge,
+                        "live_market_data": req.live_market_data,
+                    }),
+                    rationale: rationale_extended,
+                    short_explanation: format!(
+                        "{} {} using real market prices (buy {:.4} at {} UTC, sell {:.4} at {} UTC) because momentum {:.4} and hybrid score {:.4} favored {} on {}.",
+                        if side == "LONG" { "Buy" } else { "Sell short" },
+                        sym,
+                        open_px,
+                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_open_utc.to_string() },
+                        close_px,
+                        if req.live_market_data { hhmm_utc_from_ts(exec_ts) } else { exchange.session_close_utc.to_string() },
+                        ret_prev,
+                        hybrid_score,
+                        if side == "LONG" { "upside" } else { "downside" },
+                        exchange.code
+                    ),
+                };
+                decision_rows.push(trace.clone());
+                total_decisions += 1;
+                explained_decisions += 1;
 
                 // Open if no position exists
                 if desired_side == "SHORT" && !req.short_enabled {
