@@ -6,7 +6,11 @@
 set -e
 
 BASE_URL="${BASE_URL:-https://www.lianel.se}"
-LOGIN_URL="${BASE_URL}/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=${BASE_URL}/&response_type=code&scope=openid"
+# Keycloak can enforce PKCE on the frontend client. Generate a throwaway PKCE pair so we can
+# reliably fetch the login form HTML and discover the theme CSS URL.
+CODE_VERIFIER="$(openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' | tr -d '=')"
+CODE_CHALLENGE="$(printf '%s' "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+LOGIN_URL="${BASE_URL}/auth/realms/lianel/protocol/openid-connect/auth?client_id=frontend-client&redirect_uri=${BASE_URL}/&response_type=code&scope=openid&code_challenge=${CODE_CHALLENGE}&code_challenge_method=S256"
 
 echo "=== Verify Keycloak theme CSS on www ==="
 
