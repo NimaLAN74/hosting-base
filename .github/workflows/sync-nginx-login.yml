@@ -95,7 +95,7 @@ jobs:
               [ -f "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" ] && REPO="$base/hosting-base" && break
             done
             if [ -n "$REPO" ]; then
-              cd "$REPO" && git fetch origin 2>/dev/null; git checkout origin/master -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml 2>/dev/null || git checkout origin/main -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml 2>/dev/null || true
+              cd "$REPO" && git fetch origin 2>/dev/null; git checkout origin/master -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml lianel/dc/docker-compose.oauth2-proxy.yaml 2>/dev/null || git checkout origin/main -- lianel/dc/nginx/config/nginx.conf lianel/dc/docker-compose.infra.yaml lianel/dc/docker-compose.oauth2-proxy.yaml 2>/dev/null || true
               echo "  Repo: $REPO"
             fi
             echo "=== 2. Nginx + compose into /root/lianel/dc ==="
@@ -107,6 +107,10 @@ jobs:
             for base in /root/hosting-base /root; do
               [ -f "$base/lianel/dc/docker-compose.infra.yaml" ] && cp "$base/lianel/dc/docker-compose.infra.yaml" /root/lianel/dc/ && break
               [ -f "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" ] && cp "$base/hosting-base/lianel/dc/docker-compose.infra.yaml" /root/lianel/dc/ && break
+            done
+            for base in /root/hosting-base /root; do
+              [ -f "$base/lianel/dc/docker-compose.oauth2-proxy.yaml" ] && cp "$base/lianel/dc/docker-compose.oauth2-proxy.yaml" /root/lianel/dc/ && break
+              [ -f "$base/hosting-base/lianel/dc/docker-compose.oauth2-proxy.yaml" ] && cp "$base/hosting-base/lianel/dc/docker-compose.oauth2-proxy.yaml" /root/lianel/dc/ && break
             done
             echo "=== 3. Force KC_HOSTNAME in all compose copies ==="
             for d in /root/lianel/dc /root/hosting-base/lianel/dc; do
@@ -153,6 +157,10 @@ jobs:
             echo "  Keycloak is up (HTTP $KC_CODE)."
             echo "=== 6. Reload nginx (optional; job 3 deploys runner nginx.conf and reloads) ==="
             docker exec nginx-proxy nginx -t 2>/dev/null && docker exec nginx-proxy nginx -s reload 2>/dev/null || echo "  (nginx reload skipped)"
+            echo "=== 6b. Restart oauth2-proxy (issuer mismatch can cause /oauth2/callback 500) ==="
+            if [ -f "$DC_DIR/docker-compose.oauth2-proxy.yaml" ]; then
+              (cd "$DC_DIR" && docker compose -f docker-compose.oauth2-proxy.yaml up -d oauth2-proxy) || echo "  (oauth2-proxy restart skipped)"
+            fi
             echo "=== 7. Set realm frontendUrl (if Keycloak is up) ==="
             for dc in /root/hosting-base/lianel/dc /root/lianel/dc; do
               [ -f "$dc/scripts/keycloak-setup/fix-keycloak-https.sh" ] || continue
