@@ -133,16 +133,17 @@ jobs:
             echo "  Waiting 60s for Keycloak to start..."
             sleep 60
             echo "=== 5. Verify Keycloak is responding (fail job if not – root cause of 502) ==="
-            # Keycloak health endpoints vary by version/config. Accept any of these as "up":
-            # - /health/ready (Quarkus, when health enabled)
-            # - /health (some builds expose this)
-            # - /realms/master (legacy fallback; returns 200/302 when Keycloak is serving HTTP)
-            KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/health/ready 2>/dev/null || echo "000")
+            # Keycloak health endpoints vary by version/config AND relative path (KC_HTTP_RELATIVE_PATH=/auth).
+            # Accept any of these as "up":
+            # - /auth/health/ready (Quarkus, when health enabled)
+            # - /auth/health (some builds expose this)
+            # - /auth/realms/master (legacy fallback; returns 200/302 when Keycloak is serving HTTP)
+            KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/auth/health/ready 2>/dev/null || echo "000")
             if [ "$KC_CODE" = "404" ] || [ "$KC_CODE" = "000" ]; then
-              KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/health 2>/dev/null || echo "000")
+              KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/auth/health 2>/dev/null || echo "000")
             fi
             if [ "$KC_CODE" = "404" ] || [ "$KC_CODE" = "000" ]; then
-              KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/realms/master 2>/dev/null || echo "000")
+              KC_CODE=$(docker exec nginx-proxy curl -s -o /dev/null -w "%{http_code}" http://keycloak:8080/auth/realms/master 2>/dev/null || echo "000")
             fi
             if [ "$KC_CODE" != "200" ] && [ "$KC_CODE" != "302" ] && [ "$KC_CODE" != "301" ]; then
               echo "  Keycloak health check returned HTTP $KC_CODE (expected 200/301/302). Keycloak may be down – login can return 502."
