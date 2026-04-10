@@ -16,15 +16,19 @@ if [ ! -f /tmp/verify_kc_login.html ] || [ "$(wc -c < /tmp/verify_kc_login.html)
   echo "  SKIP: Login page unavailable (502 or empty); cannot discover theme URL. Nginx sync was still applied."
   exit 0
 fi
-# Extract first /resources/.../.css or /auth/resources/.../.css from the page
-CSS_PATH=$(grep -oE '/(auth/)?resources/[^"'\''<> ]+\.css' /tmp/verify_kc_login.html | head -1)
+# Extract first resources CSS path from the page.
+# Keycloak may emit absolute (/auth/resources/...) or relative (resources/...) URLs depending on theme and hostname settings.
+CSS_PATH=$(grep -oE '(/(auth/)?resources/|resources/)[^"'\''<> ]+\.css' /tmp/verify_kc_login.html | head -1)
 if [ -z "$CSS_PATH" ]; then
   # Fallback: try known path (hash may be outdated)
-  CSS_PATH="/resources/lbvvu/common/keycloak/vendor/patternfly-v5/patternfly.min.css"
+  CSS_PATH="/auth/resources/lbvvu/common/keycloak/vendor/patternfly-v5/patternfly.min.css"
   echo "  (using fallback path)"
 fi
-# Normalize: ensure single leading slash
+# Normalize: ensure leading slash and keep it under /auth/ when relative paths are used.
 CSS_PATH="${CSS_PATH#/}"
+if [[ "$CSS_PATH" == resources/* ]]; then
+  CSS_PATH="auth/${CSS_PATH}"
+fi
 CSS_URL="${BASE_URL}/${CSS_PATH}"
 echo "  URL: $CSS_URL"
 
@@ -32,8 +36,18 @@ HTTP=$(curl -s -k -o /tmp/verify_kc_css.bin -w "%{http_code}" "$CSS_URL")
 CT=$(curl -s -k -I "$CSS_URL" 2>/dev/null | grep -i "^Content-Type:" | tr -d '\r' | cut -d' ' -f2-)
 
 if [ "$HTTP" != "200" ]; then
-  echo "  FAIL: HTTP $HTTP (expected 200)"
-  exit 1
+  # Some deployments expose theme assets at /resources/ on www; try that fallback before failing.
+  if [[ "$CSS_PATH" == auth/resources/* ]]; then
+    CSS_URL_FALLBACK="${BASE_URL}/${CSS_PATH#auth/}"
+    echo "  Retry fallback URL: $CSS_URL_FALLBACK"
+    HTTP=$(curl -s -k -o /tmp/verify_kc_css.bin -w "%{http_code}" "$CSS_URL_FALLBACK")
+    CT=$(curl -s -k -I "$CSS_URL_FALLBACK" 2>/dev/null | grep -i "^Content-Type:" | tr -d '\r' | cut -d' ' -f2-)
+    CSS_URL="$CSS_URL_FALLBACK"
+  fi
+  if [ "$HTTP" != "200" ]; then
+    echo "  FAIL: HTTP $HTTP (expected 200)"
+    exit 1
+  fi
 fi
 if ! echo "$CT" | grep -q "text/css"; then
   echo "  FAIL: Content-Type is '$CT' (expected text/css)"
