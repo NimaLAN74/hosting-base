@@ -299,7 +299,7 @@ struct OpenPosition {
 #[derive(Debug, Clone)]
 struct PendingOpen {
     sym: String,
-    exchange: exchanges::Exchange,
+    exchange: exchanges::ExchangeAdapter,
     desired_side: String,
     close_px: f64,
     half_spread: f64,
