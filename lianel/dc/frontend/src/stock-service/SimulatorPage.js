@@ -165,6 +165,7 @@ export default function SimulatorPage() {
   const [biasError, setBiasError] = useState('');
   const [holdings, setHoldings] = useState(null);
   const [holdingsError, setHoldingsError] = useState('');
+  const [portfolioQuery, setPortfolioQuery] = useState('');
 
   const [exchangeFilter, setExchangeFilter] = useState('ALL');
   const [refreshEnabled, setRefreshEnabled] = useState(true);
@@ -252,6 +253,31 @@ export default function SimulatorPage() {
     const d = Number(holdings?.deployed_usd || 0);
     return d > 0 ? d : 1;
   }, [holdings]);
+
+  const portfolio = useMemo(() => {
+    const legs = Array.isArray(holdings?.legs) ? holdings.legs : [];
+    const q = String(portfolioQuery || '').trim().toLowerCase();
+    const filtered = q
+      ? legs.filter((r) => {
+        const sym = String(r?.symbol || '').toLowerCase();
+        const ex = String(r?.exchange || '').toLowerCase();
+        const side = String(r?.side || '').toLowerCase();
+        return sym.includes(q) || ex.includes(q) || side.includes(q);
+      })
+      : legs;
+    const sorted = [...filtered].sort((a, b) => Number(b?.notional_usd || 0) - Number(a?.notional_usd || 0));
+    const totals = sorted.reduce(
+      (acc, r) => {
+        const notional = Number(r?.notional_usd || 0);
+        const isShort = String(r?.side || '').includes('SHORT');
+        if (isShort) acc.short += Math.abs(notional);
+        else acc.long += Math.abs(notional);
+        return acc;
+      },
+      { long: 0, short: 0 }
+    );
+    return { legs: sorted, totals, query: q };
+  }, [holdings, portfolioQuery]);
 
   const recentExecution = useMemo(
     () => summarizeRecentExecution(timeline, orders, runStatus),
@@ -987,7 +1013,7 @@ export default function SimulatorPage() {
                 {controlMsg && <span className="sim-note">{controlMsg}</span>}
               </div>
 
-              <h3 className="sim-subtitle">Simulated holdings (latest cycle)</h3>
+              <h3 className="sim-subtitle">Portfolio (simulated holdings)</h3>
               {holdingsError && <p className="sim-error">{holdingsError}</p>}
               {!holdingsError && !holdings && runStatus?.status === 'running' && (
                 <p className="sim-note">Holdings appear after the first cycle completes (usually within one refresh interval).</p>
@@ -1005,6 +1031,32 @@ export default function SimulatorPage() {
                     <div>Unallocated: <b>${Number(holdings.cash_residual_usd || 0).toFixed(2)}</b></div>
                     <div>Universe: <b>{Number(holdings.universe_symbol_count || 0)}</b> symbols</div>
                   </div>
+                  <div className="sim-control-group" role="group" aria-label="Portfolio view controls">
+                    <span className="sim-control-group__title">View</span>
+                    <div className="sim-control-group__row">
+                      <label className="sim-field" htmlFor="sim-portfolio-filter">
+                        <span className="sim-field__label">Filter</span>
+                        <input
+                          id="sim-portfolio-filter"
+                          className="sim-input"
+                          value={portfolioQuery}
+                          onChange={(e) => setPortfolioQuery(e.target.value)}
+                          placeholder="Symbol / exchange / side (e.g. NOK, XNAS, SHORT)"
+                        />
+                      </label>
+                      <span className="sim-pill sim-pill--neutral">
+                        long <b>${Number(portfolio.totals.long || 0).toFixed(2)}</b>
+                      </span>
+                      <span className="sim-pill sim-pill--neutral">
+                        short <b>${Number(portfolio.totals.short || 0).toFixed(2)}</b>
+                      </span>
+                    </div>
+                    {portfolioQuery && (
+                      <p className="sim-control-hint">
+                        Showing <strong>{portfolio.legs.length}</strong> / {holdings.legs?.length || 0} legs.
+                      </p>
+                    )}
+                  </div>
                   <p className="sim-note sim-holdings-note">{holdings.note || ''}</p>
                   {!holdings.legs?.length && (
                     <p className="sim-note">No filled legs this cycle (skipped, rejected, or market closed).</p>
@@ -1020,10 +1072,11 @@ export default function SimulatorPage() {
                             <th className="sim-num">Notional</th>
                             <th className="sim-num">Mark</th>
                             <th className="sim-num">~Shares</th>
+                            <th className="sim-num">% Deployed</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {holdings.legs.map((row, idx) => (
+                          {portfolio.legs.map((row, idx) => (
                             <tr key={`${row.symbol}-${row.exchange}-${row.side}-${idx}`}>
                               <td><b>{row.symbol}</b></td>
                               <td>{row.exchange}</td>
@@ -1035,13 +1088,16 @@ export default function SimulatorPage() {
                               <td className="sim-num">${Number(row.notional_usd || 0).toFixed(2)}</td>
                               <td className="sim-num">${Number(row.mark_px || 0).toFixed(4)}</td>
                               <td className="sim-num">{Number(row.shares_approx || 0).toFixed(4)}</td>
+                              <td className="sim-num">
+                                {((100 * Math.abs(Number(row.notional_usd || 0))) / holdingsDeployedTotal).toFixed(1)}%
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                       <div className="sim-holdings-chart" aria-hidden="true">
                         <div className="sim-holdings-chart-title">Share of deployed notional (this cycle)</div>
-                        {holdings.legs.map((row, idx) => {
+                        {portfolio.legs.map((row, idx) => {
                           const w = (100 * Number(row.notional_usd || 0)) / holdingsDeployedTotal;
                           const isShort = String(row.side).includes('SHORT');
                           return (
