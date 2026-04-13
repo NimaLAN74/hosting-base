@@ -23,6 +23,8 @@ const SIX_MONTH_LIVE_PRESET = {
   // Production calibration: avoid "no-trade" LIVE runs while keeping cost discipline.
   edge_cost_buffer_bps: 3,
   min_signal_abs_return_bps: 4,
+  // Close hysteresis: avoid micro flip churn (buy then sell at same price).
+  close_signal_abs_return_bps: 2,
   live_max_quote_age_seconds: 60,
   live_require_bid_ask: true,
   live_max_spread_bps: 80,

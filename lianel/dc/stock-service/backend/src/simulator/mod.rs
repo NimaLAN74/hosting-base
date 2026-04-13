@@ -40,6 +40,11 @@ pub struct SimRunRequest {
     pub min_signal_abs_return_bps: f64,
     #[serde(default = "default_min_hold_seconds")]
     pub min_hold_seconds: u64,
+    /// Minimum absolute return (bps) required to close on a signal flip.
+    /// This acts as hysteresis to avoid churn (buy then sell at same price) in LIVE runs.
+    /// Set to 0 to restore "always close on flip (after min_hold_seconds)" behavior.
+    #[serde(default = "default_close_signal_abs_return_bps")]
+    pub close_signal_abs_return_bps: f64,
     #[serde(default = "default_symbol_cooldown_seconds")]
     pub symbol_cooldown_seconds: u64,
     /// Live mode: maximum allowed quote age (seconds) based on watchlist `updated_at`.
@@ -388,6 +393,11 @@ fn default_min_signal_abs_return_bps() -> f64 {
 }
 fn default_min_hold_seconds() -> u64 {
     300
+}
+
+fn default_close_signal_abs_return_bps() -> f64 {
+    // Realistic close hysteresis: avoid micro-flips that only pay spread/fees.
+    2.0
 }
 fn default_symbol_cooldown_seconds() -> u64 {
     180
@@ -1649,6 +1659,24 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 if let Some(pos) = positions.get(&sym).cloned() {
                     let elapsed = exec_ts.saturating_sub(pos.entry_ts);
                     if elapsed >= req.min_hold_seconds && desired_side != pos.side {
+                        let min_close_signal = (req.close_signal_abs_return_bps.max(0.0)) / 10_000.0;
+                        if min_close_signal > 0.0 && signal_abs_return < min_close_signal {
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "TradeSkipped",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "reason": "skip_close_signal_too_small",
+                                    "signal_abs_return": signal_abs_return,
+                                    "min_close_signal_abs_return_bps": req.close_signal_abs_return_bps,
+                                    "note": "close hysteresis to avoid flip churn"
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
                         let notional = pos.notional_usd;
                         let exit_px = if pos.side == "LONG" {
                             close_px * (1.0 - half_spread)
