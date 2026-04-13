@@ -126,7 +126,9 @@ export default function SimulatorPage() {
   const [lastRefreshTs, setLastRefreshTs] = useState(0);
 
   const [selectedOrderKey, setSelectedOrderKey] = useState('');
-  const [onlyTodayOrders, setOnlyTodayOrders] = useState(true);
+  // Default to showing all orders to avoid the common "no trades" confusion
+  // when the simulator traded earlier today or across midnight boundaries.
+  const [onlyTodayOrders, setOnlyTodayOrders] = useState(false);
   const [explainData, setExplainData] = useState(null);
   const [explainError, setExplainError] = useState('');
 

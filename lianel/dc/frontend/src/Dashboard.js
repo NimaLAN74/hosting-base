@@ -25,17 +25,30 @@ function Dashboard() {
     // Check admin status via backend API
     authenticatedFetch('/api/admin/check')
       .then(res => {
+        // This endpoint is served by the profile-service stack; it can be unavailable when those
+        // containers are paused. Treat unavailability as "not admin" and fall back to token roles.
         if (!res.ok) {
-          throw new Error(`API returned ${res.status}`);
+          return { __error: `API returned ${res.status}`, __status: res.status };
         }
-        return res.json();
+        return res.json().catch(() => ({ __error: 'Invalid JSON', __status: res.status }));
       })
       .then(data => {
-        setIsAdminFromAPI(!!data?.isAdmin);
+        if (data && typeof data === 'object' && data.__error) {
+          const status = Number(data.__status || 0);
+          if (status === 502 || status === 503 || status === 504 || status === 404) {
+            console.warn('Admin check endpoint unavailable; falling back to token roles.', { status });
+          } else {
+            console.error('Admin check failed; falling back to token roles.', data);
+          }
+          setIsAdminFromAPI(false);
+        } else {
+          setIsAdminFromAPI(!!data?.isAdmin);
+        }
         setAdminCheckLoading(false);
       })
       .catch(err => {
-        console.error('Failed to check admin status via API:', err);
+        // Network / fetch errors: fall back silently to token roles (avoid scaring users during partial outages).
+        console.warn('Admin check request failed; falling back to token roles.', err);
         setIsAdminFromAPI(false);
         setAdminCheckLoading(false);
       });
