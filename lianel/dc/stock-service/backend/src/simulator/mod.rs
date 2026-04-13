@@ -750,10 +750,32 @@ pub async fn set_control_action(
     action: &str,
 ) -> Result<(), String> {
     let mut conn = redis.clone();
+    let normalized = action.to_ascii_lowercase();
     let _: () = conn
-        .set(run_control_key(run_id), action.to_ascii_lowercase())
+        .set(run_control_key(run_id), normalized.clone())
         .await
         .map_err(|e| e.to_string())?;
+    // If a run is "running" in Redis but the in-memory task died (e.g. after container restart),
+    // a stop request should still make the run non-active so automation (Airflow) can start a new one.
+    if normalized == "stop" {
+        if let Some(mut meta) = get_run_meta(redis, run_id).await? {
+            meta.status = "completed".to_string();
+            meta.stop_reason = Some("MANUAL_STOP".to_string());
+            meta.finished_at_ts = Some(now_ts());
+            let _ = set_meta(redis, &meta).await;
+            let _ = push_event(
+                redis,
+                run_id,
+                "RunStopped",
+                None,
+                json!({
+                    "stop_reason": "MANUAL_STOP",
+                    "note": "control endpoint forced meta completed (task may have already exited)"
+                }),
+            )
+            .await;
+        }
+    }
     Ok(())
 }
 
