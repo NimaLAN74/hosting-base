@@ -97,6 +97,51 @@ function statusTone(status) {
   return 'neutral';
 }
 
+function summarizeRecentExecution(timeline, orders, runStatus) {
+  const live = runStatus?.live_market_data === true;
+  const nowSec = Date.now() / 1000;
+  const windowSec = 60 * 60;
+  const cutoff = nowSec - windowSec;
+
+  const noise = new Set(['MarketSnapshotSeen', 'PortfolioValued', 'RiskSnapshot', 'HoldingsSnapshot']);
+  const events = Array.isArray(timeline) ? timeline : [];
+  const recentEvents = events.filter((e) => {
+    const ts = Number(e?.ts || 0);
+    if (!ts) return false;
+    if (ts < cutoff) return false;
+    const kind = String(e?.kind || '');
+    if (!kind) return false;
+    return !noise.has(kind);
+  });
+
+  const ordersArr = Array.isArray(orders) ? orders : [];
+  const recentFills = ordersArr.filter((o) => {
+    const status = String(o?.status || '').toLowerCase();
+    if (status !== 'filled' && status !== 'partially_filled') return false;
+    const ts = Number(live ? (o?.wall_clock_ts || o?.ts || 0) : (o?.ts || 0));
+    return ts && ts >= cutoff;
+  });
+
+  const skipped = recentEvents.filter((e) => String(e?.kind || '') === 'TradeSkipped');
+  const byReason = new Map();
+  skipped.forEach((e) => {
+    const reason = String(e?.payload?.reason || 'unknown');
+    byReason.set(reason, (byReason.get(reason) || 0) + 1);
+  });
+  const topReasons = Array.from(byReason.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  return {
+    cutoff,
+    recentFills,
+    recentFillCount: recentFills.length,
+    recentSkipCount: skipped.length,
+    topSkipReasons: topReasons,
+    recentDecisionCount: recentEvents.filter((e) => String(e?.kind || '') === 'DecisionCreated').length,
+  };
+}
+
 export default function SimulatorPage() {
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(true);
@@ -205,6 +250,11 @@ export default function SimulatorPage() {
     const d = Number(holdings?.deployed_usd || 0);
     return d > 0 ? d : 1;
   }, [holdings]);
+
+  const recentExecution = useMemo(
+    () => summarizeRecentExecution(timeline, orders, runStatus),
+    [timeline, orders, runStatus]
+  );
 
   const runLooksStuck = useMemo(() => {
     if (!runStatus || String(runStatus.status || '').toLowerCase() !== 'running') return false;
@@ -889,6 +939,43 @@ export default function SimulatorPage() {
                   )}
                 <div>Readiness score: <b>{runStatus.readiness_score != null ? Number(runStatus.readiness_score).toFixed(3) : '—'}</b></div>
                 <div>Readiness: <b>{runStatus.readiness_passed == null ? '—' : (runStatus.readiness_passed ? 'PASS' : 'NOT YET')}</b></div>
+              </div>
+
+              <div className="sim-control-group" role="group" aria-label="Recent execution summary">
+                <span className="sim-control-group__title">Last 60 minutes</span>
+                <div className="sim-control-group__row">
+                  <span className="sim-pill sim-pill--neutral">
+                    fills <b>{recentExecution.recentFillCount}</b>
+                  </span>
+                  <span className="sim-pill sim-pill--warn">
+                    skipped <b>{recentExecution.recentSkipCount}</b>
+                  </span>
+                  <span className="sim-pill sim-pill--neutral">
+                    decisions <b>{recentExecution.recentDecisionCount}</b>
+                  </span>
+                </div>
+                {recentExecution.topSkipReasons.length > 0 && (
+                  <p className="sim-control-hint">
+                    Top skip reasons:{' '}
+                    {recentExecution.topSkipReasons
+                      .map(([reason, n]) => `${reason} (${n})`)
+                      .join(' · ')}
+                  </p>
+                )}
+                {recentExecution.recentFillCount > 0 && (
+                  <p className="sim-control-hint">
+                    Latest fill:{' '}
+                    <b>
+                      {fmtTs(
+                        runStatus?.live_market_data === true
+                          ? (recentExecution.recentFills[0]?.wall_clock_ts || recentExecution.recentFills[0]?.ts)
+                          : recentExecution.recentFills[0]?.ts
+                      )}
+                    </b>
+                    {' '}· {recentExecution.recentFills[0]?.symbol} · {sideActionLabel(recentExecution.recentFills[0]?.side)} · $
+                    {Number(recentExecution.recentFills[0]?.filled_notional_usd || 0).toFixed(2)}
+                  </p>
+                )}
               </div>
 
               <div className="sim-control-row">

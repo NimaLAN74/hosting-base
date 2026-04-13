@@ -1286,6 +1286,11 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         let mut live_last_decision_ts = now_ts().saturating_sub(1);
         let mut last_fill_ts_by_symbol: HashMap<String, u64> = HashMap::new();
         let mut cooldown_until_by_symbol: HashMap<String, u64> = HashMap::new();
+        // LIVE tradeability guard: when a symbol repeatedly lacks bid/ask, quarantine it briefly
+        // rather than spamming skips and pretending we can execute. This keeps LIVE mode realistic:
+        // only trade instruments with actionable quotes.
+        let mut live_missing_bid_ask_streak_by_symbol: HashMap<String, u32> = HashMap::new();
+        let mut live_bid_ask_quarantine_until_by_symbol: HashMap<String, u64> = HashMap::new();
         let mut positions: HashMap<String, OpenPosition> = HashMap::new();
         let short_margin_requirement = 0.50_f64;
 
@@ -1401,6 +1406,14 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                     if !is_exchange_open_now(&exchange, exec_ts) {
                         continue;
                     }
+                    if req.live_require_bid_ask {
+                        if let Some(until_ts) = live_bid_ask_quarantine_until_by_symbol.get(&sym).copied() {
+                            if until_ts > exec_ts {
+                                // Quarantined due to repeated missing bid/ask.
+                                continue;
+                            }
+                        }
+                    }
                     let q = quote_snapshot.as_ref().and_then(|m| m.get(&sym));
                     let px_now = q
                         .and_then(|q| q.price)
@@ -1469,6 +1482,35 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         _ => None,
                     };
                     if req.live_require_bid_ask && live_bid_ask.is_none() {
+                        let streak = live_missing_bid_ask_streak_by_symbol
+                            .get(&sym)
+                            .copied()
+                            .unwrap_or(0)
+                            .saturating_add(1);
+                        live_missing_bid_ask_streak_by_symbol.insert(sym.clone(), streak);
+                        // Quarantine after a few consecutive misses to avoid pretending we can execute.
+                        const LIVE_MISSING_BID_ASK_QUARANTINE_STREAK: u32 = 3;
+                        const LIVE_BID_ASK_QUARANTINE_SECONDS: u64 = 15 * 60;
+                        if streak >= LIVE_MISSING_BID_ASK_QUARANTINE_STREAK {
+                            live_missing_bid_ask_streak_by_symbol.insert(sym.clone(), 0);
+                            let until_ts = exec_ts.saturating_add(LIVE_BID_ASK_QUARANTINE_SECONDS);
+                            live_bid_ask_quarantine_until_by_symbol.insert(sym.clone(), until_ts);
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "SymbolQuarantined",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "reason": "repeated_missing_bid_ask",
+                                    "streak_threshold": LIVE_MISSING_BID_ASK_QUARANTINE_STREAK,
+                                    "quarantine_seconds": LIVE_BID_ASK_QUARANTINE_SECONDS,
+                                    "quarantine_until_ts": until_ts,
+                                    "note": "live_require_bid_ask=true"
+                                }),
+                            )
+                            .await;
+                        }
                         let _ = push_event(
                             &redis,
                             &run_id_cloned,
@@ -1483,6 +1525,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                         .await;
                         continue;
                     }
+                    // Reset streak on successful bid/ask.
+                    live_missing_bid_ask_streak_by_symbol.insert(sym.clone(), 0);
                     (
                         px_prev_mid,
                         px_now_mid,
