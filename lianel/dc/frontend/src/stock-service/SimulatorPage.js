@@ -107,6 +107,7 @@ export default function SimulatorPage() {
   const [runStatusError, setRunStatusError] = useState('');
   const [timeline, setTimeline] = useState([]);
   const [timelineError, setTimelineError] = useState('');
+  const [hideNoisyTimeline, setHideNoisyTimeline] = useState(true);
   const [orders, setOrders] = useState([]);
   const [ordersError, setOrdersError] = useState('');
   const [riskSeries, setRiskSeries] = useState([]);
@@ -184,6 +185,11 @@ export default function SimulatorPage() {
     () => timeline.find((e) => e?.kind === 'RunStarted') || null,
     [timeline]
   );
+  const filteredTimeline = useMemo(() => {
+    if (!hideNoisyTimeline) return timeline;
+    const noisy = new Set(['MarketSnapshotSeen', 'PortfolioValued', 'RiskSnapshot', 'HoldingsSnapshot']);
+    return timeline.filter((e) => !noisy.has(String(e?.kind || '')));
+  }, [timeline, hideNoisyTimeline]);
   const runDataModeLabel = useMemo(() => {
     if (runStatus?.live_market_data === true) return 'LIVE (real-time quotes)';
     if (runStatus?.live_market_data === false) return 'REPLAY (historical daily bars)';
@@ -268,9 +274,11 @@ export default function SimulatorPage() {
     latestRunLoadTokenRef.current = loadToken;
     setIsRefreshing(true);
     const statusUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/status`;
+    // Timeline can be noisy (per-cycle snapshot events). Pull more and allow client-side filtering.
+    const timelineLimit = 5000;
     const timelineUrl = exchangeFilter === 'ALL'
-      ? `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/timeline?limit=400`
-      : `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/exchanges/${encodeURIComponent(exchangeFilter)}?limit=400`;
+      ? `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/timeline?limit=${timelineLimit}`
+      : `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/exchanges/${encodeURIComponent(exchangeFilter)}?limit=${timelineLimit}`;
     const biasUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/bias-report`;
     const ordersUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/orders?limit=2000`;
     const riskUrl = `/api/v1/stock-service/sim/runs/${encodeURIComponent(selectedRunId)}/risk?limit=500`;
@@ -971,9 +979,26 @@ export default function SimulatorPage() {
           <section className="sim-card">
             <h3>Timeline</h3>
             {timelineError && <p className="sim-error">{timelineError}</p>}
-            {!timelineError && timeline.length === 0 && <p className="sim-note">No events yet.</p>}
+            <div className="sim-control-group" role="group" aria-label="Timeline visibility">
+              <span className="sim-control-group__title">View</span>
+              <div className="sim-control-group__row">
+                <label className="sim-check sim-check--spaced" htmlFor="sim-timeline-hide-noise">
+                  <input
+                    id="sim-timeline-hide-noise"
+                    type="checkbox"
+                    checked={hideNoisyTimeline}
+                    onChange={(e) => setHideNoisyTimeline(e.target.checked)}
+                  />
+                  Hide per-cycle snapshot noise (MarketSnapshotSeen / PortfolioValued / RiskSnapshot / HoldingsSnapshot)
+                </label>
+              </div>
+              <p className="sim-control-hint">
+                Showing <strong>{filteredTimeline.length}</strong> / {timeline.length} events from the server.
+              </p>
+            </div>
+            {!timelineError && filteredTimeline.length === 0 && <p className="sim-note">No events in this view yet.</p>}
             <div className="sim-timeline">
-              {timeline.map((e) => (
+              {filteredTimeline.map((e) => (
                 <div key={e.event_id} className="sim-event-row">
                   <span>{fmtTs(e.ts)}</span>
                   <span>{e.kind}</span>
