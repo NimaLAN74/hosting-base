@@ -1803,7 +1803,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                                 } else {
                                     1.0 / symbol_count as f64
                                 },
-                                hybrid_score,
+                                // Close decisions are state transitions (risk management), not new alpha bets.
+                                hybrid_score: 0.0,
                                 features: json!({
                                     "action": "close_position",
                                     "position_side": pos.side,
