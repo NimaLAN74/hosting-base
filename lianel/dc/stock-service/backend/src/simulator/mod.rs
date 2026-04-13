@@ -45,6 +45,10 @@ pub struct SimRunRequest {
     /// Set to 0 to restore "always close on flip (after min_hold_seconds)" behavior.
     #[serde(default = "default_close_signal_abs_return_bps")]
     pub close_signal_abs_return_bps: f64,
+    /// Require the opposite signal direction to persist for N consecutive cycles before closing.
+    /// This avoids single-tick flip noise causing close+reopen churn.
+    #[serde(default = "default_close_flip_confirm_cycles")]
+    pub close_flip_confirm_cycles: u32,
     #[serde(default = "default_symbol_cooldown_seconds")]
     pub symbol_cooldown_seconds: u64,
     /// Live mode: maximum allowed quote age (seconds) based on watchlist `updated_at`.
@@ -398,6 +402,10 @@ fn default_min_hold_seconds() -> u64 {
 fn default_close_signal_abs_return_bps() -> f64 {
     // Realistic close hysteresis: avoid micro-flips that only pay spread/fees.
     2.0
+}
+
+fn default_close_flip_confirm_cycles() -> u32 {
+    2
 }
 fn default_symbol_cooldown_seconds() -> u64 {
     180
@@ -1031,6 +1039,8 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
     req.edge_cost_buffer_bps = req.edge_cost_buffer_bps.clamp(0.0, 150.0);
     req.min_signal_abs_return_bps = req.min_signal_abs_return_bps.clamp(0.0, 200.0);
     req.min_hold_seconds = req.min_hold_seconds.clamp(0, 86_400);
+    req.close_signal_abs_return_bps = req.close_signal_abs_return_bps.clamp(0.0, 200.0);
+    req.close_flip_confirm_cycles = req.close_flip_confirm_cycles.clamp(1, 10);
     req.symbol_cooldown_seconds = req.symbol_cooldown_seconds.clamp(0, 86_400);
 
     let run_id = generate_run_id();
@@ -1325,6 +1335,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
         // This is more robust than requiring strict consecutive misses (feeds can flicker).
         let mut live_missing_bid_ask_score_by_symbol: HashMap<String, u32> = HashMap::new();
         let mut live_bid_ask_quarantine_until_by_symbol: HashMap<String, u64> = HashMap::new();
+        let mut close_flip_streak_by_symbol: HashMap<String, (String, u32)> = HashMap::new();
         let mut positions: HashMap<String, OpenPosition> = HashMap::new();
         let short_margin_requirement = 0.50_f64;
 
@@ -1659,6 +1670,31 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                 if let Some(pos) = positions.get(&sym).cloned() {
                     let elapsed = exec_ts.saturating_sub(pos.entry_ts);
                     if elapsed >= req.min_hold_seconds && desired_side != pos.side {
+                        let confirm_cycles = req.close_flip_confirm_cycles.max(1);
+                        let streak = match close_flip_streak_by_symbol.get(&sym).cloned() {
+                            Some((s, n)) if s == desired_side => n.saturating_add(1),
+                            _ => 1,
+                        };
+                        close_flip_streak_by_symbol.insert(sym.clone(), (desired_side.clone(), streak));
+                        if streak < confirm_cycles {
+                            let _ = push_event(
+                                &redis,
+                                &run_id_cloned,
+                                "TradeSkipped",
+                                Some(exchange.code.to_string()),
+                                json!({
+                                    "symbol": sym,
+                                    "reason": "skip_close_flip_unconfirmed",
+                                    "position_side": pos.side,
+                                    "new_signal_side": desired_side,
+                                    "flip_streak_cycles": streak,
+                                    "required_confirm_cycles": confirm_cycles,
+                                    "note": "close requires persistent flip to avoid churn"
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
                         let min_close_signal = (req.close_signal_abs_return_bps.max(0.0)) / 10_000.0;
                         if min_close_signal > 0.0 && signal_abs_return < min_close_signal {
                             let _ = push_event(
@@ -1943,6 +1979,9 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                             .await;
                             continue;
                         }
+                    }
+                    if desired_side == pos.side {
+                        close_flip_streak_by_symbol.remove(&sym);
                     }
                 }
                 if let Some(cooldown_until) = cooldown_until_by_symbol.get(&sym).copied() {
