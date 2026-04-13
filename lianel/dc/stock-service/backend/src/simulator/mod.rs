@@ -1980,7 +1980,7 @@ pub async fn start_run(state: AppState, mut req: SimRunRequest) -> Result<SimRun
                             continue;
                         }
                     }
-                    if desired_side == pos.side {
+                    if desired_side == positions.get(&sym).map(|p| p.side.as_str()).unwrap_or("") {
                         close_flip_streak_by_symbol.remove(&sym);
                     }
                 }
